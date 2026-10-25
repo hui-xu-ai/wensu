@@ -8,6 +8,8 @@
 
 > **独立项目，非官方**，与任何数据库运营方无隶属、合作或授权关系。
 
+[![开放插件市场](https://img.shields.io/endpoint?url=https%3A%2F%2Fdshopen.org%2Fbadge%2F%40hui-xu-ai%2Fdsh-wensu.json)](https://dshopen.org/zh/plugins/@hui-xu-ai/dsh-wensu/)
+
 ## 它能做什么
 
 - **关键词检索**：标题、作者、刊名、年份、被引、下载、详情链接
