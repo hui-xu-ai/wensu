@@ -1,6 +1,16 @@
 # Connecting to DeepSeek Harness
 
-Two transports are supported. Both expose the same five tools.
+Two transports are supported. Both expose the same four tools: `search`, `detail`,
+`export`, `status`.
+
+## DSH bundle (recommended when the client is DSH)
+
+Install `@hui-xu-ai/dsh-wensu` from the plugin market (or through `plugin_manager`);
+it is a config-only bundle that mounts `@deepseek-ai/dsh-mcp-client` for you. It supports
+DSH **0.2.2-rc.1 up to (not including) 0.3.0** — the pinned MCP client's DSH peer ranges are
+exact, so a mismatched DSH admits the bundle but silently denies the MCP row and no tools appear.
+`wensu` must still be on the PATH of the DSH process. Tools show up as
+`mcp__wensu__{search,detail,export,status}`.
 
 ## stdio
 

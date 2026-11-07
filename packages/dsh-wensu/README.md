@@ -3,6 +3,18 @@
 这是一个**配置型 bundle**：它不包含插件代码，只声明对 `@deepseek-ai/dsh-mcp-client`
 的依赖，并通过 `cordis.patch.yml` 插入一条 MCP 客户端实例。
 
+## 版本对照
+
+两个独立版本流，互相不需要同步升级：
+
+| 装什么 | 版本在哪看 | 当前 |
+|---|---|---|
+| DSH bundle（本目录） | npm / 插件市场 | **0.4.4** |
+| `wensu` 命令本体（Python 包） | PyPI | 0.4.2（`pip install -U wensu` 时看得到） |
+
+市场显示 0.4.4 而 `pip show wensu` 是 0.4.2 属于正常现象；bundle 只负责把 MCP 客户端接进 DSH，
+不含服务端代码。本 bundle 走 npm 发布，**不产生 GitHub Release**；Release 只跟 Python 包的发版。
+
 ## 前置
 
 DSH **0.2.2-rc.1 及以上**（`0.3.0` 前）。DSH 在导入插件行前会把 `@deepseek-ai/dsh-mcp-client`
