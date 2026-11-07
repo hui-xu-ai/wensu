@@ -26,5 +26,38 @@ jobs:
       - name: Show package
         run: npm pkg get name version
 
-      - name: Publish with provenance
+      # A tag is a promise: refuse to publish a version the tag does not name.
+      - name: Check tag matches package version
+        if: github.event_name == 'push'
+        run: |
+          version="$(npm pkg get version | tr -d '"')"
+          expected="npm-v${version}"
+          echo "tag=${GITHUB_REF_NAME} version=${version}"
+          if [ "${GITHUB_REF_NAME}" != "${expected}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match package version (expected ${expected})"
+            exit 1
+          fi
+
+      # Two authentication paths, one of which must be configured on the package:
+      #   1. a repository secret NPM_TOKEN (classic or granular token), or
+      #   2. a Trusted Publisher for hui-xu-ai/wensu + this workflow file (OIDC, no secret).
+      - name: Detect npm credentials
+        id: auth
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -n "$NPM_TOKEN" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish with npm token
+        if: steps.auth.outputs.present == 'true'
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish with OIDC trusted publisher
+        if: steps.auth.outputs.present != 'true'
         run: npm publish --access public --provenance
