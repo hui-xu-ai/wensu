@@ -1,6 +1,6 @@
 {
   "name": "@hui-xu-ai/dsh-wensu",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "DSH bundle that mounts the wensu (文溯) MCP server over stdio.",
   "license": "MIT",
   "author": "hui-xu-ai",
@@ -30,7 +30,10 @@
     "access": "public"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-mcp-client": "0.2.1-rc.2"
+    "@deepseek-ai/dsh-mcp-client": "0.2.2-rc.1"
+  },
+  "engines": {
+    "dsh": ">=0.2.2-rc.1 <0.3.0"
   },
   "dsh": {
     "bundle": {

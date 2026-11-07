@@ -5,6 +5,10 @@
 
 ## 前置
 
+DSH **0.2.2-rc.1 及以上**（`0.3.0` 前）。DSH 在导入插件行前会把 `@deepseek-ai/dsh-mcp-client`
+声明的 DSH peer 版本与运行时比较，未满足则整行被拒（MCP 静默不上线、工具不出现），所以
+bundle 的依赖版本必须与 DSH 版本对齐。
+
 `wensu` 命令必须在 DSH 进程的 PATH 上，浏览器侧也要装一次：
 
 ```powershell
@@ -20,7 +24,7 @@ wensu status       # bridge_ready: true 才表示整条链路通了
 
 在 DSH 的插件管理入口（桌面端 Plugins 页面，或在 Creator 会话里让 agent 调用
 `plugin_manager`）安装这个目录。安装时 DSH 会解析并安装
-`@deepseek-ai/dsh-mcp-client@0.2.1-rc.2`，不需要手工复制 `node_modules`，也不要手工编辑
+`@deepseek-ai/dsh-mcp-client@0.2.2-rc.1`，不需要手工复制 `node_modules`，也不要手工编辑
 profile 的 `cordis.patch.yml`。
 
 安装完成后**完全重启 DSH**，新会话中应出现：
