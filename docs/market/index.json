@@ -87,7 +87,7 @@
             "registry": "https://registry.npmjs.org/"
           },
           "engines": {
-            "dsh": ">=0.2.1-rc.2"
+            "dsh": "0.2.1-rc.2"
           }
         },
         {
@@ -98,7 +98,7 @@
             "registry": "https://registry.npmjs.org/"
           },
           "engines": {
-            "dsh": ">=0.2.1-rc.2"
+            "dsh": "0.2.1-rc.2"
           }
         },
         {
@@ -109,7 +109,7 @@
             "registry": "https://registry.npmjs.org/"
           },
           "engines": {
-            "dsh": ">=0.2.1-rc.2"
+            "dsh": "0.2.1-rc.2"
           }
         }
       ]
