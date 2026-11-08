@@ -240,7 +240,12 @@ async function run(action, params) {
         result = { ok: false, error: "not_found" };
         break;
       }
-      result = { ok: true, data: { text: (element.innerText || "").trim() } };
+      // `innerText` is rendered text with whitespace collapsed; `textContent`
+      // is the raw node text. A captured network stream must not be
+      // normalised, so its callers ask for mode "text".
+      const raw =
+        params.mode === "text" ? element.textContent || "" : element.innerText || "";
+      result = { ok: true, data: { text: raw.trim() } };
       break;
     }
     case "scroll": {

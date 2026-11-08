@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from datetime import date
 from typing import cast
 
 import pytest
@@ -95,3 +97,21 @@ def test_quota_exhaustion(tmp_path) -> None:
     assert policy.remaining_today == 0
     with pytest.raises(PolicyError, match="quota"):
         policy.wait_turn()
+
+
+def test_rebooted_clock_does_not_sleep_for_the_previous_uptime(tmp_path) -> None:
+    """`last` is a monotonic stamp, and a reboot restarts it from zero."""
+
+    state = tmp_path / "quota.json"
+    state.write_text(
+        json.dumps({"day": date.today().isoformat(), "used": 1, "last": 1_000_000.0}),
+        encoding="utf-8",
+    )
+    clock = FakeClock()
+    clock.now = 12.0  # just booted; the stamp belongs to the previous uptime
+    policy = engine(clock, state_path=state)
+
+    slept = policy.wait_turn()
+
+    assert slept <= HARD.max_interval_ms / 1000 + 1
+    assert sum(clock.sleeps) < 20, "a backwards clock must not become a multi-hour sleep"

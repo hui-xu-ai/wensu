@@ -19,12 +19,13 @@ ALLOWED_KEYS: dict[str, frozenset[str]] = {
     "click": frozenset({"selector"}),
     "select": frozenset({"selector", "value"}),
     "read_html": frozenset(),
-    "read_text": frozenset({"selector"}),
+    "read_text": frozenset({"selector", "mode"}),
     "scroll": frozenset({"to"}),
     "sleep": frozenset({"ms"}),
 }
 
 WAIT_STATES = frozenset({"visible", "hidden"})
+READ_TEXT_MODES = frozenset({"inner", "text"})
 
 
 def _selector(value: Any) -> bool:
@@ -58,6 +59,8 @@ def validate_params(verb: str, params: Any) -> str | None:
             if "clear" in params and not isinstance(params["clear"], bool):
                 return "policy.params"
         if verb == "select" and not isinstance(params.get("value"), str):
+            return "policy.params"
+        if verb == "read_text" and params.get("mode", "inner") not in READ_TEXT_MODES:
             return "policy.params"
         if verb == "wait_for":
             timeout = params.get("timeout_ms", 10_000)

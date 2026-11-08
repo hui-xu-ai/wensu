@@ -1,68 +1,90 @@
-# Web of Science channel — 设计与待确认
+# Web of Science channel — 决策记录
 
-状态：**待需求确认**（本文件是接手用的入口，不是最终设计）。
-负责人接手前先读 `AGENTS.md` 的硬约束与 `docs/channel-contract.md`。
+状态：**已决策并实现**（2026-11-08）。取数方式见 `ADR 0007`，所需内核改动见 `ADR 0008`。
+本文原先是「待确认」清单，现在每条都有了答案。
 
-## 目标（一句话）
+## 目标
 
-新增一个 `webofscience` 渠道，让 `search` / `detail` / `export` 三个既有工具能在
-Web of Science 上返回合法的题录 `Record`，与 `cnki` 渠道并列、可切换。
+`search` / `export` 两个既有工具通过 `channel: "webofscience"` 切换即可用，返回与 CNKI 同构的
+`Record`。渠道包自包含，**不改内核分派逻辑**，CNKI 一个字节不动。
 
-## 非目标
+## 原「待确认」六条的答案
 
-- 不下载 PDF/全文（ADR 0002 只读）。
-- 不写入 Zotero/EndNote 等第三方库（ADR 0006）。
-- 不处理登录、验证码、机构代理跳转的自动化（ADR 0004：遇风控即停）。
-- 不新增动作动词（`verb` 集合是封闭的九个）。
+| 问题 | 答案 |
+|---|---|
+| 访问方式 | 用户自己的浏览器 + 校园网 IP，直连 `webofscience.clarivate.cn`（Clarivate 中国镜像）；不做登录/代理/验证码自动化 |
+| 域名白名单 | `webofscience.clarivate.cn`、`www.webofscience.com`（后者只防跳转链）；`goto` 一律用前者，省一次 302 |
+| 检索页形态 | **不走 API 重放**：拦截页面自己的 `/api/wosnx/core/runQueryGetRecordsStream` 流，读渲染 DOM 拿不到摘要 |
+| 字段映射 | 见下表，`record.json` 17 个字段中 15 个有来源 |
+| 配额折算 | 一次检索 = `goto` + `type` + `click` = **3 个网络动作**，沿用 ADR 0005（300/日、间隔 3000ms + 抖动、并发 1） |
+| 许可边界 | 用户以个人研究用途访问其机构订阅下的公开题录；项目只读、不导出文件、不分发 |
 
-## 现状（可直接复用）
+## 字段映射（实测 50 条覆盖）
 
-- 微内核 + 渠道包：`src/scholar_search/channels/<site>/manifest.json` + `<site>/<site_version>/`。
-- 参考实现：`channels/cnki/v2026_10/`（`selectors` / `plan_search` / `parse_search` /
-  `plan_detail` / `parse_detail` / `doc_types`）。
-- 内核已具备：配额与冷却（ADR 0005：最小间隔 3000ms、并发 1、单页、每日 300）、风控拦截、
-  审计、RIS/EndNote 渲染（`export`）、浏览器桥（`docs/bridge-protocol.md`）。
-- 契约与测试：`tests/contract/`（manifest 校验、动词白名单、域名白名单、解析器错误类型）。
+| `record.json` | WoS 路径 | 覆盖 |
+|---|---|---|
+| title / authors | `titles.item.en[0].title` / `names.author.en[].wos_standard` | 50/50 |
+| source / doc_type | `titles.source.en[0].title` / `doctypes[0]` | 50/50 |
+| year / volume / issue | `pub_info.pubyear` / `vol` / `issue` | 50/50 |
+| pages | `pub_info.begin`–`end`，缺则 `page_count` | 50/50 |
+| doi | `doi` | 42–50/50，随批次 |
+| abstract | `abstract.basic.en.abstract`（剥 HTML） | 49–50/50 |
+| keywords | `item.keywords_plus` | **23/50** |
+| citations | `citation_related.counts.ALLDB` | **随视图变化**：相关性排序时 50/50；按时间排序时 `counts` 是空字典 ⇒ 全部为 `null` |
+| institution | `…address_spec.organizations[]`（取 `pref:"Y"`） | 50/50 |
+| url | `…/wos/woscc/full-record/WOS:<ut>` 构造 | 50/50 |
+| downloads | WoS 无此概念 | — |
 
-## 待确认（开工前必须回答）
+## 端点与批次（实测）
 
-1. **访问方式**：走用户自己浏览器里的已登录会话（同 CNKI）？还是需要机构 IP / 代理域名？
-   入口是 `www.webofscience.com`（新版）还是 `webofscience.com` / `clarivate.com` 旧版？
-2. **域名白名单**：机构代理（如 `*.edu.cn` 反代）要不要进 `domains`？这决定 manifest。
-3. **检索页形态**：结果列表走 `summary` 页面还是 API（`/api/wos/...`）？分页是 `page=N` 还是游标？
-4. **字段映射**：WoS 的 `Source Title` / `Document Type` / `Affiliations` 如何映射到
-   `schemas/record.json`（`source` / `doc_type` / `institution` / `keywords` / `citations` / `downloads`）？
-   注意 `record.json` 的字段是公开契约，不能自行加字段。
-5. **配额折算**：一次检索在 WoS 上等于几个网络动作（CNKI 是 3）？是否沿用 300/日？
-6. **许可边界**：WoS 为订阅服务，抓取题录是否在用户机构许可范围内 —— 需要用户明确确认，
-   否则默认不做（与 ADR 0002/0004 一致）。
+| 端点 | 触发 | 每批记录 | 含摘要 | 解压后体积 |
+|---|---|---|---|---|
+| `/api/wosnx/core/runQuerySearch` | 点「检索」 | **20 条** | 是 | 243 KB |
+| `/api/wosnx/core/runQueryGetRecordsStream` | 排序 / 翻页 | 20+20+10 = 50 条 | 是 | 534 KB |
 
-## 落点（文件清单，待确认后细化）
+`capture.js` 用前缀 `/api/wosnx/core/runQuery` 同时覆盖两者，解析器对两种报文同一份代码成立。
+
+两个必须记住的数字：
+
+- **单次检索只拿 20 条**。`limit > 20` 时返回条数会少于请求值；要更多必须用 `page` 翻页，每页 +1 网络动作。
+- **不要用 DevTools 的 Size 列估字段覆盖度**。那一列是 gzip 传输大小：`runQuerySearch` 显示 38.6 KB，
+  解压后 243 KB。按 772 B/条推算"装不下摘要"是错的，实际摘要有 1000+ 字符。
+
+## 落点（已实现）
 
 ```
 src/scholar_search/channels/webofscience/
-├── manifest.json                      # channel/site_version/domains/detail_url_prefixes/capabilities
+├── manifest.json                 # domains / verbs / capabilities: search, export
 └── v2026_11/
-    ├── __init__.py                    # 导出 Channel 实现
-    ├── selectors.py                   # 选择器集中在此，便于站点改版时替换
-    ├── plan_search.py                 # SearchQuery -> Plan（仅九个动词）
-    ├── parse_search.py                # html -> SearchPage
-    ├── plan_detail.py                 # url -> Plan
-    └── parse_detail.py                # html -> Record
-tests/fixtures/webofscience/           # 脱敏 HTML 回放（禁止线上验证代替 fixture）
+    ├── __init__.py               # get_channel()
+    ├── selectors.py              # data-ta 优先；禁止锚定 cdk-overlay-N / mat-menu-panel-N
+    ├── query.py                  # 检索式构造：字段白名单、日期默认五年、残留覆盖
+    ├── plan_search.py            # 九动词内，默认路径 3 个网络动作
+    └── parse_records.py          # NDJSON -> Record[]
+extension/content/capture.js      # MAIN world，document_start，拦截 fetch + XHR
+tests/fixtures/webofscience/records.ndjson   # 脱敏，3 条（含缺 keywords / 缺 doi 的形态）
 tests/contract/test_channel_webofscience.py
+tests/unit/test_wos_query.py
 ```
 
-## 验收（三档，缺一不可）
+## 交互纪律（写进代码，不靠自觉）
 
-1. **契约/单测**：`pytest tests/contract -q` 通过；解析器对畸形 HTML 抛 `ParseError` 而非 `KeyError`；
-   fixture 回放得到预期 `SearchPage` / `Record`。
-2. **真实链路**：`wensu status` → `bridge_ready: true`；一次 `search`（单页 ≤3 条）+ 一次 `detail` +
-   一次 `export`；审计里能看到动作数、耗时、结果数。
-3. **风控路径**：故意触发（或回放）一次验证码/重定向，确认返回 `blocked` 且 24h 冷却生效。
+- 一次检索**只发 3 个请求**；翻页每页 +1，显式排序 +2，默认都不加。
+- 所有暂停都是随机区间（`jitter()`），没有固定节拍。
+- 检索式框每次先清空（`type` 的 `clear: True`），多次检索不会互相污染。
+- 日期写进检索式 `PY=(…)`，**不点任何筛选控件**，默认近五年。
+- 需要组合历史检索时用完整检索式表达（`ALL=(a) AND ALL=(b)`），不走页面的「检索历史」面板。
 
-## 风险
+## 未做（明确记录）
 
-- WoS 对自动化访问敏感，验证码/限流概率高于 CNKI ⇒ 先做“能解析”再谈“能翻页”。
-- DOM 与 URL 形态变动频繁 ⇒ `site_version` 目录化，旧版本保留可回滚。
-- 若走机构代理，域名白名单与 Host 检查需同步评审，避免把白名单放宽到任意子域。
+- `detail`：作者关键词（Author Keywords）只在 `full-record` 页，本版不取；`capabilities` 已声明不含它。
+- `journal`：WoS 无对应入口。
+- `#N` 检索历史引用：会让内核去读页面面板，交互不划算；调用方传完整表达式即可，效果等价。
+- 配额与冷却仍为**全局单例**（理由见 ADR 0008「明确不做」）。
+
+## 验收三档
+
+1. **契约/单测**：`pytest -q` 215 通过；最坏计划 23 动作 / 108.9 s / 7 网络动作，在内核上限内。
+2. **真实链路**：重载扩展 → `wensu status` 的 `bridge_ready: true` → 一次 `search`（`limit=5`）
+   → 审计里 3 个网络动作、结果数为 5、无风控信号。
+3. **风控路径**：伪造 `session-expired` 跳转 → `blocked` + 24 h 冷却 → 二次调用被拒。

@@ -223,8 +223,16 @@ def _record_from(payload: dict[str, Any]) -> Record:
 
 
 def _html(outcomes: Sequence[ActionOutcome]) -> str:
+    """Return the page payload of the last read action.
+
+    Usually an HTML document. A channel that captures a network stream reads it
+    through ``read_text`` instead and receives plain text here — from the
+    kernel's point of view both are "the page".
+    """
+
     for outcome in reversed(outcomes):
-        value = outcome.data.get("html")
-        if isinstance(value, str):
-            return value
-    raise ParseError("plan produced no html payload")
+        for key in ("html", "text"):
+            value = outcome.data.get(key)
+            if isinstance(value, str) and value:
+                return value
+    raise ParseError("plan produced no page payload")

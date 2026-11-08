@@ -16,7 +16,23 @@ from .contracts import ActionOutcome, RiskSignal
 from .errors import RiskBlocked
 
 # URL fragments that mean "you are behind an interstitial", not a result page.
-VERIFY_URL_MARKERS: tuple[str, ...] = ("/verify/home", "/verify/", "captcha")
+VERIFY_URL_MARKERS: tuple[str, ...] = (
+    "/verify/home",
+    "/verify/",
+    "captcha",
+    "recaptcha",
+    "hcaptcha",
+)
+
+# Document titles that mean "you are on a gate page". Compared after casefold,
+# so the English entries also match "Sign In" / "SIGN IN".
+RISK_TITLE_MARKERS: tuple[str, ...] = (
+    "安全验证",
+    "验证中心",
+    "session expired",
+    "sign in",
+    "access denied",
+)
 
 # Text that only appears when a human check is being demanded. Kept for
 # reference; detection now relies on the content script's visibility flag.
@@ -27,7 +43,16 @@ CAPTCHA_TEXT_MARKERS: tuple[str, ...] = (
 )
 
 # Login redirects are not a captcha, but they still invalidate the plan.
-LOGIN_URL_MARKERS: tuple[str, ...] = ("/login", "fsso.cnki.net", "login.aspx")
+LOGIN_URL_MARKERS: tuple[str, ...] = (
+    "/login",
+    "fsso.cnki.net",
+    "login.aspx",
+    # Web of Science (Clarivate) routes an expired session through an SSO hop.
+    "sso",
+    "shibboleth",
+    "carsi",
+    "session-expired",
+)
 
 
 class RiskGuard:
@@ -113,7 +138,9 @@ class RiskGuard:
 
         # Verification interstitials keep a short, distinctive document title.
         title = outcome.data.get("title")
-        if isinstance(title, str) and any(marker in title for marker in ("安全验证", "验证中心")):
+        if isinstance(title, str) and any(
+            marker in title.casefold() for marker in RISK_TITLE_MARKERS
+        ):
             return RiskSignal.VERIFY_REDIRECT
         return None
 

@@ -1,0 +1,19 @@
+{
+  "channel": "webofscience",
+  "site_version": "2026.11",
+  "schema_version": 1,
+  "min_core": "0.5.0",
+  "domains": ["webofscience.clarivate.cn", "www.webofscience.com"],
+  "verbs": [
+    "goto",
+    "wait_for",
+    "type",
+    "click",
+    "scroll",
+    "read_html",
+    "read_text",
+    "sleep"
+  ],
+  "detail_url_prefixes": [],
+  "capabilities": ["search", "export"]
+}

@@ -30,8 +30,15 @@ VERBS: frozenset[str] = frozenset(
 
 MAX_FRAME_BYTES = 2 * 1024 * 1024
 
-# Trusted default scope used when no channel manifest is supplied.
-TRUSTED_DOMAINS: tuple[str, ...] = ("kns.cnki.net", "www.cnki.net")
+# Trusted default scope used when no channel manifest is supplied. The host
+# keeps its own copy on purpose: a compromised extension cannot widen it, so a
+# new channel has to be added here as well as in its manifest.
+TRUSTED_DOMAINS: tuple[str, ...] = (
+    "kns.cnki.net",
+    "www.cnki.net",
+    "webofscience.clarivate.cn",
+    "www.webofscience.com",
+)
 
 
 def _host_allowed(host: str, domains: Iterable[str]) -> bool:

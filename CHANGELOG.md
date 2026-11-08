@@ -4,6 +4,59 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.5.2] - 2026-11-08
+
+### Fixed
+
+- Every WoS navigation failed with `policy.domain`. The native host keeps its own domain allowlist
+  (`TRUSTED_DOMAINS`) and narrows each request to that scope, never widening it; it still listed
+  only CNKI, so a WoS request narrowed to the empty set and the extension refused the URL. The WoS
+  hosts are in that list now. A new channel has to add itself there *and* in its manifest — the
+  host copy is the layer an extension is not allowed to widen.
+
+## [0.5.1] - 2026-11-08
+
+### Fixed
+
+- The first request after a machine reboot could sleep for hours while holding the plan lock.
+  `quota.json` stores the last request as a monotonic timestamp, and a monotonic clock restarts
+  from zero on reboot; the interval calculation read that restart as "we are early" and waited out
+  the previous uptime (observed: five hours, with the plan lock held, so every later call stalled
+  behind it). A backwards clock now counts as a full interval already served.
+
+## [0.5.0] - 2026-11-08
+
+### Added
+
+- `webofscience` channel (site version 2026.11): searches Web of Science through the user's own
+  browser session and returns the same `Record` shape as CNKI — title, authors, source,
+  year/volume/issue/pages, DOI, abstract, Keywords Plus, citation count and institution.
+  Selected with `channel: "webofscience"`; `query` accepts either a keyword phrase or a full WoS
+  expression such as `TS=(actuator) AND PY=(2021-2026)`.
+- `extension/content/capture.js`: a MAIN-world content script that mirrors the page's own result
+  stream. It issues no request of its own — the 50 records, abstracts included, arrive with the
+  normal search and cost zero extra network actions.
+- Year handling for WoS: an omitted range defaults to the last five years and is written into the
+  expression, so no filter widget is ever clicked.
+
+### Changed
+
+- `read_text` accepts an optional `mode` (`inner` by default, `text` for raw node text), and the
+  kernel now hands a captured `text` payload to a channel parser as well as an `html` one.
+- Risk markers cover SSO redirects (`sso`, `shibboleth`, `carsi`) and English gate titles
+  (`session expired`, `sign in`, `access denied`); the title check is case-insensitive.
+- The extension manifest gains the WoS host permission and a `world: "MAIN"` capture script.
+
+### Docs
+
+- ADR 0007 (WoS capture strategy) and ADR 0008 (the three kernel hooks it requires).
+- `docs/wos-channel.md` is now a decision record rather than a list of open questions.
+
+### Not in this release
+
+- WoS `detail` and `journal` are not implemented; `keywords` comes from Keywords Plus only
+  (about half of the records carry it).
+
 ## [0.4.2] - 2026-10-24
 
 ### Docs

@@ -7,7 +7,12 @@
 
 const HOST_NAME = "com.scholar.search";
 const PROTOCOL_VERSION = 1;
-const DEFAULT_DOMAINS = ["kns.cnki.net", "www.cnki.net"];
+const DEFAULT_DOMAINS = [
+  "kns.cnki.net",
+  "www.cnki.net",
+  "webofscience.clarivate.cn",
+  "www.webofscience.com",
+];
 
 let port = null;
 let boundTabId = null;

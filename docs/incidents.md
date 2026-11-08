@@ -2,6 +2,39 @@
 
 只记真实发生的故障：现象 → 根因 → 修复 → 是否可借鉴避免。新故障追加在顶部。
 
+## 2026-11-08 WoS 捕获脚本匹配错端点，`wait_for` 超时被误判成"没注入"
+
+- **现象**：WoS 检索的每个动作都成功（`goto` 1823ms、`wait_for` 2ms、`type` 5ms、`click` 323ms），
+  只有末尾的 `wait_for #wensu-wos-capture[data-ready='1']` 等满 6 秒超时，报 `no page payload`。
+- **根因**：`capture.js` 只匹配 `/api/wosnx/core/runQueryGetRecordsStream`（用户手动点排序时看到的端点），
+  而点「检索」按钮发的是 `/api/wosnx/core/runQuerySearch`。两个端点都返回完整记录，只是名字不同。
+- **排查关键**：给 capture.js 加两个可读证据——`html[data-wensu-capture="loaded"]`（证明脚本在页面世界
+  真的跑起来了）和 `html[data-wensu-seen]`（页面实际请求过的 path，query string 已剥离、不含 SID）。
+  一次探测就把"没注入"与"端点不匹配"这两种可能分开，省掉了反复改代码重试。
+- **修复**：匹配前缀放宽到 `/api/wosnx/core/runQuery`；解析器一行没改就吃下了 `runQuerySearch`
+  （实测 20 条 / 243 KB / 含摘要）。
+- **教训**：① 不要用 DevTools 的 Size 列估算字段覆盖度——那是 gzip 后大小，38.6 KB 解压后 243 KB，
+  我据此推断过"装不下摘要"，错了两次；② 注入到页面世界的脚本必须自带"我跑起来了"的证据，
+  否则失败只能靠猜；③ 站点可能有多个等价端点，按前缀匹配而不是全名。
+
+## 2026-11-08 `pip install --upgrade` 卸载成功、换 exe 失败，包被删空
+
+- **现象**：升级 0.4.2 → 0.5.0 时 pip 报
+  `ERROR: Could not install packages due to an OSError: [WinError 32] 另一个程序正在使用此文件:
+  'd:\python\python314\scripts\wensu.exe'`。随后 `import scholar_search` 直接 `ModuleNotFoundError`，
+  site-packages 里连 `scholar_search` 和 `wensu-*.dist-info` 都没了。
+- **根因**：MCP 服务进程（`wensu.exe serve --transport stdio`，PID 19628）正在运行，Windows 不允许
+  删除正在执行的可执行文件。pip 的顺序是「先卸载旧版本、再装新版本」，卸载成功了，装载脚本阶段
+  失败，回滚也没有把包文件放回来——`pip install --upgrade` **不是事务性的**。
+- **影响面**：磁盘上的包消失。运行中的 MCP 进程因为模块已在内存里而暂时工作，但**任何新启动的
+  host 都会崩**：扩展一旦重载就会断桥，症状会看起来像「扩展坏了」。
+- **修复**：绕开 `wensu.exe`，把 wheel 直接解压进 site-packages——
+  `Expand-Archive <whl> → Copy-Item x\scholar_search <site-packages>\`，并复制
+  `wensu-0.5.0.dist-info`。之后 `pip show wensu` 为 0.5.0，`import`、CLI、`native-host\main.py`
+  的导入全部恢复正常。
+- **教训**：升级正在运行的 pip 包，要么先停掉占用 `Scripts\<name>.exe` 的进程，要么干脆不解包、
+  直接覆盖包目录。不要假设失败会回滚。
+
 ## 2026-10-21 代理换证导致 `content_not_ready`，被误判为 MCP 故障
 
 - **现象**：新装环境第一次 `search`，`goto` 成功（约 1.9 s），紧随的 `sleep` 报

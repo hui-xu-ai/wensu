@@ -6,7 +6,7 @@
   "tools": [
     {
       "name": "search",
-      "description": "Search a channel for bibliographic records. Read-only.",
+      "description": "Search a channel for bibliographic records. Read-only. With channel=webofscience, query may be a Web of Science expression (e.g. TS=(actuator) AND PY=(2021-2026)); when no year range is given the last five years are used, and the span is applied inside the expression rather than through page filters.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,

@@ -208,7 +208,16 @@ class PolicyEngine:
 
             now = self._clock()
             if state.last is not None:
-                remaining_ms = required - (now - state.last) * 1000
+                elapsed_ms = (now - state.last) * 1000
+                # ``last`` is a monotonic timestamp, and a monotonic clock
+                # restarts from zero when the machine reboots. A negative
+                # elapsed time therefore means "the clock restarted", not "we
+                # are early"; treating it as early makes the first request after
+                # a reboot sleep for the length of the previous uptime (observed:
+                # ~5 hours, while holding the plan lock).
+                if elapsed_ms < 0:
+                    elapsed_ms = required
+                remaining_ms = required - elapsed_ms
                 if remaining_ms > 0:
                     slept = remaining_ms / 1000
                     self._sleep(slept)
