@@ -16,20 +16,31 @@ const DEFAULT_DOMAINS = [
 
 let port = null;
 let boundTabId = null;
+let reconnectDelayMs = 3000;
 
 function connect() {
   if (port) return;
   try {
     const channel = chrome.runtime.connectNative(HOST_NAME);
     port = channel;
+    reconnectDelayMs = 3000;
     channel.onMessage.addListener((message) => onHostMessage(message, channel));
     channel.onDisconnect.addListener(() => {
       if (port === channel) port = null;
-      setTimeout(connect, 3000);
+      // A host that was never registered fails differently from one that exited.
+      // Retrying every 3 s regardless spawned another launcher process each time,
+      // so a missing registration turned into a loop of doomed processes.
+      const error = chrome.runtime.lastError;
+      const text = String((error && error.message) || "");
+      if (/not found|not registered|forbidden|access/i.test(text)) {
+        reconnectDelayMs = Math.min(reconnectDelayMs * 2, 60_000);
+      }
+      setTimeout(connect, reconnectDelayMs);
     });
   } catch (error) {
     port = null;
-    setTimeout(connect, 3000);
+    reconnectDelayMs = Math.min(reconnectDelayMs * 2, 60_000);
+    setTimeout(connect, reconnectDelayMs);
   }
 }
 
@@ -175,10 +186,12 @@ async function onHostMessage(message, channel) {
 
     const message = { type: "dom_action", action, params };
 
-    // document_idle injection can lag behind a navigation; retry a missing
-    // receiver before giving up.
+    // document_idle injection can lag behind a navigation. A fixed 6 x 300 ms gave
+    // a slow page 1.8 s and then declared the extension broken; back off instead,
+    // which covers roughly 6.4 s within the action budget.
     const sendToTab = async () => {
-      for (let attempt = 0; attempt < 6; attempt += 1) {
+      let delay = 200;
+      for (let attempt = 0; attempt < 8; attempt += 1) {
         try {
           return await chrome.tabs.sendMessage(tabId, message);
         } catch (error) {
@@ -189,7 +202,8 @@ async function onHostMessage(message, channel) {
           if (!/Receiving end|Could not establish|message channel closed/i.test(text)) {
             throw error;
           }
-          await new Promise((resolve) => setTimeout(resolve, 300));
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          delay = Math.min(delay * 2, 1000);
         }
       }
       throw new Error("content_not_ready");

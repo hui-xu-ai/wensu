@@ -123,23 +123,27 @@
   }
 
   function armIdle(gen) {
-    // One lazy batch is ~100 KB arriving over several chunks, and the gap between
-    // chunks can exceed a single idle window. So keep waiting while the tail is
-    // unparseable rather than handing a truncated JSON line downstream — but give
-    // up after a few windows, so a genuinely stuck stream still terminates.
+    // One lazy batch is ~100 KB arriving over several chunks, and the gaps can
+    // exceed a single idle window, so keep waiting while the tail is unparseable.
+    // There is deliberately no attempt cap: giving up would hand a truncated JSON
+    // line downstream, which reads as "the page had fewer records" — worse than a
+    // timeout the plan can report. The plan's own wait deadline is the real bound.
     if (idleTimer) clearTimeout(idleTimer);
-    let attempts = 0;
-    const tick = () => {
+    idleTimer = setTimeout(() => {
       idleTimer = null;
       if (gen !== generation) return;
-      attempts += 1;
-      if (looksComplete() || attempts >= 6) {
-        markReady();
+      const element = ensureNode();
+      if (element.getAttribute("data-overflow") === "1") {
+        // Over the size cap: never declared ready, so the caller times out instead
+        // of receiving a record set that silently stops mid-page.
         return;
       }
-      idleTimer = setTimeout(tick, IDLE_MS);
-    };
-    idleTimer = setTimeout(tick, IDLE_MS);
+      if (!looksComplete()) {
+        armIdle(gen);
+        return;
+      }
+      markReady();
+    }, IDLE_MS);
   }
 
   function begin(url) {
@@ -169,7 +173,13 @@
   function append(chunk, gen) {
     if (!chunk || gen !== generation) return;
     const element = ensureNode();
-    if (buffer.length > MAX_CHARS) return;
+    if (buffer.length > MAX_CHARS) {
+      // Refuse to grow without bound, and record why. The marker stops the idle
+      // timer from ever declaring this payload complete, so an oversized capture
+      // surfaces as a timeout rather than as a short page.
+      element.setAttribute("data-overflow", "1");
+      return;
+    }
     if (needSeparator) {
       if (buffer) buffer += "\n";
       needSeparator = false;

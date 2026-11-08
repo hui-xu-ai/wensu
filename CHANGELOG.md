@@ -4,6 +4,24 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.8] - 2026-11-09
+
+### Fixed — the four extension-side minors from the audit
+
+- **A truncated payload looked like a short page.** The idle timer gave up after six windows and
+  declared the capture ready anyway, so a half-written JSON line reached the parser, which dropped it
+  and reported fewer records. There is no attempt cap now: readiness requires a parseable tail, and
+  the plan's own deadline is the only bound. A timeout is a better answer than a quietly short list.
+- **An oversized capture was silently truncated.** Past 8 MB the buffer stopped growing and the
+  payload was still marked ready. It now sets `data-overflow`, which stops the idle timer from ever
+  declaring it complete — same reasoning, and the marker says why.
+- **A missing host registration caused a reconnect loop.** Every disconnect retried after 3 s
+  regardless of why, so an unregistered host spawned another launcher process each time. The retry
+  now backs off to 60 s when the disconnect says "not found / not registered / forbidden".
+- **`content_not_ready` had a fixed 1.8 s budget** (6 × 300 ms), which a slow `document_idle`
+  injection can exceed — and then the extension was reported broken. It now backs off from 200 ms to
+  1 s over eight attempts, covering roughly 6.4 s inside the action budget.
+
 ## [0.12.7] - 2026-11-09
 
 ### Fixed — audit m1
