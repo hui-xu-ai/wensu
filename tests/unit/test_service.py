@@ -180,3 +180,30 @@ def test_sources_only_filters_by_journal(tmp_path: Path) -> None:
     page = service.search(SearchQuery(text="x", channel="fake", sources_only=("journ",)))
 
     assert [record.title for record in page.records] == ["Inside"]
+
+
+def test_list_only_records_do_not_seed_the_detail_cache(tmp_path: Path) -> None:
+    """A CNKI row has a URL but no abstract; caching it would starve detail()."""
+
+    row = make_record("Paper A")
+    row.abstract = None  # exactly what a CNKI result row looks like
+    row.url = "https://example.org/article/1"
+    channel = FakeChannel(manifest=make_manifest(), records=[row])
+    service = build_service(
+        tmp_path,
+        channel,
+        [
+            list(SEARCH_SCRIPT),
+            [
+                {"verb": "goto", "data": {}},
+                {"verb": "read_html", "data": {"html": "<html>detail</html>"}},
+            ],
+        ],
+    )
+
+    service.search(SearchQuery(text="x", channel="fake"))
+    detail = service.detail("https://example.org/article/1", channel="fake")
+
+    # parse_detail returns "A paper", the list row is "Paper A": seeing the
+    # latter would mean the row was served from the cache and the abstract lost.
+    assert detail.title == "A paper"

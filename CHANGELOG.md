@@ -4,6 +4,16 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.6.1] - 2026-11-08
+
+### Fixed
+
+- The detail cache was seeded for every record that had a URL, including CNKI result rows, which
+  carry no abstract by design. A later `detail(url)` for such a row answered from the cache with
+  strictly less than the detail page would have — a silent regression that would have looked like
+  "CNKI stopped returning abstracts". Only records that already carry their own abstract are
+  seeded now.
+
 ## [0.6.0] - 2026-11-08
 
 ### Added

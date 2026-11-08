@@ -86,8 +86,13 @@ class ScholarService:
         # five records now may want the abstract of the twelfth one later, and
         # fetching it from the site would cost a browser action for data we have
         # already parsed and are about to throw away.
+        #
+        # Only records that already carry their own detail are seeded. A CNKI
+        # list row has a title and a URL but no abstract — caching it would make
+        # a later detail(url) answer with strictly less than the detail page
+        # would, which is worse than not caching at all.
         for record in page.records:
-            if record.url:
+            if record.url and record.abstract:
                 self._cache.set(_key("detail", spec, {"url": record.url}), record.to_dict())
 
         records = page.records
