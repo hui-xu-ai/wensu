@@ -93,3 +93,43 @@ def test_clear_removes_cooldown(tmp_path: Path) -> None:
     risk.trip(RiskSignal.VERIFY_REDIRECT)
     risk.clear()
     risk.ensure_ready()
+
+
+def test_article_titles_do_not_trigger_a_gate(tmp_path: Path) -> None:
+    """A paper may legitimately carry "Access Denied" or "sign in" in its title.
+
+    Matching those as substrings cost a full day of cooldown for reading an
+    ordinary article, so only a title that *is* the gate counts now.
+    """
+
+    risk = guard(tmp_path)
+    for title in (
+        "Access Denied: 论跨境数据主权 - 中国知网",
+        "How to sign in to a legacy system - 中国知网",
+        "When access denied errors reveal design flaws",
+    ):
+        assert risk.inspect(outcome(data={"title": title})) is None
+
+
+def test_real_gate_titles_still_trigger(tmp_path: Path) -> None:
+    risk = guard(tmp_path)
+    for title in ("Sign In", "Sign In - Web of Science", "安全验证", "Session Expired"):
+        assert risk.inspect(outcome(data={"title": title})) is RiskSignal.VERIFY_REDIRECT
+
+
+def test_doi_containing_sso_is_not_a_login_redirect(tmp_path: Path) -> None:
+    """The bare substring "sso" matched 10.1002/essoar.10501234."""
+
+    risk = guard(tmp_path)
+    doi_url = "https://onlinelibrary.wiley.com/doi/10.1002/essoar.10501234"
+    assert risk.inspect(outcome(url=doi_url)) is None
+
+
+def test_a_real_sso_hop_still_redirects(tmp_path: Path) -> None:
+    risk = guard(tmp_path)
+    for url in (
+        "https://sso.clarivate.com/authorize",
+        "https://login.webofscience.com/sso/authorize",
+        "https://fsso.cnki.net/wayf",
+    ):
+        assert risk.inspect(outcome(url=url)) is RiskSignal.LOGIN_REDIRECT

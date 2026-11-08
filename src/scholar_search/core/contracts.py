@@ -211,7 +211,7 @@ class ChannelManifest:
             if "/" in domain or ":" in domain or domain.startswith("*."):
                 raise ValueError(f"domain must be a bare host name: {domain!r}")
         for cap in self.capabilities:
-            if cap not in {"search", "detail", "journal", "export"}:
+            if cap not in {"search", "detail", "journal", "export", "journal_metrics"}:
                 raise ValueError(f"unknown capability: {cap!r}")
 
 

@@ -15,5 +15,5 @@
     "sleep"
   ],
   "detail_url_prefixes": [],
-  "capabilities": ["search", "export"]
+  "capabilities": ["search", "export", "journal_metrics"]
 }

@@ -340,7 +340,7 @@ def parse(text: str, *, query: SearchQuery | None = None) -> SearchPage:
             return SearchPage(
                 records=(),
                 total=0,
-                page=query.page if query is not None else None,
+                page=None,
             )
         raise ParseError(
             "capture holds no records; the stream was not intercepted "
@@ -354,5 +354,5 @@ def parse(text: str, *, query: SearchQuery | None = None) -> SearchPage:
     return SearchPage(
         records=tuple(records),
         total=total,
-        page=query.page if query is not None else None,
+        page=None,
     )

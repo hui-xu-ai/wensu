@@ -24,7 +24,7 @@ from .contracts import (
     SearchPage,
     SearchQuery,
 )
-from .errors import ActionError, ChannelError, ParseError, PolicyError
+from .errors import ActionError, ChannelError, ParseError, PolicyError, ScholarSearchError
 from .export import to_endnote, to_ris
 from .planner import Planner
 from .policy import PolicyEngine
@@ -62,6 +62,17 @@ class ScholarService:
         query.validate()
         self._ensure_ready()
         spec, channel = self._resolve(query.channel)
+        # Refuse a filter the channel cannot honour rather than silently returning
+        # unfiltered records: a caller that asked for high-impact venues and got
+        # everything back has no way to notice.
+        if (
+            query.min_impact_factor is not None
+            and "journal_metrics" not in spec.manifest.capabilities
+        ):
+            raise ScholarSearchError(
+                f"channel {query.channel!r} does not report journal metrics, "
+                "so min_impact_factor cannot be applied"
+            )
         key = _key("search", spec, query)
 
         cached = self._cache.get(key)
@@ -114,13 +125,12 @@ class ScholarService:
             # is what keeps a fifty-record page affordable; `detail(url)` serves
             # the full record from the cache seeded above, with no second visit.
             records = tuple(replace(record, abstract=None) for record in records)
-        if records is not page.records or page.page != query.page:
-            page = SearchPage(
-                records=records,
-                total=page.total,
-                page=query.page,
-                page_count=page.page_count,
-            )
+        if records is not page.records:
+            # Never overwrite this with `query.page`. Doing so reported "page 2"
+            # even when the site had served page 1, which made a failed page turn
+            # invisible: the caller saw success and a page number it asked for.
+            # What lands here is whatever the channel actually observed.
+            page = replace(page, records=records)
         self._cache.set(key, _page_to(page))
         return page
 

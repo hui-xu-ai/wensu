@@ -24,8 +24,10 @@ VERIFY_URL_MARKERS: tuple[str, ...] = (
     "hcaptcha",
 )
 
-# Document titles that mean "you are on a gate page". Compared after casefold,
-# so the English entries also match "Sign In" / "SIGN IN".
+# Gate pages keep a short, distinctive document title. These used to be matched as
+# substrings of any title, which fired on ordinary articles — "Access Denied: 论跨境
+# 数据主权" cost a whole day of cooldown for reading a paper. A title now has to be
+# one of these exactly, or start with one and continue with the site's own name.
 RISK_TITLE_MARKERS: tuple[str, ...] = (
     "安全验证",
     "验证中心",
@@ -34,25 +36,46 @@ RISK_TITLE_MARKERS: tuple[str, ...] = (
     "access denied",
 )
 
-# Text that only appears when a human check is being demanded. Kept for
-# reference; detection now relies on the content script's visibility flag.
-CAPTCHA_TEXT_MARKERS: tuple[str, ...] = (
-    "安全验证",
-    "滑动验证",
-    "请完成验证",
-)
-
 # Login redirects are not a captcha, but they still invalidate the plan.
 LOGIN_URL_MARKERS: tuple[str, ...] = (
     "/login",
     "fsso.cnki.net",
     "login.aspx",
-    # Web of Science (Clarivate) routes an expired session through an SSO hop.
-    "sso",
+    # A bare "sso" used to be here and matched DOIs such as 10.1002/essoar.10501234.
+    # An SSO hop appears as a host label or a path segment, so those forms only.
+    "//sso.",
+    ".sso.",
+    "/sso/",
     "shibboleth",
     "carsi",
     "session-expired",
 )
+
+
+def _title_is_gate(title: str) -> bool:
+    """True when the document title names a gate page, not an article.
+
+    An exact match always counts. A prefix match counts only when the remainder
+    looks like a site name — short, and free of CJK — because an article whose
+    title merely *starts* with "Access Denied" carries on in prose, usually in
+    Chinese.
+    """
+
+    text = " ".join(title.split()).casefold()
+    if not text:
+        return False
+    for marker in RISK_TITLE_MARKERS:
+        lowered = marker.casefold()
+        if text == lowered:
+            return True
+        if not text.startswith(lowered):
+            continue
+        tail = text[len(lowered) :]
+        if any("\u4e00" <= char <= "\u9fff" for char in tail):
+            continue
+        if len(tail) <= 32:
+            return True
+    return False
 
 
 class RiskGuard:
@@ -138,9 +161,7 @@ class RiskGuard:
 
         # Verification interstitials keep a short, distinctive document title.
         title = outcome.data.get("title")
-        if isinstance(title, str) and any(
-            marker in title.casefold() for marker in RISK_TITLE_MARKERS
-        ):
+        if isinstance(title, str) and _title_is_gate(title):
             return RiskSignal.VERIFY_REDIRECT
         return None
 

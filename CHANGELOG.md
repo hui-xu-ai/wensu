@@ -4,6 +4,25 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.11.1] - 2026-11-08
+
+### Fixed — second batch from the independent audit
+
+- **Risk markers fired on ordinary article titles.** `access denied` and `sign in` were matched as
+  substrings, so reading a paper titled "Access Denied: 论跨境数据主权" tripped a 24-hour cooldown.
+  A title now has to *be* a gate title: exact match, or that prefix followed by a short, non-CJK site
+  suffix. The bare `sso` URL marker — which matched the DOI `10.1002/essoar.10501234` — is replaced
+  by `//sso.`, `.sso.` and `/sso/`, the shapes an SSO hop actually takes.
+- **A failed page turn was invisible.** The kernel overwrote whatever page the channel reported with
+  the page the caller asked for, and both channels back-filled `query.page` when the site showed no
+  marker. Together they guaranteed `page=2` came back as `2` even when the site had served page 1.
+  Channels now report only what they observed (`None` when the page carries no marker), and the
+  kernel no longer overwrites it.
+- **`min_impact_factor` was silently ignored by CNKI.** A caller who asked for high-impact venues got
+  unfiltered results with no way to notice. Web of Science now declares a `journal_metrics`
+  capability and the kernel refuses that filter on channels lacking it, instead of quietly dropping
+  it.
+
 ## [0.11.0] - 2026-11-08
 
 ### Fixed — first batch from an independent audit

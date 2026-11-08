@@ -163,6 +163,17 @@ def test_parse_flattens_abstract_markup() -> None:
     assert "<p>" not in record.abstract
 
 
+def test_page_is_none_when_the_stream_reports_none() -> None:
+    """The stream carries no page number, and guessing one hides a failed turn.
+
+    The kernel used to overwrite whatever the channel returned with the requested
+    page number, so `page=2` came back as 2 even when the site had served page 1.
+    """
+
+    page = parse_records.parse(CAPTURE, query=SearchQuery(text="x", channel="webofscience", page=2))
+    assert page.page is None
+
+
 def test_impact_factor_is_returned_with_each_record() -> None:
     page = parse_records.parse(CAPTURE)
     factors = [record.impact_factor for record in page.records]

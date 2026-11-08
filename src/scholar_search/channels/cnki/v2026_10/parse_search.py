@@ -91,6 +91,8 @@ def parse(html: str, query: SearchQuery) -> SearchPage:
     return SearchPage(
         records=tuple(records),
         total=int(total_match.group(1).replace(",", "")) if total_match else None,
-        page=int(page_match.group(1)) if page_match else query.page,
+        # The page marker this page shows, or None when it carries none. Filling in
+        # `query.page` here would claim a turn that may never have happened.
+        page=int(page_match.group(1)) if page_match else None,
         page_count=int(page_match.group(2)) if page_match else None,
     )
