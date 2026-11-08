@@ -99,12 +99,12 @@ def test_type_clears_the_editor_first() -> None:
     assert typing[0].params["clear"] is True
 
 
-def test_capture_wait_is_a_two_phase_handshake() -> None:
+def test_capture_wait_only_waits_for_the_payload() -> None:
     waits = [a for a in plan_search.build(_query()).actions if a.verb == "wait_for"]
+    ready = [a for a in waits if a.params.get("selector") == "#wensu-wos-capture[data-ready='1']"]
     hidden = [a for a in waits if a.params.get("state") == "hidden"]
-    ready = [a for a in waits if a.params.get("state") != "hidden"]
-    assert hidden, "must wait for the stale marker to clear"
-    assert ready, "must then wait for the new payload"
+    assert ready, "the plan must wait for the captured payload"
+    assert not hidden, "a ready marker that is often already set cannot be waited out"
 
 
 def test_default_page_and_sort_add_no_clicks() -> None:

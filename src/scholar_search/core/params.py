@@ -20,7 +20,7 @@ ALLOWED_KEYS: dict[str, frozenset[str]] = {
     "select": frozenset({"selector", "value"}),
     "read_html": frozenset(),
     "read_text": frozenset({"selector", "mode"}),
-    "scroll": frozenset({"to"}),
+    "scroll": frozenset({"to", "by"}),
     "sleep": frozenset({"ms"}),
 }
 
@@ -76,7 +76,12 @@ def validate_params(verb: str, params: Any) -> str | None:
         return None
 
     if verb == "scroll":
-        return None if params.get("to") in {"top", "bottom"} else "policy.params"
+        if params.get("to") in {"top", "bottom"}:
+            return None
+        by = params.get("by")
+        if isinstance(by, int) and not isinstance(by, bool) and 0 < by <= 10_000:
+            return None
+        return "policy.params"
 
     if verb == "sleep":
         ms = params.get("ms")

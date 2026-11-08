@@ -272,16 +272,22 @@ def parse(text: str, *, query: SearchQuery | None = None) -> SearchPage:
         raise ParseError("empty capture: the result stream was never written")
 
     rows: list[dict[str, Any]] = []
+    malformed = 0
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped:
             continue
         try:
             row = json.loads(stripped)
-        except ValueError as exc:
-            raise ParseError(f"capture is not newline-delimited JSON: {exc}") from exc
+        except ValueError:
+            # A stream cut mid-line leaves one unparseable tail. Skipping it keeps
+            # the records that did arrive; a capture with nothing usable still
+            # fails the checks below.
+            malformed += 1
+            continue
         if not isinstance(row, dict):
-            raise ParseError("capture line is not a JSON object")
+            malformed += 1
+            continue
         rows.append(row)
 
     factors = _impact_factors(rows)
@@ -325,7 +331,10 @@ def parse(text: str, *, query: SearchQuery | None = None) -> SearchPage:
                 total=0,
                 page=query.page if query is not None else None,
             )
-        raise ParseError("capture holds no records; the stream was not intercepted")
+        raise ParseError(
+            "capture holds no records; the stream was not intercepted "
+            f"({malformed} unparseable line(s) dropped)"
+        )
     if not records and wanted is None:
         raise ParseError("capture holds records but none carried a usable title")
 

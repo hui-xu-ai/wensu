@@ -249,7 +249,13 @@ async function run(action, params) {
       break;
     }
     case "scroll": {
-      window.scrollTo(0, params.to === "top" ? 0 : document.body.scrollHeight);
+      if (typeof params.by === "number") {
+        // Relative scrolling: a person reads their way down the list rather than
+        // teleporting to the end, so the plan walks down in a few uneven steps.
+        window.scrollBy({ top: params.by, behavior: "smooth" });
+      } else {
+        window.scrollTo(0, params.to === "top" ? 0 : document.body.scrollHeight);
+      }
       result = { ok: true, data: {} };
       break;
     }

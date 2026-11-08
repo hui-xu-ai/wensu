@@ -9,22 +9,26 @@
  *   runQuerySearch            first screen, 20 records, sent by the Search button
  *   runQueryGetRecordsStream  later batches, sent lazily when the list is
  *                             scrolled — this is how a "50 per page" setting
- *                             actually gets its remaining 30 records
+ *                             actually gets its remaining records
  *
- * So the node is cleared only when a *primary* query starts, and every later
- * batch is appended. An earlier version cleared on any request and silently kept
- * just the last batch of 20.
+ * So the node is cleared only when a *primary* query starts, and later batches
+ * are appended. Three mistakes are worth not repeating:
  *
- * Handshake with the channel plan:
- *   - `data-ready` is dropped when the primary query starts;
- *   - it is restored once nothing is pending and the payload is in the node.
- * A single wait would match the previous run's marker the instant the click
- * returned.
+ *   - clearing on any request kept only the last batch of a multi-batch page;
+ *   - inserting a newline per *chunk* cut the streamed JSON lines in half;
+ *   - anchoring the node to <html> gave it 0x0 layout, and `wait_for` matches on
+ *     visibility, so the plan timed out even though the data was there.
  *
- * Diagnostics that survive the page: `data-wensu-capture="loaded"` proves the
- * script ran in the page world, `data-wensu-hits` counts tracked responses, and
- * `data-wensu-seen` lists request paths (query strings stripped, so no session
- * id leaks).
+ * "Finished" cannot rely on the stream closing: the response body often stays
+ * open after the last record, so `done` never arrives and `finish()` never runs.
+ * A short idle timer therefore declares the payload complete once chunks stop.
+ *
+ * The node lives in <body> (visible layout) and is re-attached with its buffer
+ * intact if a render detaches it.
+ *
+ * Diagnostics: `data-wensu-capture="loaded"`, `data-wensu-hits` (tracked
+ * responses), `data-wensu-rebuilds`, `data-wensu-seen` (request paths, query
+ * stripped so no session id leaks).
  */
 
 (() => {
@@ -32,6 +36,7 @@
   const PRIMARY = "/api/wosnx/core/runQuerySearch";
   const ID = "wensu-wos-capture";
   const MAX_CHARS = 8 * 1024 * 1024;
+  const IDLE_MS = 1_500;
   const seen = [];
 
   try {
@@ -54,36 +59,99 @@
   let node = null;
   let pending = 0;
   let hits = 0;
+  let rebuilds = 0;
+  let needSeparator = false;
+  let buffer = "";
+  let idleTimer = null;
 
   function ensureNode() {
-    if (node && node.isConnected) return node;
-    const existing = document.getElementById(ID);
-    if (existing) {
-      node = existing;
+    if (node && node.isConnected) {
+      // Rendered matters: a node parked outside <body> gets 0x0 layout and
+      // `wait_for` never matches it.
+      if (document.body && node.parentElement !== document.body) {
+        document.body.appendChild(node);
+      }
       return node;
     }
+    const existing = document.getElementById(ID);
+    if (existing && existing.isConnected) {
+      node = existing;
+      if (document.body && node.parentElement !== document.body) {
+        document.body.appendChild(node);
+      }
+      return node;
+    }
+    rebuilds += 1;
     node = document.createElement("div");
     node.id = ID;
-    // Rendered on purpose: `wait_for` matches on visibility, not presence.
     node.setAttribute(
       "style",
       "position:fixed;top:0;left:0;width:1px;height:1px;overflow:hidden;" +
         "opacity:0;pointer-events:none;white-space:pre;font-size:0;z-index:-1"
     );
     (document.body || document.documentElement).appendChild(node);
+    try {
+      document.documentElement.setAttribute("data-wensu-rebuilds", String(rebuilds));
+    } catch (error) {
+      /* ignore */
+    }
+    if (buffer) node.textContent = buffer;
     return node;
+  }
+
+  function markReady() {
+    pending = 0;
+    if (idleTimer) {
+      clearTimeout(idleTimer);
+      idleTimer = null;
+    }
+    ensureNode().setAttribute("data-ready", "1");
+  }
+
+  function looksComplete() {
+    const text = buffer.replace(/\s+$/, "");
+    if (!text) return false;
+    if (text.endsWith("\n")) return true;
+    const tail = text.slice(text.lastIndexOf("\n") + 1);
+    if (!tail.trim()) return true;
+    try {
+      JSON.parse(tail);
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function armIdle() {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      idleTimer = null;
+      if (pending <= 0) return;
+      if (looksComplete()) {
+        markReady();
+        return;
+      }
+      // The stream paused mid-line. Give it one more window rather than
+      // declaring a truncated payload complete: a half-written JSON line fails
+      // far more confusingly downstream than a plain timeout.
+      idleTimer = setTimeout(() => {
+        idleTimer = null;
+        if (pending > 0) markReady();
+      }, IDLE_MS * 2);
+    }, IDLE_MS);
   }
 
   function begin(url) {
     const text = String(url || "");
     const element = ensureNode();
-    // Every batch invalidates "ready", primary or not: the payload is only whole
-    // once nothing is still pending.
     element.removeAttribute("data-ready");
     if (text.indexOf(PRIMARY) !== -1) {
       // A primary query means a new result set: drop whatever the last one left.
+      buffer = "";
       element.textContent = "";
+      needSeparator = false;
     }
+    needSeparator = true;
     pending += 1;
     hits += 1;
     try {
@@ -91,23 +159,27 @@
     } catch (error) {
       /* ignore */
     }
-    ensureNode();
   }
 
   function append(chunk) {
     if (!chunk) return;
     const element = ensureNode();
-    if (element.textContent.length > MAX_CHARS) return;
-    if (element.textContent && !element.textContent.endsWith("\n")) {
-      element.textContent += "\n";
+    if (buffer.length > MAX_CHARS) return;
+    // One separator per *response*, never per chunk: NDJSON lines are split
+    // across chunks arbitrarily, and a newline in the middle breaks them.
+    if (needSeparator) {
+      if (buffer) buffer += "\n";
+      needSeparator = false;
     }
-    element.textContent += chunk;
+    buffer += chunk;
+    element.textContent = buffer;
+    armIdle();
   }
 
   function finish() {
+    if (pending === 0) return;
     pending = Math.max(0, pending - 1);
-    if (pending > 0) return;
-    ensureNode().setAttribute("data-ready", "1");
+    if (pending === 0) markReady();
   }
 
   function tracked(url) {
@@ -161,8 +233,6 @@
   }
 
   // -- XMLHttpRequest ------------------------------------------------------
-  // Angular's HttpClient uses XHR unless told otherwise, so both transports are
-  // wrapped rather than betting on one.
   const NativeXHR = window.XMLHttpRequest;
   if (typeof NativeXHR === "function") {
     const nativeOpen = NativeXHR.prototype.open;

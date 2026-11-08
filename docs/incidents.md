@@ -2,6 +2,19 @@
 
 只记真实发生的故障：现象 → 根因 → 修复 → 是否可借鉴避免。新故障追加在顶部。
 
+## 2026-11-08 改了动词参数白名单，host 仍用旧版，出现「内核放行、扩展拒绝」
+
+- **现象**：给 `scroll` 加相对偏移 `by` 后跑 `wensu search`，先报
+  `invalid parameters for scroll: policy.params`（内核 `validate_plan` 拒绝，因为
+  `ALLOWED_KEYS` 还没加），修好后又报 `scroll failed: policy.params`（执行阶段）。
+- **根因**：参数校验在**两处各有一份**——内核 `core/params.py`（`validate_plan`）与 native host 的
+  `adapters/bridge/policy.py`（`validate_request`，host 进程启动时加载的包副本）。host 是
+  **浏览器启动的独立进程**，更新 site-packages 不会让已在运行的 host 换代码。
+- **修复**：重载扩展——旧 host 退出、新 host 用当前包启动。
+- **教训**：一次改动可能触及**三个代码载体**：内核包、浏览器扩展、native host 进程。前两个
+  更新即生效，第三个必须重启。以后动 `ALLOWED_KEYS`、`VERBS`、域名白名单这类双端校验的东西，
+  改完要显式说明「host 需要重启」，否则会得到内核与扩展各说各话的分裂状态。
+
 ## 2026-11-08 WoS 捕获脚本匹配错端点，`wait_for` 超时被误判成"没注入"
 
 - **现象**：WoS 检索的每个动作都成功（`goto` 1823ms、`wait_for` 2ms、`type` 5ms、`click` 323ms），

@@ -52,9 +52,6 @@ READ_TIMEOUT_MS = 8_000
 # The stream answered in 1.6 s on the live site; five seconds leaves a wide
 # margin and still keeps the worst-case plan (3 pages) under the kernel's 120 s.
 CAPTURE_WAIT_MS = 5_000
-# How long the previous capture may take to be invalidated once the click has
-# fired. Short on purpose: the request starts within a few hundred ms.
-TURN_MARKER_WAIT_MS = 2_000
 
 
 def settle(ms: int) -> Action:
@@ -68,24 +65,15 @@ def jitter(low: int, high: int) -> int:
 
 
 def capture_wait() -> tuple[Action, ...]:
-    """Wait for the capture node to be invalidated, then to be written again.
+    """Wait for the captured payload to be complete.
 
-    Two phases on purpose. ``capture.js`` drops ``data-ready`` the moment a
-    tracked request starts and restores it when the stream ends, so "ready
-    marker disappears, then reappears" is a race-free handshake — a single wait
-    would match the *previous* run's marker the instant the click returns.
+    There is deliberately no "wait until ready disappears" phase: the first
+    batch often lands during the pause after the click, so the marker is already
+    set and that phase would do nothing but time out. The pause before this call
+    is what gives a fresh request time to start.
     """
 
     return (
-        Action(
-            "wait_for",
-            {
-                "selector": CAPTURE_READY,
-                "timeout_ms": TURN_MARKER_WAIT_MS,
-                "state": "hidden",
-            },
-            timeout_ms=TURN_MARKER_WAIT_MS + WAIT_REPLY_MARGIN_MS,
-        ),
         Action(
             "wait_for",
             {"selector": CAPTURE_READY, "timeout_ms": CAPTURE_WAIT_MS},
@@ -95,21 +83,23 @@ def capture_wait() -> tuple[Action, ...]:
 
 
 def scroll_round() -> tuple[Action, ...]:
-    """Scroll the list to pull the next lazy batch, then wait for it.
+    """Walk down the list the way a reader would, then wait for the lazy batch.
 
-    No "wait until ready disappears" phase here, unlike :func:`capture_wait`:
-    on the last round the list is already complete and no new request starts, so
-    that phase would simply time out and kill the plan.
+    Two steps, not one teleport: the first scroll moves a random distance and the
+    second finishes the page. A single `scrollTo(bottom)` produces identical
+    positions on every run, which is exactly the kind of fingerprint automation
+    detection looks for.
 
-    Measured on the live page: 20 records on load, 40 after the first scroll,
-    50 after the second — a "50 per page" setting fills itself in batches.
+    No "wait until ready disappears" phase, unlike the older version: on the last
+    round the list is already complete and no new request starts, so that phase
+    would simply time out and kill the plan.
     """
 
     return (
+        Action("scroll", {"by": jitter(700, 1_300)}, timeout_ms=CLICK_TIMEOUT_MS),
+        settle(jitter(400, 900)),
         Action("scroll", {"to": "bottom"}, timeout_ms=CLICK_TIMEOUT_MS),
-        # Two seconds is the floor for "scrolled, looked, scrolled again". Anything
-        # faster reads as a script driving the page rather than a person reading it.
-        settle(jitter(1_600, 2_400)),
+        settle(jitter(1_400, 2_000)),
         Action(
             "wait_for",
             {"selector": CAPTURE_READY, "timeout_ms": CAPTURE_WAIT_MS},

@@ -4,6 +4,47 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.8.6] - 2026-11-08
+
+### Fixed
+
+- `scroll` with a relative `by` was rejected with `policy.params` even after the kernel learned the
+  parameter: `ALLOWED_KEYS["scroll"]` still listed only `to`, and the native host validates the same
+  schema from its own copy of the package. Both now accept `by`.
+
+### Note
+
+- A verb's parameter schema reaches the native host only after the host restarts (reloading the
+  extension does that). The kernel and the host can otherwise disagree — the kernel accepts and the
+  extension refuses.
+
+## [0.8.5] - 2026-11-08
+
+### Changed
+
+- Scrolling is no longer a single jump to the bottom. `scroll` now accepts a relative `by` offset,
+  and the plan walks down in two uneven steps with randomised distances and pauses. A `scrollTo`
+  landing on the same pixel every run is a fingerprint; a reader's scroll is not.
+
+## [0.8.4] - 2026-11-08
+
+### Fixed
+
+- The capture could be declared complete mid-stream, leaving a half-written JSON line. The idle
+  timer now checks that the last line actually parses before setting the ready marker, and grants
+  the stream a second window when it does not. The parser also drops unparseable lines instead of
+  failing the whole page, so one cut tail costs nothing.
+
+## [0.8.3] - 2026-11-08
+
+### Fixed
+
+- The plan then timed out on `wait_for ... state: hidden`. That phase assumed the ready marker would
+  be cleared when a fresh request starts, but the first batch usually lands during the pause after
+  the click, so the marker was already set and the wait had nothing to wait out. The phase is gone:
+  each stage now waits for the payload once, and the pause after a click is what gives a new request
+  time to begin. Worst-case budget improves to 101–104 s of 120 s.
+
 ## [0.8.2] - 2026-11-08
 
 ### Fixed

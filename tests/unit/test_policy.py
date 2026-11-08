@@ -88,6 +88,19 @@ def test_wait_turn_enforces_interval(tmp_path) -> None:
     assert clock.sleeps
 
 
+def test_scroll_accepts_a_relative_offset() -> None:
+    policy = engine()
+    plan = Plan(channel="fake", purpose="search", actions=(Action("scroll", {"by": 800}),))
+    policy.validate_plan(plan, make_manifest(verbs=("scroll",)))
+
+
+def test_scroll_rejects_an_unknown_parameter() -> None:
+    policy = engine()
+    plan = Plan(channel="fake", purpose="search", actions=(Action("scroll", {"sideways": 1}),))
+    with pytest.raises(PolicyError, match="params"):
+        policy.validate_plan(plan, make_manifest(verbs=("scroll",)))
+
+
 def test_quota_exhaustion(tmp_path) -> None:
     clock = FakeClock()
     policy = engine(clock, state_path=tmp_path / "quota.json")
