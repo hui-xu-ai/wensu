@@ -7,7 +7,7 @@ import pytest
 from scholar_search.adapters.fixture import FixtureAdapter
 from scholar_search.core.audit import AuditLog
 from scholar_search.core.cache import Cache
-from scholar_search.core.contracts import SearchQuery
+from scholar_search.core.contracts import RiskSignal, SearchQuery
 from scholar_search.core.errors import PolicyError
 from scholar_search.core.planner import Planner
 from scholar_search.core.policy import PolicyEngine
@@ -68,6 +68,30 @@ def test_search_returns_records_and_caches(tmp_path: Path) -> None:
     again = service.search(SearchQuery(text="x", channel="fake"))
     assert again.records[0].title == "Paper A"
     assert len(scripts) == 1
+
+
+def test_a_cached_page_is_served_even_during_a_cooldown(tmp_path: Path) -> None:
+    """A cooldown stops traffic; it should not withhold what was already fetched.
+
+    Readiness used to be checked before the cache lookup, so a 24-hour stop made
+    the user unable to read records the tool had already retrieved.
+    """
+
+    channel = FakeChannel(manifest=make_manifest(), records=[make_record("Paper A")])
+    scripts: list[list[dict[str, object]]] = [
+        [
+            {"verb": "goto", "data": {}},
+            {"verb": "read_html", "data": {"html": "<html>results</html>"}},
+        ],
+    ]
+    service = build_service(tmp_path, channel, scripts)
+    service.search(SearchQuery(text="x", channel="fake"))
+
+    # Trip the cooldown the service reads, then ask for the same page again.
+    RiskGuard(state_path=tmp_path / "cooldown.json").trip(RiskSignal.VERIFY_REDIRECT)
+    again = service.search(SearchQuery(text="x", channel="fake"))
+    assert again.records[0].title == "Paper A"
+    assert scripts == [], "no action may run while a cooldown is in force"
 
 
 def test_detail_rejects_foreign_host(tmp_path: Path) -> None:

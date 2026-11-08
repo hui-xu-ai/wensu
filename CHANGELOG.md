@@ -4,6 +4,16 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.7] - 2026-11-09
+
+### Fixed — audit m1
+
+- **A cooldown withheld data the tool already had.** Readiness was checked *before* the cache lookup,
+  so a 24-hour stop also made `search` and `detail` unable to return records that were already
+  cached. A cooldown exists to stop traffic to the site; a cache hit sends nothing. The lookup now
+  comes first, and the hot path is unchanged when nothing is cached. Covered by a test that trips the
+  cooldown and asserts the cached page is still served with no action run.
+
 ## [0.12.6] - 2026-11-09
 
 ### Fixed — native host robustness (audit m19)

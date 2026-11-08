@@ -60,7 +60,6 @@ class ScholarService:
 
     def search(self, query: SearchQuery) -> SearchPage:
         query.validate()
-        self._ensure_ready()
         spec, channel = self._resolve(query.channel)
         # Refuse a filter the channel cannot honour rather than silently returning
         # unfiltered records: a caller that asked for high-impact venues and got
@@ -77,7 +76,12 @@ class ScholarService:
 
         cached = self._cache.get(key)
         if cached is not None:
+            # A cache hit sends nothing to the site, so a cooldown should not hide
+            # it: the cooldown exists to stop traffic, not to withhold data already
+            # retrieved. Checking readiness first made it do the latter.
             return _page_from(cached)
+
+        self._ensure_ready()
 
         plan = channel.plan_search(query)
         outcomes = self._run(plan, spec)
@@ -135,15 +139,19 @@ class ScholarService:
         return page
 
     def detail(self, url: str, *, channel: str) -> Record:
-        self._ensure_ready()
         spec, impl = self._resolve(channel)
         self._validate_detail_url(url, spec)
 
         key = _key("detail", spec, {"url": url})
         cached = self._cache.get(key)
         if cached is not None:
+            # Serving a cached record costs the site nothing, so the cooldown does
+            # not apply: it exists to stop traffic, not to withhold data that was
+            # already retrieved. Checking it first made a cooldown withhold records
+            # the user already had.
             return _record_from(cached)
 
+        self._ensure_ready()
         record = impl.parse_detail(_html(self._run(impl.plan_detail(url), spec)), url=url)
         self._cache.set(key, record.to_dict())
         return record
