@@ -37,7 +37,7 @@
   const PRIMARY = "/api/wosnx/core/runQuerySearch";
   const ID = "wensu-wos-capture";
   const MAX_CHARS = 8 * 1024 * 1024;
-  const IDLE_MS = 1_500;
+  const IDLE_MS = 2_000;
   const seen = [];
 
   try {
@@ -131,7 +131,7 @@
     let attempts = 0;
     const tick = () => {
       idleTimer = null;
-      if (gen !== generation || pending <= 0) return;
+      if (gen !== generation) return;
       attempts += 1;
       if (looksComplete() || attempts >= 6) {
         markReady();
@@ -183,7 +183,11 @@
     if (gen !== generation) return;
     if (pending === 0) return;
     pending = Math.max(0, pending - 1);
-    if (pending === 0) markReady();
+    // Reaching zero does not mean the page is done: the lazy loader sends three
+    // batches in sequence, with quiet gaps between them. Declaring ready here cut
+    // the payload in half — the reader saw "95 results" on screen and 20 records
+    // in the node. The idle timer decides instead, after a quiet window.
+    armIdle(gen);
   }
 
   function tracked(url) {

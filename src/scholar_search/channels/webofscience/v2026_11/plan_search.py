@@ -45,13 +45,14 @@ WAIT_REPLY_MARGIN_MS = 1_000
 
 NAV_TIMEOUT_MS = 10_000
 WAIT_TIMEOUT_MS = 8_000
-INPUT_TIMEOUT_MS = 8_000
+INPUT_TIMEOUT_MS = 4_000
 CLICK_TIMEOUT_MS = 2_200
 READ_TIMEOUT_MS = 8_000
 
-# The stream answered in 1.6 s on the live site; five seconds leaves a wide
-# margin and still keeps the worst-case plan (3 pages) under the kernel's 120 s.
-CAPTURE_WAIT_MS = 5_000
+# Must exceed capture.js's standby budget (6 windows x 1.5 s = 9 s), otherwise a
+# payload whose tail takes a while to parse is declared complete *after* this wait
+# has already given up. Observed: 50 records captured, ready marker late, timeout.
+CAPTURE_WAIT_MS = 10_000
 
 
 def settle(ms: int) -> Action:

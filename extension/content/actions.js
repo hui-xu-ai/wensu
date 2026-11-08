@@ -222,9 +222,10 @@ async function humanClick(element) {
   clickElement(element);
 }
 
-// Type like a person: focus first, then one character at a time, each with its
-// own keydown/input/keyup and an uneven pause. Setting `.value` in one shot is the
-// single most obvious automation tell in a form.
+// Type the way most people put a search expression into a form: paste it whole.
+// Per-character typing is more "human" in the abstract, but a 40-character query
+// spent two seconds on it for no safety gain — nobody types a boolean expression
+// by hand. Focus first, so the field looks clicked, then one assignment.
 async function humanType(element, text, clear) {
   try {
     if (typeof element.focus === "function") element.focus();
@@ -232,17 +233,9 @@ async function humanType(element, text, clear) {
     // A non-focusable field is fine; the value assignment below still applies.
   }
   await sleep(randomBetween(60, 150));
-  if (clear !== false) {
-    element.value = "";
-    element.dispatchEvent(new Event("input", { bubbles: true }));
-  }
-  for (const char of text) {
-    element.value += char;
-    element.dispatchEvent(new KeyboardEvent("keydown", { key: char, bubbles: true }));
-    element.dispatchEvent(new Event("input", { bubbles: true }));
-    element.dispatchEvent(new KeyboardEvent("keyup", { key: char, bubbles: true }));
-    await sleep(randomBetween(20, 70));
-  }
+  element.value = clear === false ? element.value + text : text;
+  element.dispatchEvent(new Event("input", { bubbles: true }));
+  await sleep(randomBetween(20, 60));
   element.dispatchEvent(new Event("change", { bubbles: true }));
 }
 

@@ -4,6 +4,23 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.10.5] - 2026-11-08
+
+### Changed
+
+- Typing is a single assignment again (paste, not type). Per-character typing spent two seconds on a
+  40-character query for no safety gain — nobody types a boolean expression by hand. Focus and the
+  20–60 ms gap before `change` are kept. The `type` timeout returns to 4 s.
+
+### Fixed
+
+- The capture declared itself ready the moment `pending` reached zero, but the lazy loader sends three
+  batches in sequence with quiet gaps between them. A 95-result query was read as a single truncated
+  line, and the reader saw an empty page while the browser showed "95 results". Readiness is now
+  decided by the idle timer after a quiet window (2 s), never by the last `finish()`.
+- `CAPTURE_WAIT_MS` was shorter than capture.js's own standby budget (6 × 1.5 s), so a payload whose
+  tail took a while to parse was declared complete only after the plan had already given up on it.
+
 ## [0.10.2] - 2026-11-08
 
 ### Changed — interaction realism
