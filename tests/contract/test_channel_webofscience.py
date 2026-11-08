@@ -142,15 +142,27 @@ def test_page_turns_and_sort_each_add_clicks() -> None:
 
 def test_parse_reads_the_fixture() -> None:
     page = parse_records.parse(CAPTURE)
-    assert len(page.records) == 3
+    assert len(page.records) == 4
     assert page.total == 50
     schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
     for record in page.records:
         jsonschema.validate(record.to_dict(), schema)
 
 
+def test_primary_batch_is_ordered_first() -> None:
+    """The fixture puts the runQuerySearch block last on purpose.
+
+    The site sends the primary batch first, but a lazy batch can beat it. With no
+    primary block in the fixture the ordering was a no-op that no test could catch;
+    putting it last makes a broken ordering show up as a wrong first record.
+    """
+
+    page = parse_records.parse(CAPTURE)
+    assert page.records[0].title == "Synthetic primary-batch record"
+
+
 def test_parse_keeps_records_with_missing_fields() -> None:
-    first = parse_records.parse(CAPTURE).records[0]
+    first = parse_records.parse(CAPTURE).records[1]
     assert first.keywords == [], "record 1 carried no keywords_plus block"
     assert first.title.startswith("Synthetic")
     assert first.channel == "webofscience"
@@ -158,7 +170,7 @@ def test_parse_keeps_records_with_missing_fields() -> None:
 
 
 def test_parse_flattens_abstract_markup() -> None:
-    record = parse_records.parse(CAPTURE).records[1]
+    record = parse_records.parse(CAPTURE).records[2]
     assert record.abstract is not None
     assert "<p>" not in record.abstract
 
@@ -177,7 +189,8 @@ def test_page_is_none_when_the_stream_reports_none() -> None:
 def test_impact_factor_is_returned_with_each_record() -> None:
     page = parse_records.parse(CAPTURE)
     factors = [record.impact_factor for record in page.records]
-    assert factors == [5.0, 2.0, None], "the third record has no jcrKey"
+    # The primary record clones record 1 (5.0); record 4 carries no jcrKey.
+    assert factors == [5.0, 5.0, 2.0, None]
 
 
 def test_impact_factor_filter_uses_the_jcr_block() -> None:
@@ -186,8 +199,11 @@ def test_impact_factor_filter_uses_the_jcr_block() -> None:
         query=SearchQuery(text="x", channel="webofscience", min_impact_factor=3.0),
     )
     # Record 1 is in the 5.0 journal, record 2 in the 2.0 one, record 3 has no
-    # jcrKey at all — only the first survives.
-    assert [record.title for record in page.records] == ["Synthetic example record 1"]
+    # jcrKey at all, and the primary record clones record 1 — so it survives too.
+    assert [record.title for record in page.records] == [
+        "Synthetic primary-batch record",
+        "Synthetic example record 1",
+    ]
 
 
 def test_impact_factor_filter_can_empty_the_page_without_error() -> None:

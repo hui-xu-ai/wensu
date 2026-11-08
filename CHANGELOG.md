@@ -4,6 +4,19 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.1] - 2026-11-08
+
+### Fixed — fourth batch from the independent audit (tests that could not fail)
+
+- **The WoS fixture had no `runQuerySearch` block**, so "the primary batch is ordered first" was a
+  no-op: inverting the rule left every test green. The fixture now ends with a primary block carrying
+  a distinctive title, and a test asserts it comes out first. **Verified by mutation**: flipping the
+  ordering rule makes that test fail.
+- **The two validation layers were never compared in a test.** A plan the kernel accepts and the
+  host rejects could only be discovered by reloading the extension and spending quota. A contract
+  test now builds every channel's plan and runs it through both layers, the same comparison
+  `scripts/check-plan.py` performs before a deploy.
+
 ## [0.12.0] - 2026-11-08
 
 ### Fixed — third batch from the independent audit (CNKI parsers)

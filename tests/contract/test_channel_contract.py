@@ -10,8 +10,17 @@ from pathlib import Path
 
 import pytest
 
+from scholar_search.adapters.bridge.policy import validate_request
 from scholar_search.core.config import HARD
-from scholar_search.core.contracts import FORBIDDEN_VERB_MARKERS, VERBS, ChannelManifest
+from scholar_search.core.contracts import (
+    FORBIDDEN_VERB_MARKERS,
+    VERBS,
+    ChannelManifest,
+    SearchQuery,
+)
+from scholar_search.core.errors import ScholarSearchError
+from scholar_search.core.policy import PolicyEngine
+from scholar_search.core.registry import ChannelRegistry
 
 CHANNELS = Path(__file__).resolve().parents[2] / "src" / "scholar_search" / "channels"
 
@@ -64,3 +73,37 @@ def test_hard_limits_match_adr() -> None:
     assert HARD.daily_request_limit == 300
     assert HARD.cooldown_hours == 24
     assert HARD.concurrency == 1
+
+
+def test_every_channel_plan_passes_both_validation_layers() -> None:
+    """The kernel and the native host keep separate copies of the same rules.
+
+    Change one and not the other and you get a plan the kernel accepts and the
+    host rejects — a failure that only surfaces after the extension has been
+    reloaded and quota spent. This is the comparison, run offline; the same check
+    ships as ``scripts/check-plan.py`` for pre-deploy use.
+    """
+
+    registry = ChannelRegistry()
+    engine = PolicyEngine()
+    checked = 0
+    for spec in registry.discover():
+        for extra in ({}, {"page": 2}, {"sort": "date"}):
+            query = SearchQuery(text="plan check", channel=spec.name, **extra)
+            try:
+                plan = registry.load(spec.name).plan_search(query)
+            except ScholarSearchError:
+                # A channel may refuse a combination by design (budget, unsupported
+                # paging). That is an answer, not a defect.
+                continue
+            engine.validate_plan(plan, spec.manifest)
+            for action in plan.actions:
+                code = validate_request(
+                    {"action": action.verb, "params": dict(action.params)},
+                    spec.manifest.domains,
+                )
+                assert code is None, (
+                    f"{spec.name} {extra}: host rejected {action.verb}: {code}"
+                )
+            checked += 1
+    assert checked >= 2, "expected at least one plan per channel"
