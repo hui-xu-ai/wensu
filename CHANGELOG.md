@@ -4,6 +4,17 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.6.3] - 2026-11-08
+
+### Fixed
+
+- The plan scrolled once, which stopped at 40 of 50 records. Measured live: 20 on load, 40 after
+  the first scroll, 50 after the second. The plan now waits for the first batch, then scrolls
+  twice, and each round waits for the captured payload instead of for "ready to disappear" — on
+  the last round the list is already complete and no new request starts, so that phase would time
+  out. It also waits for the payload *before* the first scroll: the result list renders before its
+  data arrives, and scrolling an empty list triggers no lazy load.
+
 ## [0.6.2] - 2026-11-08
 
 ### Fixed

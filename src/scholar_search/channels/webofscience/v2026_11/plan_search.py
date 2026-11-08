@@ -32,7 +32,6 @@ from .selectors import (
     CAPTURE_READY,
     NEXT_PAGE,
     QUERY_INPUT,
-    RESULT_READY,
     SORT,
     SORT_OPEN,
     SUBMIT,
@@ -88,6 +87,28 @@ def capture_wait() -> tuple[Action, ...]:
             },
             timeout_ms=TURN_MARKER_WAIT_MS + WAIT_REPLY_MARGIN_MS,
         ),
+        Action(
+            "wait_for",
+            {"selector": CAPTURE_READY, "timeout_ms": CAPTURE_WAIT_MS},
+            timeout_ms=CAPTURE_WAIT_MS + WAIT_REPLY_MARGIN_MS,
+        ),
+    )
+
+
+def scroll_round() -> tuple[Action, ...]:
+    """Scroll the list to pull the next lazy batch, then wait for it.
+
+    No "wait until ready disappears" phase here, unlike :func:`capture_wait`:
+    on the last round the list is already complete and no new request starts, so
+    that phase would simply time out and kill the plan.
+
+    Measured on the live page: 20 records on load, 40 after the first scroll,
+    50 after the second — a "50 per page" setting fills itself in batches.
+    """
+
+    return (
+        Action("scroll", {"to": "bottom"}, timeout_ms=CLICK_TIMEOUT_MS),
+        settle(jitter(1_200, 1_800)),
         Action(
             "wait_for",
             {"selector": CAPTURE_READY, "timeout_ms": CAPTURE_WAIT_MS},
@@ -154,18 +175,14 @@ def build(query: SearchQuery, *, today: dt.date | None = None) -> Plan:
         ),
         settle(jitter(400, 900)),
         Action("click", {"selector": SUBMIT}, timeout_ms=CLICK_TIMEOUT_MS),
-        # The first screen holds 20 records; the rest of a "50 per page" setting
-        # arrives only when the list is scrolled. `scroll` is a read verb and
-        # costs no quota — the lazy request it triggers is real, though, and the
-        # capture node accumulates it on top of the first batch.
-        Action(
-            "wait_for",
-            {"selector": RESULT_READY, "timeout_ms": WAIT_TIMEOUT_MS},
-            timeout_ms=WAIT_TIMEOUT_MS + WAIT_REPLY_MARGIN_MS,
-        ),
-        Action("scroll", {"to": "bottom"}, timeout_ms=CLICK_TIMEOUT_MS),
-        settle(jitter(1_200, 1_800)),
+        # Wait for the first batch before scrolling: the list renders before its
+        # data arrives, and scrolling an empty list triggers no lazy load.
         *capture_wait(),
+        # Two rounds take a "50 per page" setting from 20 to 50 records. `scroll`
+        # is a read verb, so both rounds cost no quota — the lazy requests they
+        # trigger are real, though, and the capture node accumulates them.
+        *scroll_round(),
+        *scroll_round(),
         *sort_actions(query.sort),
         *pagination(query.page),
         Action(
