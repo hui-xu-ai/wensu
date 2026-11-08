@@ -109,17 +109,22 @@ async function onHostMessage(message, channel) {
       const tab = await activeTab();
       if (!tab || !tab.id) throw new Error("no_active_tab");
       if (params.reload === true) {
-        // Navigate to the current URL. chrome.tabs.reload() discards the pending
-        // reply and the host then pairs ids wrongly. The kernel cannot check a URL
-        // it was not given, so the live one is checked here, against the same
-        // allowlist.
+        // A real reload, not a navigation to the same URL: a person pressing F5
+        // gives the page `performance.navigation.type === "reload"`, and nagivating
+        // would give "navigate" instead — a difference a page can read.
+        // The kernel cannot check a URL it was not given, so the live one is
+        // checked here, against the same allowlist.
         const current = await chrome.tabs.get(tab.id);
         if (!current.url) throw new Error("no_active_tab");
         const live = new URL(current.url);
         if (live.protocol !== "https:" || !allowedHost(live.hostname, domains)) {
           throw new Error("policy.domain");
         }
-        await chrome.tabs.update(tab.id, { url: current.url });
+        // bypassCache matters: a plain reload() restores the page from cache and
+        // issues no network request at all, so the capture never sees a stream.
+        // With it, the refresh re-fetches everything — and still reports
+        // navigation type "reload", which is what a person pressing F5 produces.
+        await chrome.tabs.reload(tab.id, { bypassCache: true });
       } else {
         const url = new URL(params.url);
         if (url.protocol !== "https:" || !allowedHost(url.hostname, domains)) {

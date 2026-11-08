@@ -137,12 +137,56 @@ function randomBetween(min, max) {
   return min + Math.random() * (max - min);
 }
 
-function mouseEvent(type) {
-  const options = { bubbles: true, cancelable: true, view: window };
+// A person does not hit the exact centre of a button: aim at a random point inside
+// it, with a margin so the coordinate always lands on the element. Aiming at the
+// centre every time is a fingerprint in the event coordinates themselves.
+function aimPoint(element) {
+  try {
+    const rect = element.getBoundingClientRect();
+    const padX = Math.min(rect.width * 0.2, 10);
+    const padY = Math.min(rect.height * 0.2, 6);
+    const spanX = Math.max(rect.width - padX * 2, 1);
+    const spanY = Math.max(rect.height - padY * 2, 1);
+    return {
+      x: Math.round(rect.left + padX + Math.random() * spanX),
+      y: Math.round(rect.top + padY + Math.random() * spanY),
+    };
+  } catch (error) {
+    return { x: 0, y: 0 };
+  }
+}
+
+function mouseEvent(type, point) {
+  const options = {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    clientX: point ? point.x : 0,
+    clientY: point ? point.y : 0,
+  };
   return typeof MouseEvent === "function" ? new MouseEvent(type, options) : new Event(type, options);
 }
 
-// Scroll into view and press like a person: short pauses between down/up/click.
+function pointerEvent(type, point) {
+  const options = {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    clientX: point ? point.x : 0,
+    clientY: point ? point.y : 0,
+    pointerId: 1,
+    pointerType: "mouse",
+    isPrimary: true,
+  };
+  return typeof PointerEvent === "function"
+    ? new PointerEvent(type, options)
+    : mouseEvent(type, point);
+}
+
+// Press like a person: move onto the target, hover, press, release, then the
+// click lands. Synthetic events are never `isTrusted` — the browser reserves that
+// for real input — but the sequence, the coordinates and the pauses match what a
+// handler would see from a real pointer.
 async function humanClick(element) {
   try {
     if (typeof element.scrollIntoView === "function") {
@@ -151,14 +195,55 @@ async function humanClick(element) {
   } catch (error) {
     // Not fatal; the element may not be scrollable.
   }
+  const point = aimPoint(element);
   await sleep(randomBetween(80, 200));
+
   if (typeof element.dispatchEvent === "function") {
-    element.dispatchEvent(mouseEvent("mousedown"));
-    await sleep(randomBetween(40, 90));
-    element.dispatchEvent(mouseEvent("mouseup"));
-    await sleep(randomBetween(40, 90));
+    for (const type of [
+      "pointerover",
+      "pointerenter",
+      "mouseover",
+      "mouseenter",
+      "pointermove",
+      "mousemove",
+    ]) {
+      element.dispatchEvent(
+        type.indexOf("pointer") === 0 ? pointerEvent(type, point) : mouseEvent(type, point)
+      );
+    }
+    await sleep(randomBetween(60, 160));
+    element.dispatchEvent(pointerEvent("pointerdown", point));
+    element.dispatchEvent(mouseEvent("mousedown", point));
+    await sleep(randomBetween(50, 120));
+    element.dispatchEvent(pointerEvent("pointerup", point));
+    element.dispatchEvent(mouseEvent("mouseup", point));
+    await sleep(randomBetween(40, 100));
   }
   clickElement(element);
+}
+
+// Type like a person: focus first, then one character at a time, each with its
+// own keydown/input/keyup and an uneven pause. Setting `.value` in one shot is the
+// single most obvious automation tell in a form.
+async function humanType(element, text, clear) {
+  try {
+    if (typeof element.focus === "function") element.focus();
+  } catch (error) {
+    // A non-focusable field is fine; the value assignment below still applies.
+  }
+  await sleep(randomBetween(60, 150));
+  if (clear !== false) {
+    element.value = "";
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  for (const char of text) {
+    element.value += char;
+    element.dispatchEvent(new KeyboardEvent("keydown", { key: char, bubbles: true }));
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    element.dispatchEvent(new KeyboardEvent("keyup", { key: char, bubbles: true }));
+    await sleep(randomBetween(20, 70));
+  }
+  element.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
 function clickElement(element) {
@@ -194,10 +279,7 @@ async function run(action, params) {
         result = { ok: false, error: "not_found" };
         break;
       }
-      if (params.clear !== false) element.value = "";
-      element.value = params.text;
-      element.dispatchEvent(new Event("input", { bubbles: true }));
-      element.dispatchEvent(new Event("change", { bubbles: true }));
+      await humanType(element, params.text, params.clear);
       result = { ok: true, data: {} };
       break;
     }

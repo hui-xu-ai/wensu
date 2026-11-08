@@ -4,6 +4,26 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.10.2] - 2026-11-08
+
+### Changed — interaction realism
+
+- **Clicks aim at a random point inside the target**, not its centre, and emit
+  `pointerover`/`pointerenter`/`mouseover`/`mouseenter`/`pointermove`/`mousemove` before
+  `pointerdown`+`mousedown`, `pointerup`+`mouseup`, with uneven pauses. Every event carries real
+  coordinates — they were `0,0` before, which no real pointer produces.
+- **Typing is per-character**: focus, then for each character a `keydown`/`input`/`keyup` triple with
+  a 20–70 ms pause. Setting `.value` in one shot was the single most obvious automation tell in a
+  form. `type` therefore gets 8 s instead of 3.5 s.
+- The reload is a real one (`navigation.type === "reload"`, as with F5) and passes `bypassCache`,
+  because a plain `reload()` restores from cache and **issues no network request at all** — the
+  capture stayed empty without it.
+
+### Note
+
+- Synthetic events are never `isTrusted`; the browser reserves that for real input. Faking it needs
+  the `debugger` permission, whose always-on banner is more conspicuous than the synthetic events.
+
 ## [0.9.9] - 2026-11-08
 
 ### Changed
