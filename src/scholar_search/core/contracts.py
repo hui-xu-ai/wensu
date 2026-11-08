@@ -107,6 +107,10 @@ class SearchQuery:
     sort_by: LocalSort = "none"
     min_citations: int | None = None
     sources_only: tuple[str, ...] = ()
+    # Channel-specific and best-effort: only a channel that ships journal metrics
+    # can honour it. A record whose journal has no metric is dropped, because the
+    # caller is asking for high-impact venues and "unknown" is not that.
+    min_impact_factor: float | None = None
 
     def validate(self) -> None:
         if not self.text.strip():
@@ -121,6 +125,8 @@ class SearchQuery:
             raise ValueError("year_to must be >= year_from")
         if self.min_citations is not None and self.min_citations < 0:
             raise ValueError("min_citations must be >= 0")
+        if self.min_impact_factor is not None and self.min_impact_factor < 0:
+            raise ValueError("min_impact_factor must be >= 0")
 
 
 @dataclass(slots=True)

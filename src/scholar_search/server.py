@@ -44,6 +44,7 @@ def build_server(service: ScholarService) -> FastMCP:
         sort_by: Literal["none", "citations", "year"] = "none",
         min_citations: int | None = None,
         sources_only: list[str] | None = None,
+        min_impact_factor: float | None = None,
     ) -> dict[str, Any]:
         """Search a channel for bibliographic records. Read-only.
 
@@ -51,6 +52,9 @@ def build_server(service: ScholarService) -> FastMCP:
         include_abstract is true, and sort_by / min_citations / sources_only
         filter locally without any browser action. Call detail(url) for the full
         record — after a search it is served from the cache, not the site.
+
+        min_impact_factor is honoured by channels that ship journal metrics
+        (currently webofscience); records whose journal has no metric are dropped.
         """
         try:
             return _page_payload(
@@ -68,6 +72,7 @@ def build_server(service: ScholarService) -> FastMCP:
                         sort_by=sort_by,
                         min_citations=min_citations,
                         sources_only=tuple(sources_only or ()),
+                        min_impact_factor=min_impact_factor,
                     )
                 )
             )

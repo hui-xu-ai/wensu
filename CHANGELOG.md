@@ -4,6 +4,25 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] - 2026-11-08
+
+### Added
+
+- `search` accepts `min_impact_factor`, honoured by channels that ship journal metrics. The WoS
+  channel joins each record to the `jcr` block by `jcrKey` and drops records whose journal has no
+  metric — for "high-impact venues only", unknown is not a pass.
+- A filter that matches nothing returns an empty page instead of a parse error: the capture was
+  fine, the journals just did not qualify.
+
+### Changed
+
+- `SearchQuery` gains `min_impact_factor` (contract change, ADR 0010).
+
+### Not in this release
+
+- The impact factor is used for filtering only; it is not in `record.json`, which stays
+  `additionalProperties: false`. Surfacing the value would be a separate contract change.
+
 ## [0.6.3] - 2026-11-08
 
 ### Fixed

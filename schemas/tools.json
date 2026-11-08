@@ -23,7 +23,8 @@
           "include_abstract": { "type": "boolean", "default": false },
           "sort_by": { "enum": ["none", "citations", "year"], "default": "none" },
           "min_citations": { "type": ["integer", "null"], "minimum": 0 },
-          "sources_only": { "type": "array", "items": { "type": "string" } }
+          "sources_only": { "type": "array", "items": { "type": "string" } },
+          "min_impact_factor": { "type": ["number", "null"], "minimum": 0 }
         }
       }
     },

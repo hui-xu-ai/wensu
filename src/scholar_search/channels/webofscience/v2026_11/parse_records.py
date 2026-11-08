@@ -205,6 +205,36 @@ def _order(key: str) -> int:
     return int(key) if key.isdigit() else 0
 
 
+def _impact_factors(rows: list[dict[str, Any]]) -> dict[str, float]:
+    """Map a record's ``jcrKey`` to its journal's impact factor.
+
+    The metrics ride in their own ``jcr`` block, and it arrives *after* the
+    records it describes — hence a separate pass rather than inline lookup.
+    """
+
+    factors: dict[str, float] = {}
+    for row in rows:
+        if row.get("key") != "jcr":
+            continue
+        payload = row.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        for key, entry in payload.items():
+            if not isinstance(entry, dict):
+                continue
+            value = entry.get("ImpactFactor")
+            if isinstance(value, bool):
+                continue
+            if isinstance(value, (int, float)):
+                factors[str(key)] = float(value)
+            elif isinstance(value, str):
+                try:
+                    factors[str(key)] = float(value)
+                except ValueError:
+                    continue
+    return factors
+
+
 def _record(payload: dict[str, Any]) -> Record | None:
     titles = _titles(payload)
     title = _title_of(titles.get("item"))
@@ -238,10 +268,7 @@ def parse(text: str, *, query: SearchQuery | None = None) -> SearchPage:
     if not isinstance(text, str) or not text.strip():
         raise ParseError("empty capture: the result stream was never written")
 
-    records: list[Record] = []
-    total: int | None = None
-    seen = 0
-
+    rows: list[dict[str, Any]] = []
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped:
@@ -252,7 +279,16 @@ def parse(text: str, *, query: SearchQuery | None = None) -> SearchPage:
             raise ParseError(f"capture is not newline-delimited JSON: {exc}") from exc
         if not isinstance(row, dict):
             raise ParseError("capture line is not a JSON object")
+        rows.append(row)
 
+    factors = _impact_factors(rows)
+    wanted = query.min_impact_factor if query is not None else None
+
+    records: list[Record] = []
+    total: int | None = None
+    seen = 0
+
+    for row in rows:
         key = row.get("key")
         payload = row.get("payload")
         if not isinstance(payload, dict):
@@ -269,14 +305,21 @@ def parse(text: str, *, query: SearchQuery | None = None) -> SearchPage:
                     continue
                 seen += 1
                 record = _record(raw)
-                if record is not None:
-                    records.append(record)
+                if record is None:
+                    continue
+                if wanted is not None:
+                    factor = factors.get(str(raw.get("jcrKey") or ""))
+                    if factor is None or factor < wanted:
+                        continue
+                records.append(record)
 
     if seen == 0:
         raise ParseError("capture holds no records; the stream was not intercepted")
-    if not records:
+    if not records and wanted is None:
         raise ParseError("capture holds records but none carried a usable title")
 
+    # An impact-factor filter that matches nothing is a legitimate empty page, not
+    # a parse failure: the capture was fine, the journals just did not qualify.
     return SearchPage(
         records=tuple(records),
         total=total,

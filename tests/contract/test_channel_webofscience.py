@@ -133,6 +133,24 @@ def test_parse_flattens_abstract_markup() -> None:
     assert "<p>" not in record.abstract
 
 
+def test_impact_factor_filter_uses_the_jcr_block() -> None:
+    page = parse_records.parse(
+        CAPTURE,
+        query=SearchQuery(text="x", channel="webofscience", min_impact_factor=3.0),
+    )
+    # Record 1 is in the 5.0 journal, record 2 in the 2.0 one, record 3 has no
+    # jcrKey at all — only the first survives.
+    assert [record.title for record in page.records] == ["Synthetic example record 1"]
+
+
+def test_impact_factor_filter_can_empty_the_page_without_error() -> None:
+    page = parse_records.parse(
+        CAPTURE,
+        query=SearchQuery(text="x", channel="webofscience", min_impact_factor=99.0),
+    )
+    assert page.records == ()
+
+
 def test_parse_rejects_non_json() -> None:
     with pytest.raises(ParseError):
         parse_records.parse("not json at all")
