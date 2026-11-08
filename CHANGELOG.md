@@ -4,6 +4,35 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.9] - 2026-11-09
+
+### Fixed — the last of the audit's minors
+
+- **The cache ran without WAL.** Two `wensu` processes at once could trip
+  "database is locked"; the journal mode is now WAL, so a reader and a writer coexist.
+- **Every action re-scanned the channels tree twice.** `discover()` walks `channels/*/manifest.json`
+  and each version directory, and it was called on every `_resolve`. Results are cached per registry
+  instance now.
+- **`site_version` in a manifest was silently ignored** — the directory name overwrote it. That is
+  the right precedence (the directory is what gets imported), but the comment said otherwise. Now it
+  says what actually happens.
+- **A grid with no parsable rows returned an empty page.** If CNKI changes its markup, the parser
+  reported "your query matched nothing" instead of "I could not read this page". It raises
+  `ParseError` unless the page explicitly reports zero results.
+- **`_pick` matched only substrings**, so `卷` could hit `卷期` and take whichever entry came first —
+  volume and issue could swap. An exact label wins before the substring fallback.
+- **`install.ps1` wrote a BOM into the native-messaging manifest.** Chrome parses that file as JSON;
+  Windows PowerShell 5.1's `-Encoding utf8` prepends a BOM, and the host then registers but never
+  launches. The manifest is written with `UTF8Encoding($false)` now.
+
+### Not changed
+
+- The audit's `m13` (year filtering runs locally, so `total` describes the site rather than the
+  page) was already documented at the call site; no behaviour change was needed.
+- `m10` (`detail()` does not consult capabilities) — the capability list marks *optional* features.
+  `search` and `detail` are mandatory for every channel, so checking them would be a tautology. The
+  list's docstring now says so.
+
 ## [0.12.8] - 2026-11-09
 
 ### Fixed — the four extension-side minors from the audit

@@ -59,6 +59,18 @@ def _rows(soup: BeautifulSoup) -> dict[str, str]:
 
 
 def _pick(rows: dict[str, str], *needles: str) -> str | None:
+    """Exact label first, then substring.
+
+    Substring-only matching let "卷" match "卷期" and returned whichever entry
+    happened to come first, so volume and issue could be swapped. A label that
+    matches exactly now wins.
+    """
+
+    if len(needles) == 1:
+        target = needles[0]
+        for key, value in rows.items():
+            if key.strip() == target:
+                return value
     for key, value in rows.items():
         if all(needle in key for needle in needles):
             return value

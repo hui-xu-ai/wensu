@@ -66,12 +66,18 @@ class ChannelRegistry:
 
     def __init__(self, root: Path | None = None) -> None:
         self._root = root or Path(__file__).resolve().parent.parent / "channels"
+        # Filled on first discover(). Every action used to re-scan the channels tree
+        # twice, which is pure filesystem work on a hot path.
+        self._known: list[ChannelSpec] | None = None
 
     @property
     def root(self) -> Path:
         return self._root
 
     def discover(self) -> list[ChannelSpec]:
+        if self._known is not None:
+            return list(self._known)
+
         specs: list[ChannelSpec] = []
         for manifest_path in sorted(self._root.glob("*/manifest.json")):
             channel_dir = manifest_path.parent
@@ -89,8 +95,9 @@ class ChannelRegistry:
 
             for version in versions:
                 site_version = version[1:].replace("_", ".")
-                # Old site versions stay loadable: each directory declares its
-                # own version instead of having to match the channel manifest.
+                # The directory name is the single source of truth for the site
+                # version: `site_version` inside manifest.json is overwritten here on
+                # purpose, so a stale field cannot disagree with the directory.
                 specs.append(
                     ChannelSpec(
                         name=manifest.channel,
@@ -99,6 +106,7 @@ class ChannelRegistry:
                         package=(f"{_PACKAGE_ROOT}.channels.{channel_dir.name}.{version}"),
                     )
                 )
+        self._known = list(specs)
         return specs
 
     def select(self, name: str, site_version: str | None = None) -> ChannelSpec:

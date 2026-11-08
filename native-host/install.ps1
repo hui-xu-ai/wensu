@@ -64,7 +64,7 @@ $runtimeHome = if ($env:SCHOLAR_SEARCH_HOME) {
 } else {
   Join-Path $env:LOCALAPPDATA "scholar-search"
 }
-Set-Content -Path (Join-Path $here "runtime-home.txt") -Value $runtimeHome -Encoding utf8
+Set-Content -Path (Join-Path $here "runtime-home.txt") -Value $runtimeHome -Encoding ascii
 $runtime = Join-Path $runtimeHome "host"
 New-Item -ItemType Directory -Path $runtime -Force | Out-Null
 try {
@@ -81,7 +81,10 @@ $manifest = @{
   allowed_origins = @("chrome-extension://$ExtensionId/")
 } | ConvertTo-Json -Compress
 
-Set-Content -Path $manifestPath -Value $manifest -Encoding utf8
+# Written without a BOM on purpose: Chrome parses the native-messaging manifest as
+# JSON, and `-Encoding utf8` on Windows PowerShell 5.1 prepends one, which makes the
+# host register but never launch. UTF8Encoding($false) is BOM-free on both 5.1 and 7.
+[System.IO.File]::WriteAllText($manifestPath, $manifest, (New-Object System.Text.UTF8Encoding($false)))
 
 foreach ($browser in @("Microsoft\Edge", "Google\Chrome")) {
   $key = "HKCU:\Software\$browser\NativeMessagingHosts\$hostName"

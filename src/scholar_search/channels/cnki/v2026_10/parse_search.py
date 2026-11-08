@@ -122,10 +122,17 @@ def parse(html: str, query: SearchQuery) -> SearchPage:
 
     total_match = _TOTAL.search(total_text)
     page_match = _PAGE.search(marker_text)
+    total_value = int(total_match.group(1).replace(",", "")) if total_match else None
+
+    if not records and total_value != 0:
+        # A grid with no parsable rows and no "0 results" marker means the page
+        # structure changed. Returning an empty page here would present a broken
+        # parse as "your query matched nothing".
+        raise ParseError("result grid is present but no records could be parsed")
 
     return SearchPage(
         records=tuple(records),
-        total=int(total_match.group(1).replace(",", "")) if total_match else None,
+        total=total_value,
         # The page marker this page shows, or None when it carries none. Filling in
         # `query.page` here would claim a turn that may never have happened.
         page=int(page_match.group(1)) if page_match else None,

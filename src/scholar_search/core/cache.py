@@ -34,6 +34,10 @@ class Cache:
     def _connect(self) -> sqlite3.Connection:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self._path)
+        # WAL lets a reader and a writer coexist. Without it, two `wensu` processes
+        # running at once can trip "database is locked", and the loser gets no cache
+        # rather than a slightly stale read.
+        connection.execute("PRAGMA journal_mode=WAL")
         connection.execute(
             "CREATE TABLE IF NOT EXISTS cache ("
             "key TEXT PRIMARY KEY, value TEXT NOT NULL, created REAL NOT NULL)"

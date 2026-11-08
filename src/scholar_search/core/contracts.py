@@ -210,6 +210,10 @@ class ChannelManifest:
         for domain in self.domains:
             if "/" in domain or ":" in domain or domain.startswith("*."):
                 raise ValueError(f"domain must be a bare host name: {domain!r}")
+        # `search` and `detail` are not listed as capabilities: every channel must
+        # implement them, so declaring them would be a tautology. Capabilities mark
+        # what is *optional* — journal metadata, export, a journal lookup — and the
+        # kernel is expected to refuse a request for one that is absent.
         for cap in self.capabilities:
             if cap not in {"search", "detail", "journal", "export", "journal_metrics"}:
                 raise ValueError(f"unknown capability: {cap!r}")
