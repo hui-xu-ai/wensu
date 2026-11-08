@@ -209,3 +209,4 @@ server ──TCP 127.0.0.1:<port>──▶ native-host ──stdio──▶ exte
 | [0004](adr/0004-risk-stop.md) | 遇风控即停、冷却 24h |
 | [0005](adr/0005-quota-300.md) | 每日 300 次与频率下限 |
 | [0006](adr/0006-no-third-party-ingest.md) | 不做第三方题录入库 |
+| [0012](adr/0012-bridge-threat-model.md) | 桥的威胁模型与宿主任信边界 |
