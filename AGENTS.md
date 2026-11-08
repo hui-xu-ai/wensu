@@ -33,5 +33,11 @@
 ## 发布
 
 - `main` 分支保护，tag 触发发布。
+- **四个发行物共用一个版本号**（ADR 0013）：Python 包、浏览器扩展、native host、DSH bundle。
+  版本号写五处——`pyproject.toml`、`src/scholar_search/__init__.py`、`extension/manifest.json`、
+  `packages/dsh-wensu/package.json`、`NOTICE`——由 `scripts/check-versions.py` 校验，CI 会拦。
+- **发版前必须跑 `python scripts/release-check.py` 并全绿**。它覆盖版本一致、CHANGELOG 条目、
+  测试、lint、类型、两层计划校验、wheel 是否装得下两个渠道。
 - 版本号、CHANGELOG、NOTICE 三者必须同步。
+- 完整流程见 `docs/publishing.md`；版本与契约的关系见 `docs/compatibility.md`。
 
