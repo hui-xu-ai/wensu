@@ -32,6 +32,7 @@ from .selectors import (
     CAPTURE_READY,
     NEXT_PAGE,
     QUERY_INPUT,
+    RESULT_READY,
     SORT,
     SORT_OPEN,
     SUBMIT,
@@ -127,6 +128,12 @@ def build(query: SearchQuery, *, today: dt.date | None = None) -> Plan:
             "source-type filters are not implemented for the webofscience channel yet; "
             "express them in the search expression instead (e.g. SO=(...) )"
         )
+    if query.page > 1 and query.sort != "relevance":
+        raise ChannelError(
+            "page turns and an explicit sort cannot share one call: sorting costs two "
+            "clicks, each page costs two more actions, and together they exceed the "
+            "kernel's 120 s plan budget"
+        )
 
     text = expression.build(query, today=today)
 
@@ -147,6 +154,17 @@ def build(query: SearchQuery, *, today: dt.date | None = None) -> Plan:
         ),
         settle(jitter(400, 900)),
         Action("click", {"selector": SUBMIT}, timeout_ms=CLICK_TIMEOUT_MS),
+        # The first screen holds 20 records; the rest of a "50 per page" setting
+        # arrives only when the list is scrolled. `scroll` is a read verb and
+        # costs no quota — the lazy request it triggers is real, though, and the
+        # capture node accumulates it on top of the first batch.
+        Action(
+            "wait_for",
+            {"selector": RESULT_READY, "timeout_ms": WAIT_TIMEOUT_MS},
+            timeout_ms=WAIT_TIMEOUT_MS + WAIT_REPLY_MARGIN_MS,
+        ),
+        Action("scroll", {"to": "bottom"}, timeout_ms=CLICK_TIMEOUT_MS),
+        settle(jitter(1_200, 1_800)),
         *capture_wait(),
         *sort_actions(query.sort),
         *pagination(query.page),

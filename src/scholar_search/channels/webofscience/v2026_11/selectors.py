@@ -30,6 +30,10 @@ SORT = {
 NEXT_PAGE = "button[data-ta='next-page-button']"
 PAGE_BOX = "input#snNextPageTop"
 
+# Present only once the result list has rendered. The plan waits for it before
+# scrolling, because a scroll on an unrendered list triggers no lazy load.
+RESULT_READY = NEXT_PAGE
+
 # The capture node written by the MAIN-world content script
 # (extension/content/capture.js). It is deliberately rendered — one transparent
 # pixel anchored at the viewport origin — because ``wait_for`` matches on

@@ -1,32 +1,37 @@
 /* wensu bridge — WoS result-stream capture.
  *
  * Runs in the page's own world at document_start, so it can wrap the transport
- * before the application boots.
+ * before the application boots. It never builds a request of its own — it only
+ * mirrors what the page already asked for.
  *
- * Why copy instead of re-request: the page already asked for the 50 records; a
- * second request would be a second network action with none of the UI signals a
- * human click leaves behind. This script therefore never builds a request of
- * its own — it only mirrors what the page received.
+ * Two endpoints carry records, and they arrive in sequence, not together:
  *
- * Handshake with the channel plan (channels/webofscience/v2026_11/plan_search):
- *   - `data-ready` is dropped the moment a tracked request starts;
- *   - it is restored to "1" once the stream ends and the payload is in the node.
- * The plan waits for "ready disappears, then reappears". A single wait would
- * match the previous run's marker the instant the click returned.
+ *   runQuerySearch            first screen, 20 records, sent by the Search button
+ *   runQueryGetRecordsStream  later batches, sent lazily when the list is
+ *                             scrolled — this is how a "50 per page" setting
+ *                             actually gets its remaining 30 records
+ *
+ * So the node is cleared only when a *primary* query starts, and every later
+ * batch is appended. An earlier version cleared on any request and silently kept
+ * just the last batch of 20.
+ *
+ * Handshake with the channel plan:
+ *   - `data-ready` is dropped when the primary query starts;
+ *   - it is restored once nothing is pending and the payload is in the node.
+ * A single wait would match the previous run's marker the instant the click
+ * returned.
  *
  * Diagnostics that survive the page: `data-wensu-capture="loaded"` proves the
- * script ran in the page world, and `data-wensu-seen` lists the request paths
- * the app actually used. Query strings are stripped, so no session id leaks.
+ * script ran in the page world, `data-wensu-hits` counts tracked responses, and
+ * `data-wensu-seen` lists request paths (query strings stripped, so no session
+ * id leaks).
  */
 
 (() => {
-  // Two endpoints carry records: `runQuerySearch` answers the Search button and
-  // `runQueryGetRecordsStream` answers a re-query (sort / page turn). Both hold
-  // the same 50 records, so the prefix is matched once instead of betting on
-  // which one the UI happened to use.
-  const STREAM = "/api/wosnx/core/runQuery";
+  const QUERY_PREFIX = "/api/wosnx/core/runQuery";
+  const PRIMARY = "/api/wosnx/core/runQuerySearch";
   const ID = "wensu-wos-capture";
-  const MAX_CHARS = 4 * 1024 * 1024;
+  const MAX_CHARS = 8 * 1024 * 1024;
   const seen = [];
 
   try {
@@ -59,9 +64,7 @@
     }
     node = document.createElement("div");
     node.id = ID;
-    // Rendered on purpose: `wait_for` matches on visibility, not on presence.
-    // One transparent pixel at the viewport origin is "visible" to that check,
-    // costs no layout and cannot be seen.
+    // Rendered on purpose: `wait_for` matches on visibility, not presence.
     node.setAttribute(
       "style",
       "position:fixed;top:0;left:0;width:1px;height:1px;overflow:hidden;" +
@@ -71,13 +74,14 @@
     return node;
   }
 
-  function begin() {
-    // Only the first request of a burst clears the node. One search can arrive
-    // as several `runQuery` responses (a 50-row page showed up as batches), and
-    // wiping on each of them would leave only the last batch behind.
-    if (pending === 0) {
-      const element = ensureNode();
-      element.removeAttribute("data-ready");
+  function begin(url) {
+    const text = String(url || "");
+    const element = ensureNode();
+    // Every batch invalidates "ready", primary or not: the payload is only whole
+    // once nothing is still pending.
+    element.removeAttribute("data-ready");
+    if (text.indexOf(PRIMARY) !== -1) {
+      // A primary query means a new result set: drop whatever the last one left.
       element.textContent = "";
     }
     pending += 1;
@@ -87,12 +91,16 @@
     } catch (error) {
       /* ignore */
     }
+    ensureNode();
   }
 
   function append(chunk) {
     if (!chunk) return;
     const element = ensureNode();
     if (element.textContent.length > MAX_CHARS) return;
+    if (element.textContent && !element.textContent.endsWith("\n")) {
+      element.textContent += "\n";
+    }
     element.textContent += chunk;
   }
 
@@ -103,7 +111,7 @@
   }
 
   function tracked(url) {
-    return typeof url === "string" && url.indexOf(STREAM) !== -1;
+    return typeof url === "string" && url.indexOf(QUERY_PREFIX) !== -1;
   }
 
   async function drain(response) {
@@ -134,7 +142,7 @@
       remember(url);
       const promise = nativeFetch.apply(this, arguments);
       if (!tracked(url)) return promise;
-      begin();
+      begin(url);
       return promise.then(
         (response) => {
           try {
@@ -160,13 +168,15 @@
     const nativeOpen = NativeXHR.prototype.open;
     const nativeSend = NativeXHR.prototype.send;
     NativeXHR.prototype.open = function (method, url) {
-      remember(url);
-      this.__wensuTracked = tracked(String(url || ""));
+      const text = String(url || "");
+      remember(text);
+      this.__wensuUrl = text;
+      this.__wensuTracked = tracked(text);
       return nativeOpen.apply(this, arguments);
     };
     NativeXHR.prototype.send = function () {
       if (this.__wensuTracked) {
-        begin();
+        begin(this.__wensuUrl);
         this.addEventListener("loadend", () => {
           try {
             const type = this.responseType;

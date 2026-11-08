@@ -16,7 +16,7 @@ import pytest
 from scholar_search.channels.webofscience.v2026_11 import parse_records, plan_search
 from scholar_search.core.config import HARD
 from scholar_search.core.contracts import VERBS, SearchQuery
-from scholar_search.core.errors import ParseError
+from scholar_search.core.errors import ChannelError, ParseError
 from scholar_search.core.policy import NETWORK_VERBS
 from scholar_search.core.registry import ChannelRegistry
 
@@ -68,9 +68,15 @@ def test_plan_only_navigates_inside_declared_domains() -> None:
 
 
 def test_plan_stays_within_kernel_budget() -> None:
-    worst = plan_search.build(_query(page=3, sort="date"))
-    assert len(worst.actions) <= HARD.max_actions_per_plan
-    assert sum(a.timeout_ms for a in worst.actions) <= HARD.max_plan_seconds * 1000
+    for query in (_query(), _query(page=3), _query(sort="date")):
+        plan = plan_search.build(query)
+        assert len(plan.actions) <= HARD.max_actions_per_plan
+        assert sum(a.timeout_ms for a in plan.actions) <= HARD.max_plan_seconds * 1000
+
+
+def test_pages_and_sort_cannot_share_one_call() -> None:
+    with pytest.raises(ChannelError):
+        plan_search.build(_query(page=2, sort="date"))
 
 
 def test_plan_costs_three_network_actions() -> None:
@@ -97,10 +103,11 @@ def test_default_page_and_sort_add_no_clicks() -> None:
     assert len(clicks) == 1, "only the submit click should remain on the default path"
 
 
-def test_extra_pages_and_sort_are_expressible() -> None:
-    plan = plan_search.build(_query(page=2, sort="date"))
-    clicks = [a for a in plan.actions if a.verb == "click"]
-    assert len(clicks) >= 4
+def test_page_turns_and_sort_each_add_clicks() -> None:
+    turn = [a for a in plan_search.build(_query(page=2)).actions if a.verb == "click"]
+    ordered = [a for a in plan_search.build(_query(sort="date")).actions if a.verb == "click"]
+    assert len(turn) >= 2, "a page turn is one extra click"
+    assert len(ordered) >= 3, "sorting opens the menu and picks an option"
 
 
 def test_parse_reads_the_fixture() -> None:

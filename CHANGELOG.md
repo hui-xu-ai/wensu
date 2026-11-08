@@ -4,6 +4,23 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.6.2] - 2026-11-08
+
+### Fixed
+
+- A "50 records per page" setting only fills the first 20 on load; the rest arrive lazily when the
+  list is scrolled. Verified live: `scroll` raised the tracked request count from 1 to 2 and pulled
+  a `runQueryGetRecordsStream` batch. The plan now waits for the list, scrolls, and waits for the
+  follow-up stream before reading.
+- `capture.js` cleared the node on **every** tracked response, but the batches arrive sequentially
+  (primary query, then scroll-triggered stream), so a 50-row page kept only its last batch of 20.
+  The node is now cleared by the primary query alone and later batches are appended.
+
+### Changed
+
+- A page turn and an explicit sort can no longer share one call: together they cost 26 actions and
+  exceed the kernel's 120 s plan budget. Either works on its own.
+
 ## [0.6.1] - 2026-11-08
 
 ### Fixed
