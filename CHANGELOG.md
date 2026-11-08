@@ -4,6 +4,27 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.9.1] - 2026-11-08
+
+### Added
+
+- `goto` accepts `reload: true` — the same thing the user gets from F5. Worth having for an
+  unresponsive page, but it does **not** help with the WoS result list: a reloaded page still sends
+  only its first batch, and the lazy endpoint fires on scroll, not on load.
+
+### Fixed
+
+- A ~100 KB lazy batch arrives as one long JSON line split across chunks, and the idle timer used to
+  declare the payload complete in a gap between two of them. It now keeps waiting while the tail is
+  unparseable, up to six windows. Measured before: one scroll gave 20 records plus a truncated line.
+  Measured after: one scroll gives 40, two give 50, and nothing is truncated.
+
+### Known
+
+- Reloading a tab can make the bridge report `bridge reply id does not match the request` — the
+  navigation discards a pending reply while the host is still pairing ids. The action after a reload
+  may need a retry.
+
 ## [0.9.0] - 2026-11-08
 
 ### Added

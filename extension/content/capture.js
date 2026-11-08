@@ -123,19 +123,23 @@
   }
 
   function armIdle(gen) {
+    // One lazy batch is ~100 KB arriving over several chunks, and the gap between
+    // chunks can exceed a single idle window. So keep waiting while the tail is
+    // unparseable rather than handing a truncated JSON line downstream — but give
+    // up after a few windows, so a genuinely stuck stream still terminates.
     if (idleTimer) clearTimeout(idleTimer);
-    idleTimer = setTimeout(() => {
+    let attempts = 0;
+    const tick = () => {
       idleTimer = null;
       if (gen !== generation || pending <= 0) return;
-      if (looksComplete()) {
+      attempts += 1;
+      if (looksComplete() || attempts >= 6) {
         markReady();
         return;
       }
-      idleTimer = setTimeout(() => {
-        idleTimer = null;
-        if (gen === generation && pending > 0) markReady();
-      }, IDLE_MS * 2);
-    }, IDLE_MS);
+      idleTimer = setTimeout(tick, IDLE_MS);
+    };
+    idleTimer = setTimeout(tick, IDLE_MS);
   }
 
   function begin(url) {

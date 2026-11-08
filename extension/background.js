@@ -96,13 +96,19 @@ async function onHostMessage(message, channel) {
 
   try {
     if (action === "goto") {
-      const url = new URL(params.url);
-      if (url.protocol !== "https:" || !allowedHost(url.hostname, domains)) {
-        throw new Error("policy.domain");
-      }
       const tab = await activeTab();
       if (!tab || !tab.id) throw new Error("no_active_tab");
-      await chrome.tabs.update(tab.id, { url: params.url });
+      if (params.reload === true) {
+        // The F5 the user would press: the result page is then built in one pass
+        // instead of being filled in lazily as it scrolls.
+        await chrome.tabs.reload(tab.id);
+      } else {
+        const url = new URL(params.url);
+        if (url.protocol !== "https:" || !allowedHost(url.hostname, domains)) {
+          throw new Error("policy.domain");
+        }
+        await chrome.tabs.update(tab.id, { url: params.url });
+      }
       await waitComplete(tab.id);
       await new Promise((resolve) => setTimeout(resolve, 500 + Math.random() * 1000));
 

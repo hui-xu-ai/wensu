@@ -13,7 +13,7 @@ MAX_TEXT_CHARS = 500
 MAX_SLEEP_MS = 3_000
 
 ALLOWED_KEYS: dict[str, frozenset[str]] = {
-    "goto": frozenset({"url"}),
+    "goto": frozenset({"url", "reload"}),
     "wait_for": frozenset({"selector", "timeout_ms", "state"}),
     "type": frozenset({"selector", "text", "clear"}),
     "click": frozenset({"selector"}),
@@ -44,6 +44,11 @@ def validate_params(verb: str, params: Any) -> str | None:
         return "policy.params"
 
     if verb == "goto":
+        if params.get("reload") is True:
+            # Equivalent to the user pressing F5. The site then loads the whole
+            # result page at once, where the in-page navigation after a search
+            # fills it lazily.
+            return None
         url = params.get("url")
         if not isinstance(url, str) or not url.strip():
             return "policy.params"
