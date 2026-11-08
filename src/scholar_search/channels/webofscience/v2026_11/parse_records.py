@@ -235,12 +235,14 @@ def _impact_factors(rows: list[dict[str, Any]]) -> dict[str, float]:
     return factors
 
 
-def _record(payload: dict[str, Any]) -> Record | None:
+def _record(payload: dict[str, Any], factors: dict[str, float] | None = None) -> Record | None:
     titles = _titles(payload)
     title = _title_of(titles.get("item"))
     if title is None:
         return None
     ut = _as_text(payload.get("ut")) or _as_text(payload.get("colluid"))
+    jcr_key = _as_text(payload.get("jcrKey"))
+    impact = factors.get(jcr_key) if (factors and jcr_key) else None
     return Record(
         channel=CHANNEL,
         title=title,
@@ -259,6 +261,7 @@ def _record(payload: dict[str, Any]) -> Record | None:
         url=f"{DETAIL_PREFIX}{ut}" if ut else None,
         fetched_at=datetime.now(timezone.utc),
         doc_type=_doc_type(payload),
+        impact_factor=impact,
     )
 
 
@@ -304,7 +307,7 @@ def parse(text: str, *, query: SearchQuery | None = None) -> SearchPage:
                 if not isinstance(raw, dict):
                     continue
                 seen += 1
-                record = _record(raw)
+                record = _record(raw, factors)
                 if record is None:
                     continue
                 if wanted is not None:
@@ -314,6 +317,14 @@ def parse(text: str, *, query: SearchQuery | None = None) -> SearchPage:
                 records.append(record)
 
     if seen == 0:
+        # A query that matches nothing is a valid answer, not a broken capture:
+        # the site still sends the searchInfo block, with a zero count.
+        if total == 0:
+            return SearchPage(
+                records=(),
+                total=0,
+                page=query.page if query is not None else None,
+            )
         raise ParseError("capture holds no records; the stream was not intercepted")
     if not records and wanted is None:
         raise ParseError("capture holds records but none carried a usable title")

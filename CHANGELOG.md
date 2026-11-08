@@ -4,6 +4,31 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.8.0] - 2026-11-08
+
+### Added
+
+- Records carry `impact_factor` where the channel has one — Web of Science does, through its `jcr`
+  block. Optional in `record.json`, so CNKI stays valid with `null`.
+
+### Changed
+
+- Interaction pacing is slower and more human: 1.2–2.2 s between typing an expression and
+  submitting it, 1.6–2.4 s between scroll rounds, 0.7–1.3 s before picking a sort option. The
+  worst-case plan still fits the kernel budget on every random draw (110.6–112.5 s of 120 s).
+
+### Fixed
+
+- A query that matches nothing returned a parse error instead of an empty page. The site still sends
+  `searchInfo` with a zero count — that is a valid answer, not a broken capture.
+
+### Docs
+
+- `docs/wos-channel.md` gains an interaction and risk audit: what the quota meters versus what is
+  actually requested (3 actions, 4–5 requests), how the pacing compares to a human, and which risk
+  signals are covered. It also names the one gap: a soft block that only writes "Access Denied" into
+  the page body rather than the title.
+
 ## [0.7.0] - 2026-11-08
 
 ### Added

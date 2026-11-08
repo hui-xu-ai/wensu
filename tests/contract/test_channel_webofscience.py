@@ -74,6 +74,15 @@ def test_plan_stays_within_kernel_budget() -> None:
         assert sum(a.timeout_ms for a in plan.actions) <= HARD.max_plan_seconds * 1000
 
 
+def test_worst_case_budget_holds_across_random_pacing() -> None:
+    """Pauses are randomised, so the ceiling must hold for every draw, not on average."""
+
+    for _ in range(25):
+        plan = plan_search.build(_query(page=3))
+        assert len(plan.actions) <= HARD.max_actions_per_plan
+        assert sum(a.timeout_ms for a in plan.actions) <= HARD.max_plan_seconds * 1000
+
+
 def test_pages_and_sort_cannot_share_one_call() -> None:
     with pytest.raises(ChannelError):
         plan_search.build(_query(page=2, sort="date"))
@@ -133,6 +142,12 @@ def test_parse_flattens_abstract_markup() -> None:
     assert "<p>" not in record.abstract
 
 
+def test_impact_factor_is_returned_with_each_record() -> None:
+    page = parse_records.parse(CAPTURE)
+    factors = [record.impact_factor for record in page.records]
+    assert factors == [5.0, 2.0, None], "the third record has no jcrKey"
+
+
 def test_impact_factor_filter_uses_the_jcr_block() -> None:
     page = parse_records.parse(
         CAPTURE,
@@ -149,6 +164,13 @@ def test_impact_factor_filter_can_empty_the_page_without_error() -> None:
         query=SearchQuery(text="x", channel="webofscience", min_impact_factor=99.0),
     )
     assert page.records == ()
+
+
+def test_zero_results_is_an_empty_page_not_an_error() -> None:
+    capture = '{"id": 0, "key": "searchInfo", "payload": {"RecordsFound": 0}}'
+    page = parse_records.parse(capture)
+    assert page.records == ()
+    assert page.total == 0
 
 
 def test_parse_rejects_non_json() -> None:

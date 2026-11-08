@@ -150,6 +150,9 @@ class Record:
     url: str | None = None
     fetched_at: datetime | None = None
     doc_type: str | None = None
+    # Journal metric, where the channel ships one — Web of Science does, through
+    # the `jcr` block. Optional so CNKI, which has no such notion, stays valid.
+    impact_factor: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -167,6 +170,7 @@ class Record:
             "keywords": list(self.keywords),
             "citations": self.citations,
             "downloads": self.downloads,
+            "impact_factor": self.impact_factor,
             "url": self.url,
             "fetched_at": self.fetched_at.isoformat() if self.fetched_at else None,
             "doc_type": self.doc_type,

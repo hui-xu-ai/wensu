@@ -49,10 +49,9 @@ INPUT_TIMEOUT_MS = 3_500
 CLICK_TIMEOUT_MS = 2_200
 READ_TIMEOUT_MS = 8_000
 
-# The stream answered in 1.6 s on the live site; six seconds is a wide margin
-# that still leaves the worst-case plan (page 3 + explicit sort) under the
-# kernel's 120 s ceiling.
-CAPTURE_WAIT_MS = 6_000
+# The stream answered in 1.6 s on the live site; five seconds leaves a wide
+# margin and still keeps the worst-case plan (3 pages) under the kernel's 120 s.
+CAPTURE_WAIT_MS = 5_000
 # How long the previous capture may take to be invalidated once the click has
 # fired. Short on purpose: the request starts within a few hundred ms.
 TURN_MARKER_WAIT_MS = 2_000
@@ -108,7 +107,9 @@ def scroll_round() -> tuple[Action, ...]:
 
     return (
         Action("scroll", {"to": "bottom"}, timeout_ms=CLICK_TIMEOUT_MS),
-        settle(jitter(1_200, 1_800)),
+        # Two seconds is the floor for "scrolled, looked, scrolled again". Anything
+        # faster reads as a script driving the page rather than a person reading it.
+        settle(jitter(1_600, 2_400)),
         Action(
             "wait_for",
             {"selector": CAPTURE_READY, "timeout_ms": CAPTURE_WAIT_MS},
@@ -125,9 +126,9 @@ def sort_actions(order: str) -> tuple[Action, ...]:
         return ()
     return (
         Action("click", {"selector": SORT_OPEN}, timeout_ms=CLICK_TIMEOUT_MS),
-        settle(jitter(300, 650)),
+        settle(jitter(700, 1_300)),
         Action("click", {"selector": selector}, timeout_ms=CLICK_TIMEOUT_MS),
-        settle(jitter(800, 1_300)),
+        settle(jitter(1_000, 1_600)),
         *capture_wait(),
     )
 
@@ -173,7 +174,7 @@ def build(query: SearchQuery, *, today: dt.date | None = None) -> Plan:
             {"selector": QUERY_INPUT, "text": text, "clear": True},
             timeout_ms=INPUT_TIMEOUT_MS,
         ),
-        settle(jitter(400, 900)),
+        settle(jitter(1_200, 2_200)),
         Action("click", {"selector": SUBMIT}, timeout_ms=CLICK_TIMEOUT_MS),
         # Wait for the first batch before scrolling: the list renders before its
         # data arrives, and scrolling an empty list triggers no lazy load.

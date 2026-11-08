@@ -20,6 +20,7 @@
     "keywords": { "type": "array", "items": { "type": "string" } },
     "citations": { "type": ["integer", "null"], "minimum": 0 },
     "downloads": { "type": ["integer", "null"], "minimum": 0 },
+    "impact_factor": { "type": ["number", "null"] },
     "url": { "type": ["string", "null"] },
     "doc_type": { "type": ["string", "null"] },
     "fetched_at": { "type": ["string", "null"], "format": "date-time" }
