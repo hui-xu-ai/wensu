@@ -24,6 +24,10 @@ jobs:
           pip install -e ".[dev]"
       - name: Lint
         run: ruff check .
+      - name: Versions agree
+        # Four artefacts ship under one version number. A release that bumps only
+        # some of them is the failure this catches.
+        run: python scripts/check-versions.py
       - name: Type check
         run: mypy src
       - name: Tests (no live browser)

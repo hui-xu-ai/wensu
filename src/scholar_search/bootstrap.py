@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from . import __version__
 from .adapters.bridge import BridgeAdapter
+from .adapters.bridge.host import PROTOCOL_VERSION
 from .core.audit import AuditLog
 from .core.cache import Cache
 from .core.config import host_runtime_dir
@@ -33,6 +35,11 @@ def build_service() -> ScholarService:
     def status() -> dict[str, object]:
         until = risk.cooldown_until()
         return {
+            # Which build is answering, and which bridge protocol it speaks. Without
+            # these, a caller cannot tell "the tool is missing" from "an old build is
+            # answering" — and the two need very different fixes.
+            "version": __version__,
+            "bridge_protocol": PROTOCOL_VERSION,
             "channels": [spec.name for spec in registry.discover()],
             "cooldown_until": until.isoformat() if until else None,
             "quota_remaining": policy.remaining_today,
