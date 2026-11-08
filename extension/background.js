@@ -149,7 +149,12 @@ async function onHostMessage(message, channel) {
           return await chrome.tabs.sendMessage(tabId, message);
         } catch (error) {
           const text = String((error && error.message) || error);
-          if (!/Receiving end|Could not establish/i.test(text)) throw error;
+          // A navigation tears down the content script mid-flight. All three
+          // wordings mean "the new document is not ready yet", not "the page is
+          // broken", so they are retried rather than surfaced.
+          if (!/Receiving end|Could not establish|message channel closed/i.test(text)) {
+            throw error;
+          }
           await new Promise((resolve) => setTimeout(resolve, 300));
         }
       }

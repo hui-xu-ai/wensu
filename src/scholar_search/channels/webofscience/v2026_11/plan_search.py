@@ -176,6 +176,10 @@ def build(query: SearchQuery, *, today: dt.date | None = None) -> Plan:
         ),
         settle(jitter(1_200, 2_200)),
         Action("click", {"selector": SUBMIT}, timeout_ms=CLICK_TIMEOUT_MS),
+        # The click starts a navigation that tears down the content script. Without
+        # this pause the next `wait_for` can hit the gap and die on "message
+        # channel closed" — observed on the CLI path, where timing differs.
+        settle(jitter(800, 1_400)),
         # Wait for the first batch before scrolling: the list renders before its
         # data arrives, and scrolling an empty list triggers no lazy load.
         *capture_wait(),

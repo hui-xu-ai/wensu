@@ -4,6 +4,31 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.8.2] - 2026-11-08
+
+### Fixed
+
+- The CLI search path could die with `A listener indicated an asynchronous response by returning
+  true, but the message channel closed`. A click that starts a navigation tears down the content
+  script, and the `wait_for` right behind it hit that gap — timing that the MCP path happened to
+  miss. Both ends are fixed: the bridge now retries that wording together with the other
+  "new document not ready" errors, and the plan pauses after submitting before asking the page
+  anything.
+
+## [0.8.1] - 2026-11-08
+
+### Added
+
+- `wensu search` and `wensu detail`: the same service the MCP server exposes, callable straight from
+  the shell. `--channel`, `--limit`, `--page`, `--year-from/--year-to`, `--abstract`, `--sort-by`,
+  `--min-citations`, `--sources-only`, `--min-impact-factor` and `--format json|ris|endnote` all
+  work. The cache is on disk, so a record fetched by one process is served to `detail` by another.
+
+### Why
+
+On-demand beats a startup plugin for this channel: it keeps **zero footprint in DSH's boot path**, so
+a DSH upgrade can never be blocked by it. Install the MCP bundle only if you want the tools inline.
+
 ## [0.8.0] - 2026-11-08
 
 ### Added
