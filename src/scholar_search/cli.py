@@ -47,7 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     detail = sub.add_parser("detail", help="print one record by its detail URL")
     detail.add_argument("url")
-    detail.add_argument("--channel", default="cnki")
+    detail.add_argument("--channel", default=None, help="inferred from the URL when omitted")
 
     sub.add_parser("status", help="show session, quota and cooldown state")
 
@@ -133,7 +133,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         service = build_service()
         try:
             if args.command == "detail":
-                record = service.detail(args.url, channel=args.channel)
+                # Same inference as the MCP tool: a URL this tool produced must be
+                # accepted back without the caller knowing which channel it came from.
+                resolved = args.channel or service.channel_for_url(args.url)
+                if resolved is None:
+                    print(
+                        f"wensu: no channel claims the host of {args.url!r}",
+                        file=sys.stderr,
+                    )
+                    return 2
+                record = service.detail(args.url, channel=resolved)
                 print(json.dumps(record.to_dict(), ensure_ascii=False, indent=2))
                 return 0
             page = service.search(
@@ -171,6 +180,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "total": page.total,
                 "page": page.page,
                 "page_count": page.page_count,
+                # Same field the MCP tool returns. The CLI used to build its own
+                # payload and silently omitted it, so the one signal that separates
+                # "nothing on this page" from "nothing exists" was missing here.
+                "dropped_year": page.dropped_year,
             }
             print(json.dumps(payload, ensure_ascii=False, indent=2))
         else:
