@@ -153,11 +153,56 @@ git push origin v0.4.0
 否则发布那一步会报 `invalid-publisher`。
 
 npm bundle（`packages/dsh-wensu`）走**另一条**流水线：`.github/workflows/publish-npm.yml`，
-推 `dsh-wensu-v*` 形式的 tag 触发。bundle 的版本与 Python 包**故意不同步**——它只包含
-`cordis.patch.yml`（一行「启动 `wensu serve --stdio`」）和 README，内容很少变。
+推 `npm-v<版本>` 形式的 tag 触发（注意前缀是 `npm-v`，不是 `v`——推错前缀这条流水线不会启动）。
+bundle 的版本与 Python 包**故意不同步**：它只包含 `cordis.patch.yml`（一行「启动
+`wensu serve --stdio`」）和 README，内容很少变。
 
-插件市场的展示信息在 `docs/market/index.json`，由市场从 GitHub raw 直接拉取。**改描述不需要发版**，
-改完推送就生效；但新增 `versions` 条目必须在 npm 发布之后，否则市场会指向一个装不下来的版本。
+该工作流有两条认证路径，**配置其中一条即可**：
+
+| 路径 | 需要什么 | 在哪配 |
+|---|---|---|
+| npm token | 仓库 secret `NPM_TOKEN` | GitHub 仓库 → Settings → Secrets and variables → Actions → **Repository secrets** |
+| OIDC trusted publisher | npm 上为该包配 Trusted Publisher | npmjs.com → 包 → Settings → Trusted Publisher |
+
+**没有 token 时会自动尝试 OIDC**；两条都没配，`Publish with OIDC trusted publisher` 那一步失败。
+
+### 配 npm token（最快的一条）
+
+1. 打开 <https://www.npmjs.com/settings/<你的账号>/tokens>
+2. **Generate New Token** → Granular Access Token
+3. Permissions 选 `Read and write`；Packages 选该包或 All
+4. 复制 token（只显示一次）
+5. GitHub 仓库 → Settings → Secrets and variables → Actions → **New repository secret**
+   - Name：`NPM_TOKEN`（**必须一字不差**，工作流读的就是这个名字）
+   - Secret：粘贴
+
+**必须放在 Repository secrets，不能放 Environment secrets。** 该工作流没有声明 `environment:`，
+environment 层的 secret 不会被注入，表现和「根本没有配」完全一样——这一条踩过。
+
+### 发布 bundle 的新版本
+
+```powershell
+# 1) 升版本（只改这一处，bundle 没有独立的 CHANGELOG）
+#    packages/dsh-wensu/package.json → "version": "x.y.z"
+
+# 2) 提交并打 tag（前缀必须是 npm-v）
+git add packages/dsh-wensu/package.json
+git commit -m "chore(bundle): x.y.z"
+git tag -a npm-vx.y.z -m "dsh-wensu bundle x.y.z"
+git push origin main
+git push origin npm-vx.y.z
+
+# 3) 看 Actions 里 publish-npm 是否变绿
+```
+
+**发布成功之后**再往 `docs/market/index.json` 的 `versions` 数组加一条。**顺序不能反**：
+先写索引会让市场指向一个还装不下来的版本。
+
+### 市场页面的介绍文字
+
+`docs/market/index.json` 里的 `title` / `description` / `metadata.labels` / `metadata.keywords`
+就是市场展示的内容，由市场从 GitHub raw 直接拉取。**改描述不需要发版**，推送即生效；
+只有 `versions` 数组需要等 npm 发布。
 
 ## 7. 不要提交的东西
 
