@@ -1,8 +1,9 @@
 """Cross-process locks for metering and browser ownership.
 
-Windows uses ``msvcrt.locking`` and POSIX uses ``fcntl.flock``. If the lock file
-cannot be opened (read-only home), a process-local lock is used instead so the
-in-process invariants still hold.
+Windows uses ``msvcrt.locking`` and POSIX uses ``fcntl.flock``. A lock file that
+cannot be opened is a hard failure: falling back to a process-local lock would
+silently drop the cross-process boundary, which is the whole point of this module.
+(A read-only home is therefore an error, not a degraded mode.)
 """
 
 from __future__ import annotations
@@ -16,6 +17,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import IO
+
+from .errors import ScholarSearchError
 
 _MEMORY_LOCKS: dict[str, threading.Lock] = {}
 _MEMORY_GUARD = threading.Lock()
@@ -80,7 +83,9 @@ def interprocess_lock(path: Path, *, timeout_s: float = 60.0) -> Iterator[None]:
                 break
             except OSError:
                 if time.monotonic() >= deadline:
-                    raise TimeoutError(f"lock timeout: {path}") from None
+                    # A plain TimeoutError is not a ScholarSearchError, so callers
+                    # that catch project errors let it escape as a traceback.
+                    raise ScholarSearchError(f"lock timeout: {path}") from None
                 time.sleep(0.05)
         yield
     finally:

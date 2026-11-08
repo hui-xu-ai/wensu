@@ -4,6 +4,20 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.5] - 2026-11-09
+
+### Fixed — remaining Python-side minors from the audit
+
+- **`wensu reset --confirm` left no trace.** Lifting a 24-hour safety cooldown is exactly the kind of
+  action that needs a record; it now writes a `risk_cleared` line to the audit log.
+- **A lock timeout escaped as a traceback.** `interprocess_lock` raised the builtin `TimeoutError`,
+  which is not a `ScholarSearchError`, so every caller that catches project errors let it through to
+  the user as a stack trace.
+- **The locking module contradicted itself.** Its docstring promised a process-local fallback when
+  the lock file cannot be opened; the function — and the code — hard-fail instead, because a
+  process-local lock silently drops the cross-process boundary that is the module's whole purpose.
+  The docstring now says that.
+
 ## [0.12.4] - 2026-11-09
 
 ### Fixed — the two security-relevant minors from the independent audit

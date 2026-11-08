@@ -90,9 +90,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not args.confirm:
             print("refusing to clear the cooldown without --confirm", file=sys.stderr)
             return 2
+        from .core.audit import AuditLog
         from .core.risk import RiskGuard
 
         RiskGuard().clear()
+        # Lifting a safety cooldown is exactly the kind of action that needs a
+        # trail: without a line here there is no way to tell who cleared it, when,
+        # or in response to what.
+        AuditLog().write("risk_cleared", cooldown_cleared=True)
         print("risk cooldown cleared", file=sys.stderr)
         return 0
 
