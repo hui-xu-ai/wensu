@@ -68,7 +68,7 @@ def test_plan_only_navigates_inside_declared_domains() -> None:
 
 
 def test_plan_stays_within_kernel_budget() -> None:
-    for query in (_query(), _query(page=3), _query(sort="date")):
+    for query in (_query(), _query(page=2), _query(sort="date")):
         plan = plan_search.build(query)
         assert len(plan.actions) <= HARD.max_actions_per_plan
         assert sum(a.timeout_ms for a in plan.actions) <= HARD.max_plan_seconds * 1000
@@ -78,9 +78,16 @@ def test_worst_case_budget_holds_across_random_pacing() -> None:
     """Pauses are randomised, so the ceiling must hold for every draw, not on average."""
 
     for _ in range(25):
-        plan = plan_search.build(_query(page=3))
+        plan = plan_search.build(_query(page=2))
         assert len(plan.actions) <= HARD.max_actions_per_plan
         assert sum(a.timeout_ms for a in plan.actions) <= HARD.max_plan_seconds * 1000
+
+
+def test_a_third_page_is_refused() -> None:
+    """Each page needs a scroll round to refill; three of them blow the budget."""
+
+    with pytest.raises(ChannelError):
+        plan_search.build(_query(page=3))
 
 
 def test_pages_and_sort_cannot_share_one_call() -> None:

@@ -8,23 +8,24 @@
  *
  *   runQuerySearch            first screen, 20 records, sent by the Search button
  *   runQueryGetRecordsStream  later batches, sent lazily when the list is
- *                             scrolled — this is how a "50 per page" setting
- *                             actually gets its remaining records
+ *                             scrolled — this is how a "50 per page" setting, or
+ *                             a page turn, actually gets its remaining records
  *
- * So the node is cleared only when a *primary* query starts, and later batches
- * are appended. Three mistakes are worth not repeating:
+ * The node is cleared only when a *primary* query starts, and later batches are
+ * appended. Four mistakes are worth not repeating:
  *
  *   - clearing on any request kept only the last batch of a multi-batch page;
  *   - inserting a newline per *chunk* cut the streamed JSON lines in half;
  *   - anchoring the node to <html> gave it 0x0 layout, and `wait_for` matches on
- *     visibility, so the plan timed out even though the data was there.
+ *     visibility, so the plan timed out even though the data was there;
+ *   - a batch already in flight when a new page started appended its 20 records
+ *     to the *new* page. Hence `generation`: every primary query bumps it, and a
+ *     chunk or a completion from an older generation is dropped.
  *
  * "Finished" cannot rely on the stream closing: the response body often stays
- * open after the last record, so `done` never arrives and `finish()` never runs.
- * A short idle timer therefore declares the payload complete once chunks stop.
- *
- * The node lives in <body> (visible layout) and is re-attached with its buffer
- * intact if a render detaches it.
+ * open after the last record. A short idle timer declares the payload complete
+ * once chunks stop — but only if the tail actually parses, otherwise a truncated
+ * line would be handed downstream.
  *
  * Diagnostics: `data-wensu-capture="loaded"`, `data-wensu-hits` (tracked
  * responses), `data-wensu-rebuilds`, `data-wensu-seen` (request paths, query
@@ -60,14 +61,13 @@
   let pending = 0;
   let hits = 0;
   let rebuilds = 0;
+  let generation = 0;
   let needSeparator = false;
   let buffer = "";
   let idleTimer = null;
 
   function ensureNode() {
     if (node && node.isConnected) {
-      // Rendered matters: a node parked outside <body> gets 0x0 layout and
-      // `wait_for` never matches it.
       if (document.body && node.parentElement !== document.body) {
         document.body.appendChild(node);
       }
@@ -122,34 +122,34 @@
     }
   }
 
-  function armIdle() {
+  function armIdle(gen) {
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
       idleTimer = null;
-      if (pending <= 0) return;
+      if (gen !== generation || pending <= 0) return;
       if (looksComplete()) {
         markReady();
         return;
       }
-      // The stream paused mid-line. Give it one more window rather than
-      // declaring a truncated payload complete: a half-written JSON line fails
-      // far more confusingly downstream than a plain timeout.
       idleTimer = setTimeout(() => {
         idleTimer = null;
-        if (pending > 0) markReady();
+        if (gen === generation && pending > 0) markReady();
       }, IDLE_MS * 2);
     }, IDLE_MS);
   }
 
   function begin(url) {
     const text = String(url || "");
-    const element = ensureNode();
-    element.removeAttribute("data-ready");
     if (text.indexOf(PRIMARY) !== -1) {
-      // A primary query means a new result set: drop whatever the last one left.
+      // A primary query means a new result set: drop everything the previous one
+      // left behind, and invalidate every request still in flight.
+      generation += 1;
       buffer = "";
-      element.textContent = "";
       needSeparator = false;
+      pending = 0;
+      const element = ensureNode();
+      element.removeAttribute("data-ready");
+      element.textContent = "";
     }
     needSeparator = true;
     pending += 1;
@@ -159,24 +159,24 @@
     } catch (error) {
       /* ignore */
     }
+    return generation;
   }
 
-  function append(chunk) {
-    if (!chunk) return;
+  function append(chunk, gen) {
+    if (!chunk || gen !== generation) return;
     const element = ensureNode();
     if (buffer.length > MAX_CHARS) return;
-    // One separator per *response*, never per chunk: NDJSON lines are split
-    // across chunks arbitrarily, and a newline in the middle breaks them.
     if (needSeparator) {
       if (buffer) buffer += "\n";
       needSeparator = false;
     }
     buffer += chunk;
     element.textContent = buffer;
-    armIdle();
+    armIdle(gen);
   }
 
-  function finish() {
+  function finish(gen) {
+    if (gen !== generation) return;
     if (pending === 0) return;
     pending = Math.max(0, pending - 1);
     if (pending === 0) markReady();
@@ -186,10 +186,10 @@
     return typeof url === "string" && url.indexOf(QUERY_PREFIX) !== -1;
   }
 
-  async function drain(response) {
+  async function drain(response, gen) {
     const body = response.body;
     if (!body || typeof body.getReader !== "function") {
-      append(await response.text());
+      append(await response.text(), gen);
       return;
     }
     const reader = body.getReader();
@@ -198,9 +198,9 @@
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
-        if (value) append(decoder.decode(value, { stream: true }));
+        if (value) append(decoder.decode(value, { stream: true }), gen);
       }
-      append(decoder.decode());
+      append(decoder.decode(), gen);
     } finally {
       reader.releaseLock();
     }
@@ -214,18 +214,18 @@
       remember(url);
       const promise = nativeFetch.apply(this, arguments);
       if (!tracked(url)) return promise;
-      begin(url);
+      const gen = begin(url);
       return promise.then(
         (response) => {
           try {
-            drain(response.clone()).catch(() => {}).then(finish);
+            drain(response.clone(), gen).catch(() => {}).then(() => finish(gen));
           } catch (error) {
-            finish();
+            finish(gen);
           }
           return response;
         },
         (error) => {
-          finish();
+          finish(gen);
           throw error;
         }
       );
@@ -246,15 +246,15 @@
     };
     NativeXHR.prototype.send = function () {
       if (this.__wensuTracked) {
-        begin(this.__wensuUrl);
+        const gen = begin(this.__wensuUrl);
         this.addEventListener("loadend", () => {
           try {
             const type = this.responseType;
-            if (type === "" || type === "text") append(this.responseText);
+            if (type === "" || type === "text") append(this.responseText, gen);
           } catch (error) {
             /* opaque response: nothing to copy */
           } finally {
-            finish();
+            finish(gen);
           }
         });
       }

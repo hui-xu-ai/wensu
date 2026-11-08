@@ -19,6 +19,7 @@ from ....core.contracts import Record, SearchPage, SearchQuery
 from ....core.errors import ParseError
 
 CHANNEL = "webofscience"
+PRIMARY_API = "runQuerySearch"
 
 DETAIL_PREFIX = "https://webofscience.clarivate.cn/wos/woscc/full-record/"
 
@@ -300,27 +301,37 @@ def parse(text: str, *, query: SearchQuery | None = None) -> SearchPage:
     for row in rows:
         key = row.get("key")
         payload = row.get("payload")
-        if not isinstance(payload, dict):
-            continue
-
-        if key == "searchInfo":
+        if key == "searchInfo" and isinstance(payload, dict):
             value = payload.get("RecordsFound")
             if isinstance(value, int):
                 total = value
-        elif key == "records":
-            for index in sorted(payload, key=_order):
-                raw = payload[index]
-                if not isinstance(raw, dict):
+
+    # The primary query's batch is the first screen. A lazy batch can arrive
+    # before it, and ordering by arrival alone would then scramble the page, so
+    # the primary batch is always put first. Within a batch, the payload keys
+    # carry the true order.
+    batches = sorted(
+        (row for row in rows if row.get("key") == "records"),
+        key=lambda row: 0 if row.get("api") == PRIMARY_API else 1,
+    )
+
+    for row in batches:
+        payload = row.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        for index in sorted(payload, key=_order):
+            raw = payload[index]
+            if not isinstance(raw, dict):
+                continue
+            seen += 1
+            record = _record(raw, factors)
+            if record is None:
+                continue
+            if wanted is not None:
+                factor = factors.get(str(raw.get("jcrKey") or ""))
+                if factor is None or factor < wanted:
                     continue
-                seen += 1
-                record = _record(raw, factors)
-                if record is None:
-                    continue
-                if wanted is not None:
-                    factor = factors.get(str(raw.get("jcrKey") or ""))
-                    if factor is None or factor < wanted:
-                        continue
-                records.append(record)
+            records.append(record)
 
     if seen == 0:
         # A query that matches nothing is a valid answer, not a broken capture:

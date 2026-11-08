@@ -41,7 +41,7 @@ from .selectors import (
 # pause deadline has to cover the pause itself plus a reply margin — the same
 # rule the CNKI channel learned the hard way.
 SLEEP_REPLY_MARGIN_MS = 2_000
-WAIT_REPLY_MARGIN_MS = 2_000
+WAIT_REPLY_MARGIN_MS = 1_000
 
 NAV_TIMEOUT_MS = 10_000
 WAIT_TIMEOUT_MS = 8_000
@@ -124,13 +124,25 @@ def sort_actions(order: str) -> tuple[Action, ...]:
 
 
 def pagination(page: int) -> tuple[Action, ...]:
-    """One page turn per extra page, each re-triggering the result stream."""
+    """Turn the page, then fill it the same way the first page fills itself.
+
+    The site scrolls back to the top on a page turn, so no scroll-up is needed —
+    but the order is: wait for the first batch, *then* scroll. A list that has not
+    rendered yet has nothing to scroll, and a lazy loader that never sees a scroll
+    never sends the rest of its records.
+    """
 
     actions: list[Action] = []
     for _ in range(max(0, page - 1)):
         actions.append(Action("click", {"selector": NEXT_PAGE}, timeout_ms=CLICK_TIMEOUT_MS))
-        actions.append(settle(jitter(1_100, 1_600)))
+        actions.append(settle(jitter(900, 1_400)))
+        # A page turn can take a moment to issue its request; until it does, the
+        # ready marker still belongs to the previous page and waiting on it would
+        # return at once.
+        actions.append(settle(jitter(1_800, 2_800)))
         actions.extend(capture_wait())
+        actions.extend(scroll_round())
+        actions.extend(scroll_round())
     return tuple(actions)
 
 
@@ -146,10 +158,16 @@ def build(query: SearchQuery, *, today: dt.date | None = None) -> Plan:
             "clicks, each page costs two more actions, and together they exceed the "
             "kernel's 120 s plan budget"
         )
+    if query.page > 2:
+        raise ChannelError(
+            "the webofscience channel supports at most 2 pages per call: every page "
+            "needs a scroll round to refill 50 records, and a third would exceed the "
+            "kernel's 120 s plan budget"
+        )
 
     text = expression.build(query, today=today)
 
-    actions = (
+    head: tuple[Action, ...] = (
         Action("goto", {"url": ADVANCED_SEARCH}, timeout_ms=NAV_TIMEOUT_MS),
         settle(jitter(1_000, 1_600)),
         Action(
@@ -173,17 +191,24 @@ def build(query: SearchQuery, *, today: dt.date | None = None) -> Plan:
         # Wait for the first batch before scrolling: the list renders before its
         # data arrives, and scrolling an empty list triggers no lazy load.
         *capture_wait(),
-        # Two rounds take a "50 per page" setting from 20 to 50 records. `scroll`
-        # is a read verb, so both rounds cost no quota — the lazy requests they
-        # trigger are real, though, and the capture node accumulates them.
-        *scroll_round(),
-        *scroll_round(),
-        *sort_actions(query.sort),
-        *pagination(query.page),
+    )
+
+    actions = list(head)
+    if query.page == 1:
+        # Page one fills itself here: two rounds take a "50 per page" setting from
+        # 20 to 50 records. A later page does not need these records at all — its
+        # own two rounds run after the page turn — and skipping them is what keeps
+        # a two-page call inside the 120 s budget.
+        actions.extend(scroll_round())
+        actions.extend(scroll_round())
+
+    actions.extend(sort_actions(query.sort))
+    actions.extend(pagination(query.page))
+    actions.append(
         Action(
             "read_text",
             {"selector": CAPTURE, "mode": "text"},
             timeout_ms=READ_TIMEOUT_MS,
-        ),
+        )
     )
-    return Plan(channel="webofscience", purpose="search", actions=actions)
+    return Plan(channel="webofscience", purpose="search", actions=tuple(actions))

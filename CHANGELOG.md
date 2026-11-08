@@ -4,6 +4,35 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.9.0] - 2026-11-08
+
+### Added
+
+- Page turns work: `page=2` returns records 51–100 as 50 distinct records. A turn waits for its
+  first batch, then scrolls twice to refill — the same way page one fills itself.
+
+### Fixed
+
+- A batch already in flight when a new page started appended its 20 records to the *new* page.
+  `capture.js` now stamps every request with a generation and drops chunks and completions from
+  older ones, so a page holds only its own records.
+- Ordering by arrival scrambled a page whenever a lazy batch beat the primary query. The parser now
+  puts the primary batch first and keeps payload order inside each batch.
+- Scrolling before the first batch arrived did nothing, because a list that has not rendered has
+  nothing to scroll.
+
+### Changed
+
+- Page one skips its own scroll rounds when a later page is requested — that record set is about to
+  be replaced anyway — which keeps a two-page call at 97–99 s of the 120 s budget.
+- The channel caps `page` at 2; a third turn would not fit.
+
+### Known
+
+- Two adjacent pages can share one record: page 2's third entry was also page 1's first. That is the
+  site's paging behaviour, not a capture fault, but callers deduplicating across pages should expect
+  it.
+
 ## [0.8.6] - 2026-11-08
 
 ### Fixed
