@@ -110,17 +110,24 @@ class BridgeAdapter:
             "domains": list(self.domains or ()),
         }
         self._socket.sendall((json.dumps(request, ensure_ascii=False) + "\n").encode("utf-8"))
-        line = self._reader.readline()
-        if not line:
-            raise ConnectionError("bridge closed the connection")
-        reply = json.loads(line)
+
+        # A navigation can delay the previous action's reply past its own return,
+        # leaving it in the stream. Those replies belong to an action that already
+        # finished and was already inspected, so they are dropped rather than
+        # mistaken for a correlation error.
+        reply: dict[str, Any] = {}
+        for _ in range(8):
+            line = self._reader.readline()
+            if not line:
+                raise ConnectionError("bridge closed the connection")
+            candidate = json.loads(line)
+            if str(candidate.get("id", "")) == request_id:
+                reply = candidate
+                break
+        else:
+            raise ConnectionError("bridge reply id does not match the request")
+
         data = dict(reply.get("data") or {})
-        if str(reply.get("id", "")) != request_id:
-            # A reply that carries a navigation URL is still risk-relevant; the
-            # mismatch is recorded instead of discarding a possible gate.
-            if not isinstance(data.get("url"), str):
-                raise ConnectionError("bridge reply id does not match the request")
-            data["correlation"] = "mismatch"
 
         url = reply.get("url") or data.get("url")
         return ActionOutcome(
@@ -137,6 +144,10 @@ class BridgeAdapter:
             self._connect()
             return self._send(action, timeout_ms)
         except (OSError, ValueError, KeyError) as exc:
+            # A timed-out socket stays unusable, so drop it: the next call dials
+            # again instead of reading from a poisoned stream. Without this, one
+            # slow navigation made every later action fail.
+            self.close()
             return ActionOutcome(action=action, ok=False, error=f"bridge.error: {exc}")
 
     def close(self) -> None:

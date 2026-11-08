@@ -4,6 +4,39 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.9.9] - 2026-11-08
+
+### Changed
+
+- The WoS plan **reloads** the result page instead of scrolling down it. Measured on the live site: a
+  reload answers with all 50 records through three `runQueryGetRecordsStream` batches and never
+  issues `runQuerySearch` at all. A default search now takes **23 s** (11 actions, 4 metered) where
+  scrolling took 86 s (19 actions, 3 metered); a second page takes 25 s.
+
+### Added
+
+- `goto` accepts `reload: true`, the F5 a user would press. It carries no URL, so the kernel allows it
+  and the **extension checks the live tab URL** against the same allowlist before reloading.
+
+### Fixed
+
+- `pageMeta` awaited `chrome.tabs.sendMessage` with no deadline; that call never settles while a
+  frame is being replaced, so `goto` hung until the bridge gave up. It now races a 3 s timeout.
+- `waitComplete` treated a slow page as a hard error, and a timed-out socket stayed in use, so **one
+  slow navigation broke every later action** (`cannot read from timed out object`). Waiting is no
+  longer fatal, and a failed call drops the connection so the next one dials again.
+- A reply left over from the previous action is dropped instead of failing the request with
+  `bridge reply id does not match`.
+- Verb parameter validation lives in two layers (`core/params.py` and `adapters/bridge/policy.py`),
+  as does goto's domain check. Both layers now understand `reload`; before, the kernel accepted what
+  the host rejected.
+
+### Known
+
+- Reloading the **extension** leaves already-open tabs without a content script — every action then
+  returns `content_not_ready` until the page is refreshed. Automated runs are unaffected because the
+  plan navigates; manual probing is not.
+
 ## [0.9.1] - 2026-11-08
 
 ### Added

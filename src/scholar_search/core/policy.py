@@ -173,6 +173,11 @@ class PolicyEngine:
             raise PolicyError(f"invalid parameters for {action.verb}: {error}", rule=error)
 
         if action.verb == "goto":
+            if action.params.get("reload") is True:
+                # A reload re-navigates to wherever the tab already sits, so the
+                # kernel has no URL to check. The host validates the live URL
+                # against the same allowlist before it reloads.
+                return
             self.check_url(str(action.params["url"]), manifest.domains)
 
     def check_url(self, url: str, domains: Iterable[str]) -> None:

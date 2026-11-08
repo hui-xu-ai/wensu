@@ -123,26 +123,30 @@ def sort_actions(order: str) -> tuple[Action, ...]:
     )
 
 
-def pagination(page: int) -> tuple[Action, ...]:
-    """Turn the page, then fill it the same way the first page fills itself.
+def reload_and_wait() -> tuple[Action, ...]:
+    """Reload the result page and wait for the payload it streams.
 
-    The site scrolls back to the top on a page turn, so no scroll-up is needed —
-    but the order is: wait for the first batch, *then* scroll. A list that has not
-    rendered yet has nothing to scroll, and a lazy loader that never sees a scroll
-    never sends the rest of its records.
+    Measured on the live site: a reload answers with all 50 records through three
+    ``runQueryGetRecordsStream`` batches and never issues ``runQuerySearch`` at
+    all. Scrolling for the same records costs four more actions and two more
+    requests, so the plan reloads instead of walking down the list.
     """
+
+    return (
+        Action("goto", {"reload": True}, timeout_ms=NAV_TIMEOUT_MS),
+        settle(jitter(1_500, 2_500)),
+        *capture_wait(),
+    )
+
+
+def pagination(page: int) -> tuple[Action, ...]:
+    """One page turn per extra page, each followed by the reload that fills it."""
 
     actions: list[Action] = []
     for _ in range(max(0, page - 1)):
         actions.append(Action("click", {"selector": NEXT_PAGE}, timeout_ms=CLICK_TIMEOUT_MS))
-        actions.append(settle(jitter(900, 1_400)))
-        # A page turn can take a moment to issue its request; until it does, the
-        # ready marker still belongs to the previous page and waiting on it would
-        # return at once.
-        actions.append(settle(jitter(1_800, 2_800)))
-        actions.extend(capture_wait())
-        actions.extend(scroll_round())
-        actions.extend(scroll_round())
+        actions.append(settle(jitter(1_500, 2_500)))
+        actions.extend(reload_and_wait())
     return tuple(actions)
 
 
@@ -167,7 +171,7 @@ def build(query: SearchQuery, *, today: dt.date | None = None) -> Plan:
 
     text = expression.build(query, today=today)
 
-    head: tuple[Action, ...] = (
+    actions: list[Action] = [
         Action("goto", {"url": ADVANCED_SEARCH}, timeout_ms=NAV_TIMEOUT_MS),
         settle(jitter(1_000, 1_600)),
         Action(
@@ -184,31 +188,17 @@ def build(query: SearchQuery, *, today: dt.date | None = None) -> Plan:
         ),
         settle(jitter(1_200, 2_200)),
         Action("click", {"selector": SUBMIT}, timeout_ms=CLICK_TIMEOUT_MS),
-        # The click starts a navigation that tears down the content script. Without
-        # this pause the next `wait_for` can hit the gap and die on "message
-        # channel closed" — observed on the CLI path, where timing differs.
-        settle(jitter(800, 1_400)),
-        # Wait for the first batch before scrolling: the list renders before its
-        # data arrives, and scrolling an empty list triggers no lazy load.
-        *capture_wait(),
-    )
-
-    actions = list(head)
-    if query.page == 1:
-        # Page one fills itself here: two rounds take a "50 per page" setting from
-        # 20 to 50 records. A later page does not need these records at all — its
-        # own two rounds run after the page turn — and skipping them is what keeps
-        # a two-page call inside the 120 s budget.
-        actions.extend(scroll_round())
-        actions.extend(scroll_round())
-
-    actions.extend(sort_actions(query.sort))
-    actions.extend(pagination(query.page))
-    actions.append(
+        # The click navigates in-page. A reload navigates to the *current* URL, so
+        # the new route has to be in place first. The kernel caps a single sleep at
+        # 3 s, hence two pauses rather than one long one.
+        settle(jitter(1_800, 2_600)),
+        *reload_and_wait(),
+        *sort_actions(query.sort),
+        *pagination(query.page),
         Action(
             "read_text",
             {"selector": CAPTURE, "mode": "text"},
             timeout_ms=READ_TIMEOUT_MS,
-        )
-    )
+        ),
+    ]
     return Plan(channel="webofscience", purpose="search", actions=tuple(actions))

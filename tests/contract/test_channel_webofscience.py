@@ -60,11 +60,23 @@ def test_plan_uses_only_declared_verbs() -> None:
 def test_plan_only_navigates_inside_declared_domains() -> None:
     manifest = _channel().manifest
     plan = plan_search.build(_query())
-    hosts = [urlparse(a.params["url"]).hostname for a in plan.actions if a.verb == "goto"]
-    assert hosts, "plan must navigate somewhere"
-    for host in hosts:
+    # A reload carries no URL: it re-navigates to wherever the tab already is, so
+    # there is nothing to check against the allowlist.
+    urls = [a.params["url"] for a in plan.actions if a.verb == "goto" and "url" in a.params]
+    assert urls, "plan must navigate somewhere"
+    for url in urls:
+        host = urlparse(url).hostname
         assert host is not None
         assert any(host == d or host.endswith("." + d) for d in manifest.domains)
+
+
+def test_plan_reloads_the_result_page() -> None:
+    """A reload is how the whole result set arrives; scrolling must not be needed."""
+
+    plan = plan_search.build(_query())
+    reloads = [a for a in plan.actions if a.verb == "goto" and a.params.get("reload") is True]
+    assert reloads, "the plan must reload the result page"
+    assert not [a for a in plan.actions if a.verb == "scroll"], "reloading replaces scrolling"
 
 
 def test_plan_stays_within_kernel_budget() -> None:
@@ -95,9 +107,11 @@ def test_pages_and_sort_cannot_share_one_call() -> None:
         plan_search.build(_query(page=2, sort="date"))
 
 
-def test_plan_costs_three_network_actions() -> None:
+def test_plan_costs_four_network_actions() -> None:
+    """goto, type, click and the reload that fetches the whole page."""
+
     plan = plan_search.build(_query())
-    assert sum(1 for a in plan.actions if a.verb in NETWORK_VERBS) == 3
+    assert sum(1 for a in plan.actions if a.verb in NETWORK_VERBS) == 4
 
 
 def test_type_clears_the_editor_first() -> None:

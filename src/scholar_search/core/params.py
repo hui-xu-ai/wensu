@@ -45,9 +45,9 @@ def validate_params(verb: str, params: Any) -> str | None:
 
     if verb == "goto":
         if params.get("reload") is True:
-            # Equivalent to the user pressing F5. The site then loads the whole
-            # result page at once, where the in-page navigation after a search
-            # fills it lazily.
+            # A reload is the F5 the user would press. Measured on the live site:
+            # the reloaded result page streams all 50 records through
+            # runQueryGetRecordsStream and never issues runQuerySearch at all.
             return None
         url = params.get("url")
         if not isinstance(url, str) or not url.strip():

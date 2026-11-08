@@ -81,6 +81,10 @@ def validate_request(message: dict[str, Any], domains: Iterable[str] | None = No
         return error
 
     if action == "goto":
+        if params.get("reload") is True:
+            # No URL travels with a reload; the extension checks the live one
+            # against the same allowlist immediately before reloading.
+            return None
         allowed = tuple(domains) if domains is not None else TRUSTED_DOMAINS
         parsed = urlparse(str(params["url"]))
         if parsed.scheme != "https":

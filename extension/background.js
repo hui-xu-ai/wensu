@@ -51,17 +51,21 @@ async function activeTab() {
   return tab;
 }
 
-function waitComplete(tabId, timeoutMs = 15000) {
+function waitComplete(tabId, timeoutMs = 8000) {
+  // Resolves either way. Waiting for "complete" is an optimistic assumption: a
+  // heavy page may keep loading past the deadline, and a goto that fails there
+  // used to throw, poisoning the whole bridge connection. The subsequent
+  // wait_for is what actually decides whether the page is usable.
   const deadline = Date.now() + timeoutMs;
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const tick = async () => {
       try {
         const tab = await chrome.tabs.get(tabId);
         if (tab.status === "complete") return resolve();
       } catch (error) {
-        return reject(error);
+        return resolve();
       }
-      if (Date.now() > deadline) return reject(new Error("timeout.navigation"));
+      if (Date.now() > deadline) return resolve();
       setTimeout(tick, 250);
     };
     tick();
@@ -69,8 +73,14 @@ function waitComplete(tabId, timeoutMs = 15000) {
 }
 
 async function pageMeta(tabId) {
+  // sendMessage never settles while the frame is being replaced, and a goto that
+  // waits on it hangs forever. Race it against a deadline: the meta is only ever
+  // a bonus (status/title), never required for the action to succeed.
   try {
-    const result = await chrome.tabs.sendMessage(tabId, { type: "meta" });
+    const result = await Promise.race([
+      chrome.tabs.sendMessage(tabId, { type: "meta" }),
+      new Promise((resolve) => setTimeout(() => resolve(null), 3000)),
+    ]);
     return (result && result.data) || {};
   } catch (error) {
     return {};
@@ -99,9 +109,17 @@ async function onHostMessage(message, channel) {
       const tab = await activeTab();
       if (!tab || !tab.id) throw new Error("no_active_tab");
       if (params.reload === true) {
-        // The F5 the user would press: the result page is then built in one pass
-        // instead of being filled in lazily as it scrolls.
-        await chrome.tabs.reload(tab.id);
+        // Navigate to the current URL. chrome.tabs.reload() discards the pending
+        // reply and the host then pairs ids wrongly. The kernel cannot check a URL
+        // it was not given, so the live one is checked here, against the same
+        // allowlist.
+        const current = await chrome.tabs.get(tab.id);
+        if (!current.url) throw new Error("no_active_tab");
+        const live = new URL(current.url);
+        if (live.protocol !== "https:" || !allowedHost(live.hostname, domains)) {
+          throw new Error("policy.domain");
+        }
+        await chrome.tabs.update(tab.id, { url: current.url });
       } else {
         const url = new URL(params.url);
         if (url.protocol !== "https:" || !allowedHost(url.hostname, domains)) {
