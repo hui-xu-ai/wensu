@@ -4,6 +4,23 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.10] - 2026-11-09
+
+### Changed
+
+- **Package metadata now names both channels.** `pyproject.toml`'s `description` still said
+  "知网为首个渠道", and that string is what PyPI shows in its header — the previous commit corrected
+  the docs but could not reach PyPI, because the long description is baked in at build time and PyPI
+  refuses to overwrite a published version.
+- The README opened with the same claim; it now lists CNKI and Web of Science with the WoS-specific
+  capability (journal impact factors, local filtering and sorting at zero extra requests), and the
+  verified-capability table carries the WoS rows measured during this pass.
+
+### Note
+
+- No code changed in this release. It exists so the published metadata matches the software — a
+  documentation fix that never reaches the index is only half a fix.
+
 ## [0.12.9] - 2026-11-09
 
 ### Fixed — the last of the audit's minors
