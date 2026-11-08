@@ -240,25 +240,6 @@ class Channel(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
-class ExecutionPolicy:
-    """Effective limits after clamping. Channels cannot widen these."""
-
-    min_interval_ms: int
-    max_interval_ms: int
-    max_pages_per_call: int
-    max_pages_per_session: int
-    daily_request_limit: int
-    cooldown_hours: int
-
-    def clamp_interval(self, requested_ms: int) -> int:
-        if requested_ms < self.min_interval_ms:
-            raise ValueError(
-                f"interval {requested_ms}ms is below the hard floor {self.min_interval_ms}ms"
-            )
-        return min(requested_ms, self.max_interval_ms)
-
-
-@dataclass(frozen=True, slots=True)
 class ActionOutcome:
     action: Action
     ok: bool

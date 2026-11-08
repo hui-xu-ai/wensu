@@ -49,14 +49,14 @@ each action frame carries `id`, `action`, `params`; the reply is
 
 | Verb | Params | Returns |
 |---|---|---|
-| `goto` | `url` (https) | `{url, title, status, captcha_visible, auth_required}` |
+| `goto` | `url` (https)，或 `reload: true` 就地刷新 | `{url, title, status, captcha_visible, auth_required}` |
 | `wait_for` | `selector`, `state?` (`visible`/`hidden`), `timeout_ms?` | `{matched}` |
 | `type` | `selector`, `text`, `clear?` | `{}` |
 | `click` | `selector` | `{}` |
 | `select` | `selector`, `value` | `{}` |
 | `read_html` | — | `{html, truncated}` |
-| `read_text` | `selector` | `{text}` |
-| `scroll` | `to` (`top`/`bottom`) | `{}` |
+| `read_text` | `selector`, `mode` (`inner`/`text`) | `{text}` |
+| `scroll` | `to` (`top`/`bottom`) 或 `by` (1..10000 px) | `{}` |
 | `sleep` | `ms` (≤3000) | `{}` |
 
 Unknown verbs and unknown parameter keys are rejected, never ignored. The

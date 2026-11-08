@@ -1,6 +1,7 @@
 """Command line entry point.
 
-P0 only wires the command surface. Implementations land in later phases.
+Exposes the same service the MCP server does, for on-demand use: no daemon, no
+startup hook, one process per command.
 """
 
 from __future__ import annotations

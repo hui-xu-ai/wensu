@@ -4,6 +4,27 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.3] - 2026-11-09
+
+### Cleanup — minor items from the independent audit
+
+- **Dead code removed**: `ExecutionPolicy` (defined, never instantiated), `ConfigurationError` and
+  `SmokeTestFailed` (defined, never raised), and the empty `adapters/cdp` package.
+- **Doc drift corrected**: `incidents.md` placed the host runtime in `%TEMP%` when it actually lives
+  in `%LOCALAPPDATA%\scholar-search\host` — anyone troubleshooting from that line would search the
+  wrong tree; `reference-parity.md` claimed 143 tests; `cli.py` still described itself as "P0 only
+  wires the command surface"; `bridge-protocol.md` was missing the `by`, `mode` and `reload`
+  parameters that other sections already describe.
+
+## [0.12.2] - 2026-11-09
+
+### Docs
+
+- **ADR 0012** writes down the bridge threat model that the audit's C5 was judged against: who sits
+  inside the trust boundary, what a compromised renderer can and cannot do through this bridge, and
+  why the three obvious mitigations were rejected. C5 becomes an accepted risk with a stated
+  reopening condition, not an open defect.
+
 ## [0.12.1] - 2026-11-08
 
 ### Fixed — fourth batch from the independent audit (tests that could not fail)

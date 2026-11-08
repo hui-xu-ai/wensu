@@ -13,10 +13,6 @@ class ScholarSearchError(Exception):
     """Base class for all project errors."""
 
 
-class ConfigurationError(ScholarSearchError):
-    """Invalid or unsafe configuration."""
-
-
 class ChannelError(ScholarSearchError):
     """Channel could not be loaded or is not compatible."""
 
@@ -79,7 +75,3 @@ class BridgeError(ScholarSearchError):
 
 class BridgeTimeout(BridgeError):
     """The browser did not answer within the deadline."""
-
-
-class SmokeTestFailed(ScholarSearchError):
-    """A transport or channel self-check failed."""

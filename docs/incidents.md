@@ -152,7 +152,7 @@
 
 - **现象**：Edge 拉起宿主后 Python 立即退出码 1，`host.log` 不生成。
 - **根因**：浏览器以**低完整性级别**启动原生宿主，写不了 `AppData\Local`；异常发生在写日志之前。
-- **修复**：宿主运行时（`bridge.json`、日志）改到 `%TEMP%\scholar-search`；启动器捕获 stderr 落盘便于诊断。
+- **修复**：宿主运行时（`bridge.json`、日志）改到 `%LOCALAPPDATA%\scholar-search\host`（早先记成 `%TEMP%`，2026-11-09 更正）；启动器捕获 stderr 落盘便于诊断。
 - **可借鉴**：否。参考项目都不走原生消息。
 
 ## 2026-10-20 Edge 不启动 `.cmd` 宿主
