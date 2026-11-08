@@ -51,7 +51,7 @@ async function activeTab() {
   return tab;
 }
 
-function waitComplete(tabId, timeoutMs = 8000) {
+function waitComplete(tabId, timeoutMs = 5000) {
   // Resolves either way. Waiting for "complete" is an optimistic assumption: a
   // heavy page may keep loading past the deadline, and a goto that fails there
   // used to throw, poisoning the whole bridge connection. The subsequent
@@ -79,7 +79,7 @@ async function pageMeta(tabId) {
   try {
     const result = await Promise.race([
       chrome.tabs.sendMessage(tabId, { type: "meta" }),
-      new Promise((resolve) => setTimeout(() => resolve(null), 3000)),
+      new Promise((resolve) => setTimeout(() => resolve(null), 1000)),
     ]);
     return (result && result.data) || {};
   } catch (error) {

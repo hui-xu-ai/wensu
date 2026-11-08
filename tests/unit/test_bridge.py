@@ -8,8 +8,20 @@ from pathlib import Path
 
 from scholar_search.adapters.bridge import BridgeAdapter
 from scholar_search.adapters.bridge.host import BridgeHost, read_frame, write_frame
-from scholar_search.adapters.bridge.policy import validate_request
+from scholar_search.adapters.bridge.policy import narrow_domains, validate_request
 from scholar_search.core.contracts import Action
+
+
+def test_narrow_domains_fails_closed_when_nothing_survives() -> None:
+    """An out-of-scope request must yield an empty set, never the full list.
+
+    Returning the trusted list here would hand back a wider scope than the caller
+    asked for — the exact fail-open the module's own docstring forbids.
+    """
+
+    assert narrow_domains(["evil.test"], ("good.test",)) == ()
+    assert narrow_domains(["good.test"], ("good.test",)) == ("good.test",)
+    assert narrow_domains(None, ("good.test",)) == ("good.test",)
 
 
 def test_policy_accepts_allowed_goto() -> None:

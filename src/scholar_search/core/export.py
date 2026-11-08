@@ -30,7 +30,18 @@ _STRING_FIELDS = (
 )
 _LIST_FIELDS = ("authors", "keywords")
 _INT_FIELDS = ("citations", "downloads")
-_KNOWN = frozenset({*_STRING_FIELDS, *_LIST_FIELDS, *_INT_FIELDS, "year", "fetched_at", "doc_type"})
+_FLOAT_FIELDS = ("impact_factor",)
+_KNOWN = frozenset(
+    {
+        *_STRING_FIELDS,
+        *_LIST_FIELDS,
+        *_INT_FIELDS,
+        *_FLOAT_FIELDS,
+        "year",
+        "fetched_at",
+        "doc_type",
+    }
+)
 
 _RIS_TYPES = {
     "journal": "JOUR",
@@ -112,6 +123,12 @@ def record_from_payload(payload: Mapping[str, Any]) -> Record:
     if doc_type is not None and not isinstance(doc_type, str):
         raise ValueError("doc_type must be a string")
 
+    impact = payload.get("impact_factor")
+    if impact is not None:
+        if isinstance(impact, bool) or not isinstance(impact, (int, float)):
+            raise ValueError("impact_factor must be a number")
+        impact = float(impact)
+
     year_text = _year(payload.get("year"))
     fetched = payload.get("fetched_at")
     if isinstance(fetched, str):
@@ -137,6 +154,7 @@ def record_from_payload(payload: Mapping[str, Any]) -> Record:
         url=_text(payload.get("url"), "url") or None,
         fetched_at=fetched,
         doc_type=_text(doc_type, "doc_type").casefold() or None,
+        impact_factor=impact,
     )
 
 

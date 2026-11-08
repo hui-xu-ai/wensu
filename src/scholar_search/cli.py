@@ -6,6 +6,7 @@ P0 only wires the command surface. Implementations land in later phases.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import sys
 from collections.abc import Sequence
@@ -68,6 +69,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    # A zh-CN Windows console defaults to GBK, so `wensu search ... > out.json`
+    # wrote GBK bytes into a file every consumer reads as UTF-8. Fix the stream,
+    # not just the strings: ensure_ascii=False is what makes this matter.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        with contextlib.suppress(OSError, ValueError):
+            reconfigure(encoding="utf-8")
+
     args = build_parser().parse_args(argv)
 
     if args.command is None:
@@ -141,6 +152,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         except ScholarSearchError as error:
             print(f"wensu: {error}", file=sys.stderr)
             return 1
+        except ValueError as error:
+            # SearchQuery raises plain ValueError for out-of-range arguments such
+            # as --limit 100 or --page 9. Those are user mistakes, not bugs, and
+            # deserve a one-line message rather than a traceback.
+            print(f"wensu: {error}", file=sys.stderr)
+            return 2
 
         if args.format == "json":
             payload = {

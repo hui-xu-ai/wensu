@@ -1,7 +1,37 @@
 from __future__ import annotations
 
-from scholar_search.core.export import to_endnote, to_ris
+import pytest
+
+from scholar_search.core.contracts import Record
+from scholar_search.core.export import record_from_payload, to_endnote, to_ris
 from support import make_record
+
+
+def test_record_from_payload_round_trips_every_schema_field() -> None:
+    """A Record built from WoS data must survive the payload round trip.
+
+    The MCP export tool rebuilds records through record_from_payload, so any field
+    the schema allows but this rejects makes export fail for a whole channel.
+    """
+
+    record = Record(
+        channel="webofscience",
+        title="A paper",
+        authors=["Ada"],
+        year=2026,
+        impact_factor=2.4,
+        url="https://webofscience.clarivate.cn/wos/woscc/full-record/WOS:1",
+    )
+    back = record_from_payload(record.to_dict())
+    assert back.impact_factor == 2.4
+    assert back.title == "A paper"
+
+
+def test_record_from_payload_rejects_a_non_numeric_impact_factor() -> None:
+    payload = Record(channel="webofscience", title="t").to_dict()
+    payload["impact_factor"] = "high"
+    with pytest.raises(ValueError, match="impact_factor"):
+        record_from_payload(payload)
 
 
 def test_ris_contains_bibliographic_fields() -> None:

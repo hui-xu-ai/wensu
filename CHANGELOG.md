@@ -4,6 +4,38 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.11.0] - 2026-11-08
+
+### Fixed — first batch from an independent audit
+
+- **The CLI wrote GBK.** On a zh-CN Windows console `wensu search ... > out.json` produced GBK
+  bytes, which every consumer reads as UTF-8 — `ensure_ascii=False` made it matter. `stdout` and
+  `stderr` are reconfigured to UTF-8 at startup.
+- **`export` rejected every Web of Science record.** `record_from_payload` did not know
+  `impact_factor`, so the MCP export tool failed with `unknown record fields` for any record
+  carrying one. The field is now accepted as a float, with a round-trip test.
+- **`narrow_domains` failed open.** When none of the requested domains fell inside the trusted
+  scope, it returned the *whole* trusted list — handing the caller a wider scope than it asked
+  for. It now returns the empty set, which the host turns into a rejection.
+- **`goto` could exceed its own action budget.** The extension's worst case was 8 + 3 + 1.5 = 12.5 s
+  against a 10 s budget, so the kernel gave up while the action went on to succeed. The extension's
+  worst case is now 5 + 1 + 1.5 = 7.5 s, back inside the budget without moving the plan's ceiling.
+- **Out-of-range CLI arguments printed a traceback.** `--limit 100` or `--page 9` raised a bare
+  `ValueError`; they now print one line and exit 2.
+
+### Added
+
+- **`scripts/check-plan.py`** — feeds every channel's plan through *both* validation layers and
+  refuses to pass if either rejects it. `docs/incidents.md` has promised this gate since the
+  two-layer drift first bit; it exists now.
+
+### Note
+
+- Also from the audit but **not** in this batch, deliberately: the `page` back-fill that hides a
+  failed page turn (3 places), the risk markers that fire on ordinary titles (`Access Denied`,
+  `sign in`, and the bare substring `sso`), and `min_impact_factor` being silently ignored by CNKI.
+  Each needs a design decision, not just a patch.
+
 ## [0.10.5] - 2026-11-08
 
 ### Changed

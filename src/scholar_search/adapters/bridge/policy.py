@@ -65,7 +65,11 @@ def narrow_domains(requested: Iterable[str] | None, trusted: Iterable[str]) -> t
             for trusted in trusted_list
         )
     )
-    return narrowed or trusted_list
+    # Fail closed. Returning the full trusted list when nothing survived would
+    # hand the caller a wider scope than it asked for, which is the opposite of
+    # what this function is for. An empty result means "no domain is allowed",
+    # and the caller rejects every request.
+    return narrowed
 
 
 def validate_request(message: dict[str, Any], domains: Iterable[str] | None = None) -> str | None:
