@@ -53,7 +53,10 @@ FORBIDDEN_VERB_MARKERS: tuple[str, ...] = (
     "exec",
 )
 
-Purpose = Literal["search", "detail", "journal", "export"]
+# `probe` is a read-only look at the page after a readiness wait timed out, used to
+# tell "the query matched nothing" apart from "the capture failed". It never clicks
+# or navigates, so it costs no quota.
+Purpose = Literal["search", "detail", "journal", "export", "probe"]
 SortOrder = Literal["relevance", "date", "citation"]
 # Local post-processing of already-parsed records. It never reaches the browser,
 # so ordering here costs no request — unlike the site's own sort control.
@@ -188,6 +191,10 @@ class SearchPage:
     # papers that year" — a distinction a caller cannot otherwise make, and one that
     # has already produced a wrong conclusion in practice.
     dropped_year: int = 0
+    # Set when the channel proved the query matched nothing. Without it an empty
+    # page is indistinguishable from a capture failure or a filter that removed
+    # everything, all three of which look like `records: []`.
+    empty_reason: str | None = None
 
 
 # --------------------------------------------------------------------------

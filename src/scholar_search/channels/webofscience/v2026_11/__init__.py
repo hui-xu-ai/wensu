@@ -47,6 +47,10 @@ class WebOfScienceChannel:
     def parse_search(self, html: str, *, query: SearchQuery) -> SearchPage:
         return parse_records.parse(html, query=query)
 
+    def is_empty_page(self, text: str) -> bool:
+        """Whether the page itself says the query matched nothing."""
+        return parse_records.is_empty_page(text)
+
     def plan_detail(self, url: str) -> Plan:
         raise ChannelError("webofscience channel does not implement detail yet")
 

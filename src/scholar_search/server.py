@@ -21,6 +21,9 @@ def _page_payload(page: Any) -> dict[str, Any]:
         # Non-zero with empty records means the local year filter removed
         # everything on this page — not that the topic has no papers that year.
         "dropped_year": page.dropped_year,
+        # "no_match" means the channel proved the query matched nothing. Without it
+        # an empty page is indistinguishable from a failed capture.
+        "empty_reason": page.empty_reason,
     }
 
 

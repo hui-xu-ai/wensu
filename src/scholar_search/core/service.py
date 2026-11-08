@@ -17,9 +17,11 @@ from urllib.parse import urlparse
 from .. import __version__
 from .cache import Cache
 from .contracts import (
+    Action,
     ActionOutcome,
     BrowserAdapter,
     Channel,
+    Plan,
     Record,
     SearchPage,
     SearchQuery,
@@ -84,7 +86,17 @@ class ScholarService:
         self._ensure_ready()
 
         plan = channel.plan_search(query)
-        outcomes = self._run(plan, spec)
+        try:
+            outcomes = self._run(plan, spec)
+        except ActionError:
+            # A query that matches nothing sends no data stream on either site, so
+            # the readiness wait times out. Distinguish that from a real failure by
+            # asking the page; the channel supplies the wording.
+            if self._looks_empty(channel, spec):
+                empty = SearchPage(records=(), total=0, page=None, empty_reason="no_match")
+                self._cache.set(key, _page_to(empty))
+                return empty
+            raise
         html = _html(outcomes)
         fixer = getattr(channel, "sort_fix", None)
         for _ in range(2):
@@ -239,6 +251,35 @@ class ScholarService:
                     code=outcome.error or "action.failed",
                 )
         return outcomes
+
+    def _looks_empty(self, impl: Channel, spec: ChannelSpec) -> bool:
+        """Ask the page whether the query matched nothing.
+
+        Run only after a readiness wait timed out. A zero-result search sends no
+        data stream on either site, so the wait can never succeed — without this
+        probe every empty search surfaced as `wait_for failed: timeout`, which costs
+        quota and tells the caller nothing. `read_text` is not a network verb, so the
+        probe itself is free.
+        """
+
+        checker = getattr(impl, "is_empty_page", None)
+        if checker is None:
+            return False
+        probe = Plan(
+            channel=spec.name,
+            purpose="probe",
+            actions=(Action("read_text", {"selector": "body", "mode": "text"}),),
+        )
+        try:
+            outcomes = self._run(probe, spec)
+        except ActionError:
+            return False
+        for outcome in outcomes:
+            if outcome.action.verb == "read_text" and isinstance(outcome.data, dict):
+                text = outcome.data.get("text")
+                if isinstance(text, str) and checker(text):
+                    return True
+        return False
 
 
 # -- cache serialisation ---------------------------------------------------

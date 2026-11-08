@@ -45,6 +45,10 @@ class CnkiChannel:
     def parse_search(self, html: str, *, query: SearchQuery) -> SearchPage:
         return parse_search.parse(html, query)
 
+    def is_empty_page(self, text: str) -> bool:
+        """Whether the page itself says the query matched nothing."""
+        return parse_search.is_empty_page(text)
+
     def sort_fix(self, query: SearchQuery, html: str) -> Plan | None:
         """Return a corrective plan when the grid ended up ascending."""
 

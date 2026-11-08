@@ -184,6 +184,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 # payload and silently omitted it, so the one signal that separates
                 # "nothing on this page" from "nothing exists" was missing here.
                 "dropped_year": page.dropped_year,
+                "empty_reason": page.empty_reason,
             }
             print(json.dumps(payload, ensure_ascii=False, indent=2))
         else:

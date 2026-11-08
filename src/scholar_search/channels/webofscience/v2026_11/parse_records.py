@@ -21,6 +21,19 @@ from ....core.errors import ParseError
 CHANNEL = "webofscience"
 PRIMARY_API = "runQuerySearch"
 
+
+# What the results page says when a query matches nothing. The site does not send
+# its data stream in that case, so capture never fires and the plan times out
+# instead of returning an empty page — which reads to a caller as "the tool broke",
+# or worse, as "this topic has no papers". Recognising the wording is site
+# knowledge, so it lives here rather than in the extension.
+EMPTY_MARKERS = (
+    "no records found",
+    "found no records",
+    "no results found",
+    "0 results",
+)
+
 DETAIL_PREFIX = "https://webofscience.clarivate.cn/wos/woscc/full-record/"
 
 # WoS document types are a small English vocabulary; anything outside it is
@@ -264,6 +277,17 @@ def _record(payload: dict[str, Any], factors: dict[str, float] | None = None) ->
         doc_type=_doc_type(payload),
         impact_factor=impact,
     )
+
+
+def is_empty_page(text: str) -> bool:
+    """True when the page itself says the query matched nothing.
+
+    Called only after the data stream failed to appear, so this turns a timeout into
+    an answer instead of an error.
+    """
+
+    lowered = " ".join(text.split()).lower()
+    return any(marker in lowered for marker in EMPTY_MARKERS)
 
 
 def parse(text: str, *, query: SearchQuery | None = None) -> SearchPage:

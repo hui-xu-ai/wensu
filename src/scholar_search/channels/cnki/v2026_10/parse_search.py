@@ -14,6 +14,16 @@ from .selectors import SEARCH
 _TOTAL = re.compile(r"([\d,]+)")
 _PAGE = re.compile(r"(\d+)\s*/\s*(\d+)")
 
+# What CNKI says when a query matches nothing. It renders an empty grid instead of
+# sending results, so readiness never fires and the plan times out.
+EMPTY_MARKERS = (
+    "抱歉，没有找到",
+    "没有找到与",
+    "检索结果：0",
+    "检索结果:0",
+    "未找到相关",
+)
+
 
 def _text(node: Tag | None) -> str | None:
     if node is None:
@@ -106,6 +116,18 @@ def _doc_type(raw: str | None) -> str | None:
 def _node_text(soup: BeautifulSoup, selector: str) -> str:
     node = soup.select_one(selector)
     return node.get_text() if node is not None else ""
+
+
+def is_empty_page(html: str) -> bool:
+    """True when CNKI itself says the query matched nothing.
+
+    CNKI shows an empty grid rather than a data stream, so the plan's readiness
+    wait times out. Recognising the wording is site knowledge and belongs here.
+    """
+
+    text = BeautifulSoup(html, "lxml").get_text(" ", strip=True)
+    lowered = " ".join(text.split())
+    return any(marker in lowered for marker in EMPTY_MARKERS)
 
 
 def parse(html: str, query: SearchQuery) -> SearchPage:

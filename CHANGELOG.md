@@ -44,6 +44,20 @@ them had produced, or would have produced, a **wrong conclusion**.
   a missing lock. The skill now advises serial calls and one retry, rather than claiming a fix that
   was not made.
 
+### Still broken — zero results reported as a timeout
+
+A query that matches nothing sends no data stream on either site, so `wait_for` never sees
+`data-ready` and the call ends as `wait_for failed: timeout` — 26 s and 4 quota spent, and nothing
+the caller can act on. `SearchPage.empty_reason` and a `read_text` probe (`service._looks_empty`,
+`is_empty_page` on both channels) are in place, but **the fix does not work yet**: the probe only
+runs when the plan raises, and during a manual investigation the same zero-result query made the
+plan *succeed* instead — leaving the browser on the advanced-search page with no results rendered.
+So the failure is not one behaviour but at least two, depending on what the page was showing before.
+
+Recording this rather than shipping it as fixed. The next step is to establish, with the page state
+controlled, what `wait_for` actually observes on a zero-result search, and only then decide whether
+the signal belongs in the plan, the probe, or the capture layer.
+
 ## [0.12.10] - 2026-11-09
 
 ### Changed
