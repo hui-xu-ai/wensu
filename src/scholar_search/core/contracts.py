@@ -55,6 +55,9 @@ FORBIDDEN_VERB_MARKERS: tuple[str, ...] = (
 
 Purpose = Literal["search", "detail", "journal", "export"]
 SortOrder = Literal["relevance", "date", "citation"]
+# Local post-processing of already-parsed records. It never reaches the browser,
+# so ordering here costs no request — unlike the site's own sort control.
+LocalSort = Literal["none", "citations", "year"]
 Capability = Literal["search", "detail", "journal", "export"]
 
 
@@ -96,6 +99,14 @@ class SearchQuery:
     year_to: int | None = None
     source_types: tuple[str, ...] = ()
     limit: int = 20
+    # The four below run on records that were already parsed. Their purpose is
+    # to keep a fifty-record page out of the caller's context: ask for a
+    # shortlist now, pull the abstracts of the few that matter afterwards from
+    # the cache, and never re-visit the site for data already in hand.
+    include_abstract: bool = False
+    sort_by: LocalSort = "none"
+    min_citations: int | None = None
+    sources_only: tuple[str, ...] = ()
 
     def validate(self) -> None:
         if not self.text.strip():
@@ -108,6 +119,8 @@ class SearchQuery:
             raise ValueError("limit must be within 1..50")
         if self.year_from and self.year_to and self.year_to < self.year_from:
             raise ValueError("year_to must be >= year_from")
+        if self.min_citations is not None and self.min_citations < 0:
+            raise ValueError("min_citations must be >= 0")
 
 
 @dataclass(slots=True)

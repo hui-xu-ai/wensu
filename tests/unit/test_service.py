@@ -98,3 +98,85 @@ def test_detail_returns_record(tmp_path: Path) -> None:
 
     record = service.detail("https://example.org/article/1", channel="fake")
     assert record.title == "A paper"
+
+
+def test_search_seeds_the_detail_cache(tmp_path: Path) -> None:
+    """A record already parsed during search must not cost a second visit."""
+
+    record = make_record("Paper A")
+    record.url = "https://example.org/article/1"
+    channel = FakeChannel(manifest=make_manifest(), records=[record])
+    scripts: list[list[dict[str, object]]] = [
+        [
+            {"verb": "goto", "data": {}},
+            {"verb": "read_html", "data": {"html": "<html>results</html>"}},
+        ],
+    ]
+    service = build_service(tmp_path, channel, scripts)
+
+    service.search(SearchQuery(text="x", channel="fake"))
+
+    # No script is left: anything that reached the browser would fail here.
+    detail = service.detail("https://example.org/article/1", channel="fake")
+    assert detail.title == "Paper A"
+
+
+SEARCH_SCRIPT: list[dict[str, object]] = [
+    {"verb": "goto", "data": {}},
+    {"verb": "read_html", "data": {"html": "<html>results</html>"}},
+]
+
+
+def test_search_omits_abstracts_by_default(tmp_path: Path) -> None:
+    channel = FakeChannel(manifest=make_manifest(), records=[make_record("Paper A")])
+    service = build_service(tmp_path, channel, [list(SEARCH_SCRIPT)])
+
+    page = service.search(SearchQuery(text="x", channel="fake"))
+
+    assert page.records[0].abstract is None
+
+
+def test_include_abstract_keeps_it(tmp_path: Path) -> None:
+    channel = FakeChannel(manifest=make_manifest(), records=[make_record("Paper A")])
+    service = build_service(tmp_path, channel, [list(SEARCH_SCRIPT)])
+
+    page = service.search(SearchQuery(text="x", channel="fake", include_abstract=True))
+
+    assert page.records[0].abstract == "Abstract text"
+
+
+def test_local_sort_orders_by_citations(tmp_path: Path) -> None:
+    low = make_record("Low")
+    low.citations = 2
+    high = make_record("High")
+    high.citations = 40
+    channel = FakeChannel(manifest=make_manifest(), records=[low, high])
+    service = build_service(tmp_path, channel, [list(SEARCH_SCRIPT)])
+
+    page = service.search(SearchQuery(text="x", channel="fake", sort_by="citations"))
+
+    assert [record.title for record in page.records] == ["High", "Low"]
+
+
+def test_min_citations_keeps_records_without_a_count(tmp_path: Path) -> None:
+    measured = make_record("Measured")
+    measured.citations = 1
+    unmeasured = make_record("Unmeasured")  # citations stays None
+    channel = FakeChannel(manifest=make_manifest(), records=[measured, unmeasured])
+    service = build_service(tmp_path, channel, [list(SEARCH_SCRIPT)])
+
+    page = service.search(SearchQuery(text="x", channel="fake", min_citations=5))
+
+    assert [record.title for record in page.records] == ["Unmeasured"]
+
+
+def test_sources_only_filters_by_journal(tmp_path: Path) -> None:
+    inside = make_record("Inside")
+    outside = make_record("Outside")
+    outside.source = "Something Else"
+    channel = FakeChannel(manifest=make_manifest(), records=[inside, outside])
+    service = build_service(tmp_path, channel, [list(SEARCH_SCRIPT)])
+
+    page = service.search(SearchQuery(text="x", channel="fake", sources_only=("journ",)))
+
+    assert [record.title for record in page.records] == ["Inside"]

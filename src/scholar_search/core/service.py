@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from datetime import datetime
 from typing import Any, Literal
 from urllib.parse import urlparse
@@ -81,6 +82,14 @@ class ScholarService:
             html = _html(outcomes)
         page = channel.parse_search(html, query=query)
 
+        # Seed the detail cache before any filtering happens. A caller that wants
+        # five records now may want the abstract of the twelfth one later, and
+        # fetching it from the site would cost a browser action for data we have
+        # already parsed and are about to throw away.
+        for record in page.records:
+            if record.url:
+                self._cache.set(_key("detail", spec, {"url": record.url}), record.to_dict())
+
         records = page.records
         if query.year_from is not None or query.year_to is not None:
             # The site's year control is unreliable, so filter what we fetched.
@@ -92,8 +101,14 @@ class ScholarService:
                 and (query.year_from is None or record.year >= query.year_from)
                 and (query.year_to is None or record.year <= query.year_to)
             )
+        records = _narrow(records, query)
         if len(records) > query.limit:
             records = records[: query.limit]
+        if not query.include_abstract:
+            # An abstract is roughly 85% of a record's context cost. Dropping it
+            # is what keeps a fifty-record page affordable; `detail(url)` serves
+            # the full record from the cache seeded above, with no second visit.
+            records = tuple(replace(record, abstract=None) for record in records)
         if records is not page.records or page.page != query.page:
             page = SearchPage(
                 records=records,
@@ -220,6 +235,35 @@ def _record_from(payload: dict[str, Any]) -> Record:
     if isinstance(fetched, str):
         data["fetched_at"] = datetime.fromisoformat(fetched)
     return Record(**data)
+
+
+def _narrow(records: Sequence[Record], query: SearchQuery) -> tuple[Record, ...]:
+    """Apply the local filters and ordering — none of these touch the browser.
+
+    A missing citation count is *kept* rather than dropped: some result views do
+    not ship one at all, and an empty page would read as "no such papers" when
+    the truth is "not measured".
+    """
+
+    narrowed = tuple(records)
+    if query.min_citations is not None:
+        narrowed = tuple(
+            record
+            for record in narrowed
+            if record.citations is None or record.citations >= query.min_citations
+        )
+    if query.sources_only:
+        wanted = tuple(source.casefold() for source in query.sources_only)
+        narrowed = tuple(
+            record
+            for record in narrowed
+            if record.source and any(want in record.source.casefold() for want in wanted)
+        )
+    if query.sort_by == "citations":
+        return tuple(sorted(narrowed, key=lambda record: record.citations or 0, reverse=True))
+    if query.sort_by == "year":
+        return tuple(sorted(narrowed, key=lambda record: record.year or 0, reverse=True))
+    return narrowed
 
 
 def _html(outcomes: Sequence[ActionOutcome]) -> str:

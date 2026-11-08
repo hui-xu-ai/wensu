@@ -40,8 +40,18 @@ def build_server(service: ScholarService) -> FastMCP:
         year_to: int | None = None,
         source_types: list[str] | None = None,
         limit: int = 20,
+        include_abstract: bool = False,
+        sort_by: Literal["none", "citations", "year"] = "none",
+        min_citations: int | None = None,
+        sources_only: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Search a channel for bibliographic records. Read-only."""
+        """Search a channel for bibliographic records. Read-only.
+
+        Returns a shortlist by default: abstracts are omitted unless
+        include_abstract is true, and sort_by / min_citations / sources_only
+        filter locally without any browser action. Call detail(url) for the full
+        record — after a search it is served from the cache, not the site.
+        """
         try:
             return _page_payload(
                 service.search(
@@ -54,6 +64,10 @@ def build_server(service: ScholarService) -> FastMCP:
                         year_to=year_to,
                         source_types=tuple(source_types or ()),
                         limit=limit,
+                        include_abstract=include_abstract,
+                        sort_by=sort_by,
+                        min_citations=min_citations,
+                        sources_only=tuple(sources_only or ()),
                     )
                 )
             )

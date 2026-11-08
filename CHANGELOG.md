@@ -4,6 +4,26 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] - 2026-11-08
+
+### Added
+
+- `search` accepts four local post-processing options: `include_abstract`, `sort_by`
+  (`citations` / `year`), `min_citations` and `sources_only`. They run on records that were already
+  parsed, so ordering and filtering cost no browser action — unlike the site's own sort control,
+  which is two clicks.
+- `search` seeds the detail cache for every parsed record before filtering, so a later
+  `detail(url)` answers from disk. Pulling those abstracts one by one would have been fifty
+  requests for data already in hand.
+
+### Changed
+
+- **`search` omits abstracts by default.** A fifty-record page costs roughly 20k tokens with
+  abstracts and about 3k without. Pass `include_abstract: true` for the previous behaviour; the
+  full record is also always reachable through `detail(url)`.
+- `min_citations` keeps records whose citation count is unknown: some result views (WoS
+  `runQuerySearch`) ship no count at all, and dropping them would read as "no such papers".
+
 ## [0.5.2] - 2026-11-08
 
 ### Fixed

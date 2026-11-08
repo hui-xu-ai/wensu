@@ -48,6 +48,7 @@
 
   let node = null;
   let pending = 0;
+  let hits = 0;
 
   function ensureNode() {
     if (node && node.isConnected) return node;
@@ -71,10 +72,21 @@
   }
 
   function begin() {
+    // Only the first request of a burst clears the node. One search can arrive
+    // as several `runQuery` responses (a 50-row page showed up as batches), and
+    // wiping on each of them would leave only the last batch behind.
+    if (pending === 0) {
+      const element = ensureNode();
+      element.removeAttribute("data-ready");
+      element.textContent = "";
+    }
     pending += 1;
-    const element = ensureNode();
-    element.removeAttribute("data-ready");
-    element.textContent = "";
+    hits += 1;
+    try {
+      document.documentElement.setAttribute("data-wensu-hits", String(hits));
+    } catch (error) {
+      /* ignore */
+    }
   }
 
   function append(chunk) {
