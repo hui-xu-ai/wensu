@@ -133,17 +133,31 @@ git push origin v0.4.0
 
 本地开发用短分支 + `gh pr create`，或直接在 `main` 上做小改动（个人项目可接受，但 CI 必须绿）。
 
-## 6. 要不要发 PyPI
+## 6. 发行渠道：GitHub Release 与 PyPI 都是自动的
 
-项目现在只出 GitHub Release 的 wheel，没有配 `pypi` 的 trusted publishing。0.4.0 起发行名是
-`wensu`（旧的 `scholar-search` 已被他人占用，不能再发）。要发 PyPI 的话：
+推送 `v*` tag 会触发 `.github/workflows/release.yml`，它做四件事：
 
-1. `[project.urls]` 与 classifiers 已补齐；
-2. 在 PyPI 上建项目并配置 trusted publisher 指向本仓库的 `release.yml`；
-3. 在 `release.yml` 里加一步 `pypa/gh-action-pypi-publish`；
-4. 或本地直接 `uv build && uv publish`（需要 PyPI token）。
+1. 构建 wheel + sdist；
+2. 校验 tag 与 `__version__` 一致（不一致直接失败）；
+3. 用 `softprops/action-gh-release` 创建 GitHub Release，附上两个产物；
+4. 用 `pypa/gh-action-pypi-publish` **发布到 PyPI**（项目 `wensu`）。
 
-没做这一步之前，用户安装靠 `pip install <wheel 路径>`。
+实测（2026-11-09，`v0.12.9`）：tag 推上去后约一分钟，Release 页面出现
+`wensu-0.12.9-py3-none-any.whl` 与 `wensu-0.12.9.tar.gz`，PyPI 上 `info.version` 同步为 0.12.9，
+终端 `pip install wensu` 即可装到当前版本。
+
+所以**发布一个新版本只需要四步**：改四处版本号 → 提交 → 打 tag → 推 tag。Release 和 PyPI 不用手动做。
+
+前置条件（一次性配置，已完成）：PyPI 上项目 `wensu` 的 trusted publisher 指向本仓库的
+`release.yml`，无需 API token，凭据通过 OIDC 换取。换仓库或换工作流文件名时要同步改这一项，
+否则发布那一步会报 `invalid-publisher`。
+
+npm bundle（`packages/dsh-wensu`）走**另一条**流水线：`.github/workflows/publish-npm.yml`，
+推 `dsh-wensu-v*` 形式的 tag 触发。bundle 的版本与 Python 包**故意不同步**——它只包含
+`cordis.patch.yml`（一行「启动 `wensu serve --stdio`」）和 README，内容很少变。
+
+插件市场的展示信息在 `docs/market/index.json`，由市场从 GitHub raw 直接拉取。**改描述不需要发版**，
+改完推送就生效；但新增 `versions` 条目必须在 npm 发布之后，否则市场会指向一个装不下来的版本。
 
 ## 7. 不要提交的东西
 

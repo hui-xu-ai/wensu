@@ -10,10 +10,17 @@
 | 装什么 | 版本在哪看 | 当前 |
 |---|---|---|
 | DSH bundle（本目录） | npm / 插件市场 | **0.4.4** |
-| `wensu` 命令本体（Python 包） | PyPI | 0.4.2（`pip install -U wensu` 时看得到） |
+| `wensu` 命令本体（Python 包） | PyPI | **0.12.9**（`pip install -U wensu`）|
 
-市场显示 0.4.4 而 `pip show wensu` 是 0.4.2 属于正常现象；bundle 只负责把 MCP 客户端接进 DSH，
+市场显示 0.4.4 而 `pip show wensu` 是 0.12.9 属于正常现象；bundle 只负责把 MCP 客户端接进 DSH，
 不含服务端代码。本 bundle 走 npm 发布，**不产生 GitHub Release**；Release 只跟 Python 包的发版。
+
+bundle 提供的工具有哪些，取决于装的那份 `wensu` 认不认渠道：
+
+- **知网（CNKI）** —— 中文题录，中文检索式
+- **Web of Science** —— 英文题录，`TS=`/`ALL=` 检索式，记录自带期刊影响因子
+
+两者都由同一个 `search` 工具以 `channel` 参数区分，不需要装两个 bundle。
 
 ## 前置
 

@@ -23,6 +23,12 @@
           "en": "CNKI",
           "zh": "知网"
         }
+      },
+      "webofscience": {
+        "title": {
+          "en": "Web of Science",
+          "zh": "Web of Science"
+        }
       }
     },
     "sortKeys": {
@@ -39,12 +45,12 @@
     {
       "name": "@hui-xu-ai/dsh-wensu",
       "title": {
-        "en": "Wensu · CNKI literature search",
-        "zh": "文溯 · 知网文献检索"
+        "en": "Wensu · CNKI and Web of Science search",
+        "zh": "文溯 · 知网与 Web of Science 检索"
       },
       "description": {
-        "en": "Read-only Chinese bibliographic search over CNKI, exposed to the agent as MCP tools (search, detail, export, status). Run `wensu setup` and load the companion extension once.",
-        "zh": "只读的中文文献题录检索（知网渠道），以 MCP 工具接入 agent：search / detail / export / status。装完运行 wensu setup，并在浏览器里加载一次配套扩展。"
+        "en": "Read-only bibliographic search over CNKI and Web of Science, exposed to the agent as MCP tools (search, detail, export, status). The WoS channel carries journal impact factors; filtering and sorting run locally without extra requests. Run `wensu setup` and load the companion extension once.",
+        "zh": "只读的文献题录检索（知网 + Web of Science 双渠道），以 MCP 工具接入 agent：search / detail / export / status。WoS 渠道自带期刊影响因子，筛选与排序在本地完成、零额外请求。装完运行 wensu setup，并在浏览器里加载一次配套扩展。"
       },
       "icon": "icons/wensu.svg",
       "author": "hui-xu-ai",
@@ -56,11 +62,15 @@
       "metadata": {
         "category": "literature",
         "labels": [
-          "cnki"
+          "cnki",
+          "webofscience"
         ],
         "keywords": [
           "cnki",
           "知网",
+          "web of science",
+          "wos",
+          "影响因子",
           "文献检索",
           "题录",
           "mcp",

@@ -1,7 +1,11 @@
 # 文溯 · wensu
 
-只读的中文文献题录检索服务，以 MCP 工具的形式提供给 AI 客户端。微内核 + 渠道插件：
-知网是第一个渠道，万方、维普等以后按同一契约接入。
+只读的文献题录检索服务，以 MCP 工具或按需 CLI 的形式提供给 AI 客户端。微内核 + 渠道插件：
+
+- **知网（CNKI）** — 中文文献，中文检索式，17 个官方字段
+- **Web of Science** — 英文文献，`TS=` / `ALL=` 检索式，**自带期刊影响因子**（JCR），可筛选、可排序
+
+万方、维普等以后按同一契约接入。
 
 > 发行名 **wensu**（中文名「文溯」）。命令是 `wensu`，旧的 `scholar-search` 保留为兼容别名；
 > Python 模块名仍是 `scholar_search`，运行期目录仍是 `%LOCALAPPDATA%\scholar-search`，老配置无需改动。
@@ -49,7 +53,7 @@ MCP 客户端 ──stdio / HTTP──▶ MCP server
                                │
                         内核：契约 / 策略 / 风控 / 计划 / 审计 / 缓存
                                │
-                        渠道插件 channels/cnki/v2026_10
+                        渠道插件 channels/cnki/ 与 channels/webofscience/
                                │
                      桥接适配器 ──TCP(loopback+token)──▶ 原生宿主
                                                           │
@@ -146,17 +150,22 @@ wensu setup --force
 
 ## 状态
 
-当前版本 **v0.12.3**（最新 release 见仓库 Releases 页；PyPI 上的 `wensu` 仍是旧版，见下方说明）。真机验证过的能力（2026-10-21，知网 2026.10 版页面）：
+当前版本 **v0.12.9**（`pip install wensu` 即可，PyPI 与 GitHub Release 同步）。真机验证过的能力：
 
 | 能力 | 状态 |
 |---|---|
-| 关键词检索 | 通过（`IPMC` 595 条、`钙钛矿太阳能电池` 11820 条） |
-| 专业检索式 | 通过（`SU='IPMC' and KY='驱动器'`） |
-| 翻页 1–3 | 通过 |
-| 每页 50 条 | 通过 |
-| 排序（时间 / 被引） | 通过，稳定降序 |
-| 单篇详情 | 通过（含摘要、作者单位、卷期页） |
+| 知网关键词检索 | 通过（`IPMC` 595 条、`钙钛矿太阳能电池` 11820 条） |
+| 知网专业检索式 | 通过（`SU='IPMC' and KY='驱动器'`） |
+| 知网翻页 1–3 | 通过 |
+| 知网每页 50 条 | 通过 |
+| 知网排序（时间 / 被引） | 通过，稳定降序 |
+| 知网单篇详情 | 通过（含摘要、作者单位、卷期页） |
 | 导出 RIS / EndNote | 通过（图书 → `TY  - BOOK`，学位论文 → `THES`） |
+| **WoS 关键词检索** | 通过（`actuator` 63025 条，单次取 50 条约 23 秒） |
+| **WoS 专业检索式** | 通过（`TS=(ionic AND (soft OR flexible) AND actuator) AND PY=(2026)`） |
+| **WoS 翻页第 2 页** | 通过（50 条，与第 1 页无重叠） |
+| **WoS 影响因子** | 通过（记录自带 `impact_factor`，本地筛选/排序零请求） |
+| **WoS 摘要按需取** | 通过（检索时播种缓存，`detail` 零网络动作） |
 
 ## 检索失败了？先看这三条
 
@@ -211,7 +220,7 @@ if ($cur -notmatch 'cnki\.net') {
 
 ```
 src/scholar_search/core/       内核：契约、注册表、策略、风控、审计、缓存、导出
-src/scholar_search/channels/   渠道插件（当前只有 cnki/2026.10）
+src/scholar_search/channels/   渠道插件（cnki/2026.10、webofscience/2026.11）
 src/scholar_search/adapters/   浏览器适配器（bridge 生产 / fixture 测试）
 src/scholar_search/transports/ stdio 与 HTTP
 native-host/                   原生消息宿主（纯通讯层，Windows）
