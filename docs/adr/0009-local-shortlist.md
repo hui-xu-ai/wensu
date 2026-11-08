@@ -44,8 +44,12 @@
 
 - 默认返回变为短清单（title / authors / source / year / volume / issue / pages / doi /
   keywords / citations / url / doc_type），摘要需显式索取。
-- **对所有渠道一致生效**——参数是工具级的。CNKI 的调用方同样拿到短清单；要摘要传
-  `include_abstract: true`，或走 `detail(url)`。
+- **对所有渠道一致生效**——参数是工具级的。但对 CNKI 它是**空操作**：CNKI 的列表页从不
+  产出摘要（`parse_search` 根本不设 `abstract`），摘要只在详情页。WoS 的列表页自带摘要，
+  所以这个开关只在 WoS 上真正省 token。
+- 两个渠道"取摘要"的代价因此不同：CNKI 走 `detail(url)` 要真实访问一次详情页；WoS 的
+  `detail(url)` 命中检索时播种的缓存，**零请求**。播种只针对**自带摘要**的记录——否则 CNKI
+  的列表行会把 `detail` 喂成一份比详情页更残缺的记录（0.6.1 修的就是这个）。
 - 每次检索多写约 50 条缓存记录；`Cache` 的容量与过期策略未改。
 - **站点端请求数不变**（仍是 3 个/检索），因此风控剖面不变。
 - 若日后要在返回里带上影响因子，必须改 `schemas/record.json`（`additionalProperties: false`），
