@@ -51,12 +51,26 @@ def clear_endpoint(path: Path) -> None:
             path.unlink()
 
 
+# A request is one JSON line. Accepting an unbounded line means one client can make
+# the host buffer without limit before it ever validates a token.
+MAX_LINE_BYTES = 1_000_000
+
+
 def serve_client(
     connection: socket.socket, host: BridgeHost, token: str, domains: tuple[str, ...]
 ) -> None:
     reader = connection.makefile("r", encoding="utf-8", newline="\n")
     try:
-        for line in reader:
+        while True:
+            line = reader.readline(MAX_LINE_BYTES)
+            if not line:
+                break
+            if not line.endswith("\n"):
+                # The line reached the cap before a newline: refuse it rather than
+                # grow the buffer. The connection is dropped because the stream is
+                # no longer aligned on line boundaries.
+                connection.sendall(b'{"ok":false,"error":"protocol.line_too_long"}\n')
+                break
             if not line.strip():
                 continue
             try:
@@ -76,6 +90,10 @@ def serve_client(
             if request.get("cmd") == "shutdown":
                 connection.sendall(b'{"ok":true}\n')
                 connection.close()
+                # os._exit skips every finally block, so the endpoint file has to be
+                # cleared by hand: a stale one makes the next client dial a dead port.
+                with contextlib.suppress(OSError):
+                    clear_endpoint(host_runtime_dir() / ENDPOINT_NAME)
                 os._exit(0)
 
             action = request.get("action")

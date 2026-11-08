@@ -4,6 +4,24 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.6] - 2026-11-09
+
+### Fixed — native host robustness (audit m19)
+
+- **A request line had no size limit.** The host read whole lines with `for line in reader`, so one
+  client could make it buffer without bound before it ever validated a token. Lines are capped at
+  1 MB; a line that reaches the cap before a newline is refused and the connection dropped, because
+  the stream is no longer aligned on line boundaries.
+- **`shutdown` left a stale endpoint behind.** `os._exit` skips every `finally` block, so
+  `bridge.json` survived and the next client dialled a dead port. The endpoint is cleared by hand
+  before exiting.
+
+### Not changed, deliberately
+
+- An invalid token still gets a reply. Making it silent would defend against little — anyone in the
+  same user session can read the token file (ADR 0012) — while costing every legitimate
+  misconfiguration its only diagnostic signal.
+
 ## [0.12.5] - 2026-11-09
 
 ### Fixed — remaining Python-side minors from the audit
