@@ -14,9 +14,16 @@ from .selectors import SEARCH
 _TOTAL = re.compile(r"([\d,]+)")
 _PAGE = re.compile(r"(\d+)\s*/\s*(\d+)")
 
-# What CNKI says when a query matches nothing. It renders an empty grid instead of
-# sending results, so readiness never fires and the plan times out.
+# How to tell a search that matched nothing from a capture that failed.
+#
+# The primary signal is "the page never left the search form": with zero results the
+# site does not navigate, the plan reloads the form expecting data, and times out.
 EMPTY_MARKERS = (
+    # Still on the search form.
+    "高级检索",
+    "专业检索",
+    "检索条件",
+    # A results page that did render, with nothing in it.
     "抱歉，没有找到",
     "没有找到与",
     "检索结果：0",

@@ -22,12 +22,19 @@ CHANNEL = "webofscience"
 PRIMARY_API = "runQuerySearch"
 
 
-# What the results page says when a query matches nothing. The site does not send
-# its data stream in that case, so capture never fires and the plan times out
-# instead of returning an empty page — which reads to a caller as "the tool broke",
-# or worse, as "this topic has no papers". Recognising the wording is site
-# knowledge, so it lives here rather than in the extension.
+# How to tell a search that matched nothing from a capture that failed.
+#
+# The important case is not a results page saying "no records": when a query matches
+# nothing the site does not navigate at all, and the browser stays on the search form.
+# The plan then reloads that form expecting a data stream, waits, and times out. So
+# "still on the search form" is the primary signal, and the results-page wording is
+# only a secondary one.
 EMPTY_MARKERS = (
+    # Still on the advanced-search form: the query was never executed.
+    "advanced search page loaded",
+    "query builder",
+    "fielded search",
+    # A results page that did render, with nothing in it.
     "no records found",
     "found no records",
     "no results found",
