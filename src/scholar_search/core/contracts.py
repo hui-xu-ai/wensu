@@ -183,6 +183,11 @@ class SearchPage:
     total: int | None = None
     page: int | None = None
     page_count: int | None = None
+    # How many records the local year filter removed from this page. Non-zero with
+    # an empty `records` means "nothing on THIS page matched", not "the topic has no
+    # papers that year" — a distinction a caller cannot otherwise make, and one that
+    # has already produced a wrong conclusion in practice.
+    dropped_year: int = 0
 
 
 # --------------------------------------------------------------------------

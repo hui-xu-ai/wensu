@@ -111,9 +111,14 @@ class ScholarService:
                 self._cache.set(_key("detail", spec, {"url": record.url}), record.to_dict())
 
         records = page.records
+        dropped_year = 0
         if query.year_from is not None or query.year_to is not None:
             # The site's year control is unreliable, so filter what we fetched.
-            # `total` still describes the site's result set, not the subset.
+            # `total` still describes the site's result set, not the subset — and a
+            # page filtered to nothing does NOT mean the topic has no papers in that
+            # year. A caller that reads an empty page as "no literature" draws a
+            # wrong conclusion, so the number dropped is counted and reported.
+            before = records
             records = tuple(
                 record
                 for record in records
@@ -121,6 +126,7 @@ class ScholarService:
                 and (query.year_from is None or record.year >= query.year_from)
                 and (query.year_to is None or record.year <= query.year_to)
             )
+            dropped_year = len(before) - len(records)
         records = _narrow(records, query)
         if len(records) > query.limit:
             records = records[: query.limit]
@@ -135,8 +141,29 @@ class ScholarService:
             # invisible: the caller saw success and a page number it asked for.
             # What lands here is whatever the channel actually observed.
             page = replace(page, records=records)
+        if dropped_year:
+            page = replace(page, dropped_year=dropped_year)
         self._cache.set(key, _page_to(page))
         return page
+
+    def channel_for_url(self, url: str) -> str | None:
+        """Which channel owns this URL, judged by the manifests' domain lists.
+
+        `detail(url)` used to default to CNKI, so passing back a URL that `search`
+        had just returned for Web of Science was refused by the policy layer that
+        had just allowed it. The caller has no way to know it must also pass
+        `channel` — the tool description never said so. Deriving it from the URL the
+        tool itself produced keeps search → detail a closed loop.
+        """
+
+        host = urlparse(url).hostname or ""
+        host = host.lower()
+        for spec in self._registry.discover():
+            for domain in spec.manifest.domains:
+                value = domain.lower()
+                if host == value or host.endswith(f".{value}"):
+                    return spec.name
+        return None
 
     def detail(self, url: str, *, channel: str) -> Record:
         spec, impl = self._resolve(channel)

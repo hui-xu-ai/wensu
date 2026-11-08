@@ -18,6 +18,9 @@ def _page_payload(page: Any) -> dict[str, Any]:
         "total": page.total,
         "page": page.page,
         "page_count": page.page_count,
+        # Non-zero with empty records means the local year filter removed
+        # everything on this page — not that the topic has no papers that year.
+        "dropped_year": page.dropped_year,
     }
 
 
@@ -48,13 +51,26 @@ def build_server(service: ScholarService) -> FastMCP:
     ) -> dict[str, Any]:
         """Search a channel for bibliographic records. Read-only.
 
+        channel: "cnki" (default; Chinese literature, Chinese queries) or
+        "webofscience" (English literature; also accepts a Web of Science expression
+        such as TS=(ionic AND actuator) AND PY=(2021-2026) — with no year range the
+        last five years are applied inside the expression).
+
         Returns a shortlist by default: abstracts are omitted unless
-        include_abstract is true, and sort_by / min_citations / sources_only
-        filter locally without any browser action. Call detail(url) for the full
-        record — after a search it is served from the cache, not the site.
+        include_abstract is true, and sort_by / min_citations / sources_only filter
+        locally without any browser action. For the full record call detail(url) —
+        after a search it is served from the cache, not the site, and detail infers
+        the channel from the URL.
+
+        An empty records list is a normal answer, not a failure: read `total` and
+        `dropped_year` before concluding that a topic has no papers. year_from /
+        year_to filter only the page just fetched, so an empty page means "nothing
+        on this page matched", and `dropped_year` says how many were removed. Widen
+        the query or try a synonym rather than concluding absence.
 
         min_impact_factor is honoured by channels that ship journal metrics
-        (currently webofscience); records whose journal has no metric are dropped.
+        (currently webofscience); records whose journal has no metric are dropped,
+        which lowers recall by design.
         """
         try:
             return _page_payload(
@@ -80,10 +96,23 @@ def build_server(service: ScholarService) -> FastMCP:
             return _payload(error)
 
     @mcp.tool()
-    def detail(url: str, channel: str = "cnki") -> dict[str, Any]:
-        """Fetch full metadata for one record by its detail URL."""
+    def detail(url: str, channel: str | None = None) -> dict[str, Any]:
+        """Fetch full metadata for one record by the URL `search` returned.
+
+        `channel` is optional: it is inferred from the URL's host. Pass it only to
+        override that inference.
+        """
         try:
-            return service.detail(url, channel=channel).to_dict()
+            resolved = channel or service.channel_for_url(url)
+            if resolved is None:
+                return {
+                    "status": "error",
+                    "code": "UNKNOWN_CHANNEL",
+                    "message": f"no channel claims the host of {url!r}",
+                    "channel": None,
+                    "retryable": False,
+                }
+            return service.detail(url, channel=resolved).to_dict()
         except (RiskBlocked, ScholarSearchError) as error:
             return _payload(error)
 

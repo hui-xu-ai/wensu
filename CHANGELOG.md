@@ -4,6 +4,46 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.11] - 2026-11-09
+
+### Fixed — issues found by real use of the MCP tools
+
+A session used the installed MCP server for a literature review and reported nine defects. Three of
+them had produced, or would have produced, a **wrong conclusion**.
+
+- **`detail` refused URLs that `search` had just returned.** `detail(url, channel="cnki")` defaulted
+  the channel to CNKI, so passing back a Web of Science URL — exactly what the tool description told
+  the caller to do — was rejected by the policy layer that had just allowed it
+  (`host 'webofscience.clarivate.cn' is not allowed`). The channel is now inferred from the URL's
+  host, against the manifests' own domain lists. This is what broke the documented
+  `search → detail` loop, and with it every WoS abstract.
+- **An empty page looked like "this topic has no papers".** `year_from` / `year_to` filter only the
+  page just fetched, while `total` keeps describing the whole site result set. The caller saw
+  `records: []` next to `total: 65` and concluded CNKI had no 2026 papers on the topic — it did; they
+  were on another page. Responses now carry `dropped_year`, so "nothing on this page matched" is
+  distinguishable from "nothing exists".
+- **The `search` description never named the channels.** `channel` was documented as
+  `{"type": "string", "default": "cnki"}` with no mention that `webofscience` exists, what query
+  syntax it takes, or that an empty result is a normal answer. The docstring now states both values,
+  the WoS expression forms, the year-filter caveat, and that `min_impact_factor` lowers recall by
+  design.
+
+### Changed
+
+- **The skill covered CNKI only.** `skills/scholar-search/SKILL.md` opened with "Chinese literature
+  (CNKI channel)" and listed 17 CNKI fields — nothing about Web of Science. It now documents channel
+  selection, WoS expression syntax, the two different year-filter behaviours, impact factors, the
+  `sort` / `sort_by` distinction, what `page: null` means, and a table of what each error means and
+  whether to retry.
+
+### Investigated, not reproduced
+
+- **Parallel searches killing each other.** Two concurrent CLI searches completed successfully and
+  serialised on the existing inter-process lock (37.3 s total, 8 quota — exactly two searches). The
+  lock works. The report came from the MCP path, where the cause is more likely tab contention than
+  a missing lock. The skill now advises serial calls and one retry, rather than claiming a fix that
+  was not made.
+
 ## [0.12.10] - 2026-11-09
 
 ### Changed
