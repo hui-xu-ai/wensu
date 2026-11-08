@@ -18,24 +18,59 @@ _PAGE = re.compile(r"(\d+)\s*/\s*(\d+)")
 def _text(node: Tag | None) -> str | None:
     if node is None:
         return None
-    value = node.get_text(" ", strip=True)
+    # Join with no separator: the highlight markup CNKI injects around matched
+    # words splits the title mid-token, and joining with a space turned "TiO2"
+    # into "TiO 2" — the detail page, which has no highlight, disagreed.
+    value = node.get_text("", strip=True)
     return value or None
 
 
+def _year(text: str | None) -> int | None:
+    """A four-digit prefix only counts when it is a plausible publication year."""
+
+    if not text or not text[:4].isdigit():
+        return None
+    year = int(text[:4])
+    return year if 1800 <= year <= 2200 else None
+
+
 def _int(text: str | None) -> int | None:
+    """Parse a count that may carry a decimal and a 万/千 multiplier.
+
+    Collapsing every non-digit used to turn "1.2万" into 12 (should be 12000) and
+    "12.5" into 125, so `--min-citations` and `--sort-by citations` worked on
+    numbers that were off by orders of magnitude.
+    """
+
     if not text:
         return None
-    digits = re.sub(r"[^\d]", "", text)
-    return int(digits) if digits else None
+    match = re.search(r"(\d+(?:\.\d+)?)\s*([万千]?)", text.replace(",", ""))
+    if not match:
+        return None
+    value = float(match.group(1))
+    unit = match.group(2)
+    if unit == "万":
+        value *= 10_000
+    elif unit == "千":
+        value *= 1_000
+    return round(value)
 
 
 def _normalize_url(href: object) -> str | None:
     if not isinstance(href, str):
         return None
-    if href.startswith("http"):
-        return href
-    if href.startswith("/"):
-        return "https://kns.cnki.net" + href
+    value = href.strip()
+    if value.startswith("//"):
+        # Protocol-relative: the host is part of the value, so completing the
+        # scheme gives https://kns.cnki.net/... — prepending the host instead
+        # produced a double-host URL.
+        return "https:" + value
+    if value.startswith("https://"):
+        return value
+    if value.startswith("/"):
+        return "https://kns.cnki.net" + value
+    # http: and everything else is rejected: the policy layer would refuse an
+    # http URL later anyway, so it must not enter a record as a usable link.
     return None
 
 
@@ -49,7 +84,7 @@ def _record(row: Tag) -> Record | None:
 
     authors = [text for node in row.select(SEARCH["authors"]) if (text := _text(node))]
     date_text = _text(row.select_one(SEARCH["date"]))
-    year = int(date_text[:4]) if date_text and date_text[:4].isdigit() else None
+    year = _year(date_text)
 
     return Record(
         channel="cnki",

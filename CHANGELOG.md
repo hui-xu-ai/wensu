@@ -4,6 +4,25 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.0] - 2026-11-08
+
+### Fixed — third batch from the independent audit (CNKI parsers)
+
+- **Conference papers were exported as journal articles.** A volume/issue/pages citation in the top
+  line unconditionally set `doc_type = "journal"`, overwriting the page's own 文献类型：会议. Since
+  `doc_type` drives RIS `TY` and EndNote `%0`, a conference paper came out as `JOUR`. The citation is
+  now evidence only when no type word was found.
+- **Titles carried spaces that the detail page did not have.** The list joins text nodes with a
+  space so highlighted words became `TiO 2`; the same record's detail page (no highlight) reads
+  `TiO2`. Text nodes are now joined with no separator.
+- **Counts were off by orders of magnitude.** Stripping every non-digit turned `1.2万` into `12`
+  (should be 12000) and `12.5` into `125`. Decimals and the 万/千 multipliers are parsed now.
+- **Years could violate the record schema.** `0000-00-00` produced `year=0` against a
+  `minimum: 1800` contract; the year is range-checked and returns `None` otherwise.
+- **URLs could be malformed or insecure.** `http://` links were accepted as-is, and
+  `//kns.cnki.net/x` became a double-host URL. Protocol-relative links complete their scheme now,
+  and anything that is not https is dropped rather than stored as a usable link.
+
 ## [0.11.1] - 2026-11-08
 
 ### Fixed — second batch from the independent audit

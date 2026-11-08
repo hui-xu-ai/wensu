@@ -130,9 +130,12 @@ def parse(html: str, url: str) -> Record:
     match = _TOP_LINE.search(top_line)
     if match:
         year = year or int(match.group("year"))
-        # A concrete volume/issue/pages citation is journal evidence and wins
-        # over any type word found in the metadata header.
-        doc_type = "journal"
+        # A concrete volume/issue/pages citation is journal evidence, but it must
+        # not overrule an explicit type word: CNKI stamps conference papers with
+        # "文献类型：会议" while still showing a proceedings citation with volume and
+        # pages. Overwriting here exported conference papers as journal articles.
+        if doc_type is None:
+            doc_type = "journal"
         volume = match.group("volume")
         issue = match.group("issue")
         pages = match.group("pages")
