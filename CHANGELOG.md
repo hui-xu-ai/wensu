@@ -4,6 +4,20 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.4] - 2026-11-09
+
+### Fixed — the two security-relevant minors from the independent audit
+
+- **An unbound tab skipped the domain check.** `policy.tab_scope` was only applied once a tab had been
+  bound by a `goto`, so the first non-`goto` action ran against whatever page happened to be active —
+  including one outside the channel's allowlist. The check now runs on every action.
+- **A failed click was reported as success.** The navigation race caught *every* exception and
+  answered `ok: true, navigation_expected: true`, so a click that never found its element, or was
+  refused by policy, looked like a click that started a navigation. Only the three
+  "content script went away" wordings and the deadline are treated that way now; everything else
+  surfaces. When the race does fire there is no risk snapshot — a missing `captcha_visible` is read
+  as "no opinion", which is the honest answer for a document that was replaced mid-click.
+
 ## [0.12.3] - 2026-11-09
 
 ### Cleanup — minor items from the independent audit

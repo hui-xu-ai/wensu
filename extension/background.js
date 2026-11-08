@@ -161,12 +161,17 @@ async function onHostMessage(message, channel) {
 
     const tabId = boundTabId !== null ? boundTabId : (await activeTab())?.id;
     if (!tabId) throw new Error("no_active_tab");
-    if (boundTabId !== null) {
-      const current = await chrome.tabs.get(tabId).catch(() => null);
-      if (!current || !allowedHost(new URL(current.url).hostname, domains)) {
-        throw new Error("policy.tab_scope");
-      }
+    // Checked whether or not the tab has been bound yet: before this, the first
+    // action on an unbound tab ran against whatever page happened to be active.
+    const current = await chrome.tabs.get(tabId).catch(() => null);
+    if (!current || !current.url) throw new Error("policy.tab_scope");
+    let currentHost = "";
+    try {
+      currentHost = new URL(current.url).hostname;
+    } catch (error) {
+      throw new Error("policy.tab_scope");
     }
+    if (!allowedHost(currentHost, domains)) throw new Error("policy.tab_scope");
 
     const message = { type: "dom_action", action, params };
 
@@ -193,17 +198,25 @@ async function onHostMessage(message, channel) {
     let result;
     if (action === "click") {
       // A navigational click can destroy the content-script context before it
-      // replies. Treat a lost reply as "navigation started"; the plan's
-      // following wait_for verifies the page.
+      // replies, so a lost reply means "navigation started". Only that counts:
+      // a missing element or a refusal must surface, or the caller sees success
+      // for a click that never happened.
       try {
         result = await Promise.race([
           sendToTab(),
           new Promise((resolve) => setTimeout(() => resolve(undefined), 2000)),
         ]);
       } catch (error) {
+        const text = String((error && error.message) || error);
+        if (!/Receiving end|Could not establish|message channel closed|content_not_ready/i.test(text)) {
+          throw error;
+        }
         result = undefined;
       }
       if (result === undefined) {
+        // No snapshot is available: the document was replaced mid-click. The risk
+        // layer reads a missing `captcha_visible` as "no opinion", which is the
+        // honest answer here, and the plan's next wait_for verifies the page.
         return reply({ ok: true, data: { navigation_expected: true } });
       }
     } else {
