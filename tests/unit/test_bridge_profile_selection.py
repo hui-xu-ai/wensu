@@ -86,7 +86,7 @@ def test_identical_labels_are_refused_not_guessed(
         BridgeAdapter().pin()
     message = str(caught.value)
     assert "WENSU_PROFILE" in message, "the message must name the way out"
-    assert "told apart" in message
+    assert "claimed more than once" in message
 
 
 def test_a_stale_registry_entry_does_not_make_a_single_host_ambiguous(

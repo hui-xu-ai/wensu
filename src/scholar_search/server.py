@@ -209,14 +209,21 @@ def _error_code(error: Exception) -> str:
 def _retryable(error: Exception) -> bool:
     """Whether repeating the same call could plausibly succeed.
 
-    Transport timeouts can: the page was slow, not wrong. Policy refusals and parse
-    failures cannot: the same request produces the same refusal. A risk block is the
-    one case where retrying is actively harmful.
+    Only a timeout qualifies: the page was slow, not wrong. Everything else is a
+    state the caller cannot change by asking again:
+
+    - a risk block is the one case where retrying is actively harmful;
+    - `BridgeError` means no host is reachable — a browser has to start or an
+      extension has to reconnect, and repeating the call changes neither. This used
+      to return True for it, which is the field the second review caught inviting a
+      retry loop that could never succeed;
+    - `BridgeAmbiguous` inherits `BridgeError`: two browsers cannot be told apart, and
+      the answer does not get clearer by asking twice.
     """
 
     if isinstance(error, RiskBlocked):
         return False
-    return isinstance(error, (BridgeTimeout, BridgeError))
+    return isinstance(error, BridgeTimeout)
 
 
 def _payload(
@@ -240,13 +247,20 @@ def _payload(
     # A caller that cannot act on an error will improvise. When the bridge is the
     # problem, say what the one permitted reaction is — an agent that was left to
     # guess once killed the user's browser.
-    action_error = error if isinstance(error, ActionError) else None
-    if action_error is not None and (action_error.code or "").startswith("bridge."):
+    #
+    # `BridgeError` counts, not only `ActionError`: "no live host" and "two browsers
+    # cannot be told apart" are raised before any action runs, so they carry no
+    # `bridge.` code and fell through to `_retryable` — which reported them as worth
+    # retrying.
+    #
+    # `BridgeTimeout` is excluded on purpose: it inherits `BridgeError`, but a slow
+    # page is the one transport problem that asking again can actually fix.
+    bridge_problem = isinstance(error, BridgeError) and not isinstance(error, BridgeTimeout)
+    bridge_problem = bridge_problem or (
+        isinstance(error, ActionError) and (error.code or "").startswith("bridge.")
+    )
+    if bridge_problem:
         payload["remediation"] = ScholarService.BRIDGE_REMEDIATION
-        # NOT retryable. Retrying is guaranteed to fail until something outside the
-        # caller changes: a browser has to start, or an extension has to reconnect.
-        # `retryable: true` here invited a retry loop that spent wall-clock time and
-        # could never succeed, which the report observed directly.
         payload["retryable"] = False
         payload["requires"] = "external_state_change"
     return payload

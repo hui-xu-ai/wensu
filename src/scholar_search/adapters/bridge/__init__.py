@@ -23,6 +23,7 @@ import json
 import os
 import socket
 import uuid
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -214,16 +215,27 @@ class BridgeAdapter:
             if not eligible:
                 raise self._no_host_error(wanted)
 
-        if len(eligible) > 1:
-            labels = {item[2] for item in eligible}
-            if len(labels) <= 1:
-                shown = next(iter(labels)) or "no profile reported"
-                raise BridgeAmbiguous(
-                    f"{len(eligible)} native hosts are live and cannot be told apart "
-                    f"({shown}). A host cannot say which browser launched it, so this "
-                    "request could read a different profile's page. Close all but one "
-                    "browser, or run one host per profile and set WENSU_PROFILE."
-                )
+        # Ambiguity is **two candidates sharing a label**, not "the labels differ".
+        #
+        # Comparing distinct labels failed three times in a row, each time with a
+        # different third party: an unrelated B, then a third A, then an unlabelled
+        # endpoint. Every time the set of distinct values grew and the check went
+        # quiet while two indistinguishable candidates remained. Counting per label is
+        # the property that actually matters — if any label has more than one
+        # claimant, the request cannot be routed. An unlabelled host forms its own
+        # group, so two of them are ambiguous too.
+        claimants = Counter(item[2] for item in eligible)
+        contested = [label for label, count in claimants.items() if count > 1]
+        if contested:
+            shown = ", ".join(
+                "an unreported profile" if label is None else label for label in contested
+            )
+            raise BridgeAmbiguous(
+                f"{len(eligible)} native hosts are live and {shown} is claimed more "
+                "than once. A host cannot say which browser launched it, so this "
+                "request could read a different profile's page. Close all but one "
+                "browser, or run one host per profile and set WENSU_PROFILE."
+            )
 
         path, found, _label = eligible[0]
         self._endpoint = path

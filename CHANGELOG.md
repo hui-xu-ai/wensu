@@ -4,6 +4,67 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.36] - 2026-11-09
+
+v2 matrix acceptance (`docs/reviews/wensu-acceptance-v2-0.12.35-2026-11-09.md`). The matrix covered
+31 required cells plus 92 export combinations; **A9 and A13 from the previous round both passed**, and
+every export type is now correct. Two defects remained.
+
+### Fixed — a third unlabelled host unlocked the ambiguity check (V2-01)
+
+The check compared the set of **distinct labels** among eligible candidates:
+
+```python
+labels = {item[2] for item in eligible}
+if len(labels) <= 1:
+    raise BridgeAmbiguous(...)
+```
+
+With two hosts labelled A and one written before the field existed, the set became `{A, None}` — two
+values — so the check passed and one of the two A's was picked.
+
+**This is the third time the same mistake was written differently.** The first version counted files,
+the second compared distinct labels machine-wide, this one compared distinct labels among eligible
+candidates. Each time, adding a third party grew the set and silenced the check while two
+indistinguishable candidates remained.
+
+Counting **per label** is the property that survives every third party: if any label is claimed more
+than once, the request cannot be routed. An unlabelled host forms its own group, so two of them are
+ambiguous too.
+
+### Fixed — a bridge failure reported itself as worth retrying (V2-02)
+
+```python
+return isinstance(error, (BridgeTimeout, BridgeError))
+```
+
+`BridgeError` means no host is reachable. Retrying changes nothing — a browser has to start. It now
+returns `True` only for `BridgeTimeout`, where the page was slow rather than wrong.
+
+`BridgeError` also had no `bridge.` code, so it fell through the remediation branch in `_payload` and
+never received the "start the browser" hint. Both `BridgeError` and `ActionError(code="bridge.*")` are
+treated as bridge problems now:
+
+| error | retryable | requires |
+|---|---|---|
+| `bridge.not_ready` | false | external_state_change |
+| `BridgeError` | false | external_state_change |
+| `BridgeAmbiguous` | false | external_state_change |
+| `BridgeTimeout` | **true** | — |
+| `PolicyError` | false | — |
+| `RiskBlocked` | false | — |
+
+`BridgeTimeout` inherits `BridgeError` and had to be excluded explicitly, or the fix would have made
+the one genuinely retryable case unretryable.
+
+### Verified
+
+```
+pytest                251 passed
+ruff check / format   clean
+mypy --strict         clean
+```
+
 ## [0.12.35] - 2026-11-09
 
 Fifth review (`docs/reviews/wensu-retest-0.12.34-2026-11-09.md`). Items 1 and 2 are regressions I

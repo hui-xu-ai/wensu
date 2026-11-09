@@ -150,13 +150,64 @@ def test_an_unrelated_third_host_does_not_unlock_the_ambiguity(
         BridgeAdapter().pin()
 
 
-def test_an_unrelated_live_host_does_not_block_a_unique_match(
+def test_a_unique_match_is_not_blocked_by_another_profile(
     runtime: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The flip side: one A and one B is not ambiguous when A is what was asked for."""
 
     _endpoint(runtime, "a", port=1, profile=r"E:\ProfileA", pid=11)
     _endpoint(runtime, "b", port=2, profile=r"E:\ProfileB", pid=22)
+    monkeypatch.setenv("WENSU_PROFILE", r"E:\ProfileA")
+    _live(monkeypatch, {1, 2})
+
+    assert BridgeAdapter().pin() == (1, "t")
+
+
+def test_an_unlabelled_third_host_does_not_unlock_the_ambiguity(
+    runtime: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The third failed attempt at this check, from the v2 matrix (A14).
+
+    Two hosts labelled A, plus one written before the field existed. The eligible set
+    was `{A, A, None}`, whose *distinct labels* are `{A, None}` — two values — so the
+    "labels differ" test passed and one of the two A's was picked.
+
+    Counting per label is the property that survives every third party: A is claimed
+    twice, so the request cannot be routed, whatever else is running.
+    """
+
+    _endpoint(runtime, "a", port=1, profile=r"E:\ProfileA", pid=11)
+    _endpoint(runtime, "b", port=2, profile=r"E:\ProfileA", pid=22)
+    _endpoint(runtime, "legacy", port=3, profile=None, pid=33)
+    monkeypatch.setenv("WENSU_PROFILE", r"E:\ProfileA")
+    _live(monkeypatch, {1, 2, 3})
+
+    with pytest.raises(BridgeAmbiguous):
+        BridgeAdapter().pin()
+
+
+def test_two_unlabelled_hosts_are_ambiguous_too(
+    runtime: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No label is still a group: two members of it cannot be told apart either."""
+
+    _endpoint(runtime, "a", port=1, profile=None, pid=11)
+    _endpoint(runtime, "b", port=2, profile=None, pid=22)
+    monkeypatch.delenv("WENSU_PROFILE", raising=False)
+    monkeypatch.setattr("scholar_search.core.browser.load", lambda: None)
+    _live(monkeypatch, {1, 2})
+
+    with pytest.raises(BridgeAmbiguous):
+        BridgeAdapter().pin()
+
+
+def test_one_labelled_and_one_unlabelled_is_not_ambiguous(
+    runtime: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A14 sibling: different groups, so the labelled one wins the request."""
+
+    _endpoint(runtime, "a", port=1, profile=r"E:\ProfileA", pid=11)
+    _endpoint(runtime, "legacy", port=2, profile=None, pid=22)
     monkeypatch.setenv("WENSU_PROFILE", r"E:\ProfileA")
     _live(monkeypatch, {1, 2})
 
