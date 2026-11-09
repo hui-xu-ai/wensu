@@ -18,6 +18,56 @@ from .core.risk import RiskGuard
 from .core.service import ScholarService
 
 
+def _last_host_activity() -> str | None:
+    """The timestamp of the last line in host.log, or None.
+
+    Tells "the browser was never running" apart from "it is running but the
+    extension dropped". The two need different instructions, and the fixed
+    remediation text gave the same one for both.
+    """
+
+    log = host_runtime_dir() / "logs" / "host.log"
+    try:
+        # Read the tail, not the whole file: this log grows for as long as the tool
+        # is installed, and one line is all that is needed.
+        with log.open("rb") as handle:
+            handle.seek(0, 2)
+            size = handle.tell()
+            handle.seek(max(0, size - 4096))
+            tail = handle.read().decode("utf-8", errors="replace")
+    except OSError:
+        return None
+    for line in reversed(tail.splitlines()):
+        line = line.strip()
+        if len(line) >= 19 and line[4] == "-" and line[13] == ":":
+            return line[:19]
+    return None
+
+
+def _bridge_remediation(last_seen: str | None) -> str:
+    """What to do, based on when the host was last alive.
+
+    The fixed text told every caller to click the extension icon. The most common
+    case is that the browser is simply not running, where clicking an icon is not
+    possible — and the JSON right beside it already carried `browser_profile`.
+    """
+
+    if last_seen is None:
+        return (
+            "No host has ever logged to host.log, so the browser is probably not "
+            "running. Start it with `wensu browser start`, then load the extension "
+            "once if the toolbar icon is missing. Do NOT start, stop or kill browser "
+            "processes yourself."
+        )
+    return (
+        f"The host last logged at {last_seen}, so a browser is running but the "
+        "extension is not connected. Click the wensu icon in that window to "
+        "reconnect. Do NOT start, stop, reload or kill the user's browser processes: "
+        "the extension lives in one profile only, and restarting the browser brings "
+        "up a different one with no bridge."
+    )
+
+
 def _browser_summary() -> dict[str, object] | None:
     """The recorded browser profile, if setup has run.
 
@@ -57,10 +107,24 @@ def build_service() -> ScholarService:
     def planner_factory(adapter: BrowserAdapter) -> Planner:
         return Planner(adapter=adapter, policy=policy, risk=risk, audit=audit)
 
-    def status() -> dict[str, object]:
+    def status(brief: bool = False) -> dict[str, object]:
         until = risk.cooldown_until()
         # Probed once: the answer is used for both fields, and a probe opens a socket.
         bridge_up = BridgeAdapter.probe()
+        last_seen = _last_host_activity()
+
+        # `brief` exists because a health check cost about 500 tokens, more than a
+        # search. The three static blocks below are constants; a caller checking
+        # whether it can proceed does not need them on every poll.
+        if brief:
+            return {
+                "version": __version__,
+                "bridge_ready": bridge_up,
+                "bridge_last_seen": last_seen,
+                "quota_remaining": policy.remaining_today,
+                "cooldown_until": until.isoformat() if until else None,
+            }
+
         return {
             # Which build is answering, and which bridge protocol it speaks. Without
             # these, a caller cannot tell "the tool is missing" from "an old build is
@@ -106,7 +170,8 @@ def build_service() -> ScholarService:
                 "ready": bridge_up,
                 "endpoint": str(endpoint),
                 "log_path": str(host_runtime_dir() / "logs" / "host.log"),
-                "remediation": None if bridge_up else ScholarService.BRIDGE_REMEDIATION,
+                "last_seen": last_seen,
+                "remediation": None if bridge_up else _bridge_remediation(last_seen),
             },
             # Which browser profile wensu owns, so "the extension is not connected"
             # has an actionable answer other than "figure out which window it is in".

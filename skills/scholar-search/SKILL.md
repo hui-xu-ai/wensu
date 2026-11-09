@@ -124,7 +124,9 @@ WoS   TS=(ionic) AND PY=(2025-2026)              → 年份区间
 `year_from` / `year_to` **只过滤当前页**。如果首页没有目标年份：
 
 1. **首选**：`sort=date`（站点按时间倒序重排）——**多花 2 个额度**（3 → 5），但一页就能拿到最新的；
-2. 或者：把年份写进检索式（`PY=(2026)` / `SU='x' and 年='2026'`）；
+2. 或者：把年份写进检索式。**WoS 已验证**：`PY=(2026)`、`PY=(2025-2026)` 都有效。
+   **知网未验证**：`年='2026'` 实测 0 命中（2026-11-09），不要照抄；知网请用 `site_sort=date`
+   或 `year_from`。
 3. **不要**：连续翻页扫库，那是最贵的做法。
 
 ## 动作价目（每次调用前先算一笔）
@@ -132,10 +134,11 @@ WoS   TS=(ionic) AND PY=(2025-2026)              → 年份区间
 | 动作 | 知网 | WoS | 说明 |
 |---|---|---|---|
 | 一次检索（默认相关度） | 3 | 4 | 基本成本 |
-| 加 `sort`（站点重排） | +2 | +2 | 排序要走两次点击 |
-| `sort_by`（本地重排） | **0** | **0** | 纯本地，免费 |
+| 加 `site_sort`（站点重排） | +2 | +2 | 排序要走两次点击 |
+| `local_sort`（本地重排） | **0** | **0** | 纯本地，免费 |
 | 翻一页 | 3–4 | 4 | 每页都是完整一轮 |
-| `detail` 命中缓存 | **0** | **0** | search 之后就在缓存里 |
+| `detail` 命中缓存 | **0** | **0** | 只有 WoS 的检索行会预热详情缓存 |
+| `detail` 未命中 | **1** | **1** | **知网 detail 基本恒为 1**——检索不预热，见下 |
 | `detail` 未命中（知网） | 1 | — | 真去访问详情页 |
 | 空结果（`no_match`） | 3 | 4 | 探测也要真实检索 |
 
@@ -210,10 +213,10 @@ TI='生态' and KY='生态文明' and (AU % '陈' + '王')
 WoS 记录自带 `impact_factor`（JCR 当年值，可能为 `null`——该刊无指标）。
 
 - `min_impact_factor: 5` —— **本地筛选**，**无指标即丢弃**（会降低召回，这是设计而非 bug）；
-- `sort_by: "citations"` 或 `"year"` —— 本地排序，不发额外请求。
+- `local_sort: "citations"` 或 `"year"` —— 本地排序，不发额外请求。
 
-**注意 `sort` 与 `sort_by` 是两套**：`sort` 让站点重排（多 2 个请求、走配额），`sort_by` 在本地重排（免费）。
-想按被引排序又要省配额，用 `sort_by: "citations"`；想要站点的全局排序用 `sort`。
+**`site_sort` 与 `local_sort` 是两套**：前者让站点重排（多 2 个请求、走配额），后者在本地重排（免费）。旧名 `sort` / `sort_by` 仍能用，但不再推荐——四个名字并存只会让人犹豫。
+想按被引排序又要省配额，用 `local_sort: "citations"`；想要站点的全局排序用 `site_sort`。
 
 ## 返回
 
@@ -265,7 +268,7 @@ WoS 记录自带 `impact_factor`（JCR 当年值，可能为 `null`——该刊�
   "filters": {
     "year_from": 2026, "year_to": null, "year_scope": "page",
     "min_impact_factor": 5.0, "impact_factor_drops_unrated": true,
-    "sort_by": "citations",
+    "local_sort": "citations",
     "dropped": { "year": 49 }
   }
 }
@@ -280,8 +283,27 @@ WoS 记录自带 `impact_factor`（JCR 当年值，可能为 `null`——该刊�
 ## 详情与导出
 
 ```
-detail(url)                  → 完整记录（含摘要）。search 之后从缓存取，零网络动作
-export(records, format="ris" | "endnote")   → 纯文本题录，不写文件
+detail(url, include_abstract=false, fields=[...])   → 完整记录，摘要默认不返回
+detail_many(urls, include_abstract=false)           → 批量，逐条失败隔离
+export(records, format="ris"|"endnote", out_path=…) → 可落盘
+```
+
+**关于缓存，实测结论（2026-11-09）**：
+
+| 渠道 | 检索后 `detail` 是否免费 |
+|---|---|
+| **WoS** | **是**。检索行自带摘要和 DOI，详情缓存已被预热，`quota_charged: 0` |
+| **知网** | **否**。检索行没有摘要，缓存不会被预热，**每次 detail 都扣 1** |
+
+所以「search 之后 detail 免费」这句话**只对 WoS 成立**。知网按 1/篇预算。
+
+**摘要很贵**：知网约 1200 字，WoS 约 1000 字，占单篇详情响应的 60–80%。
+只要卷期页/DOI 就**不要**传 `include_abstract`；`detail_many` 一次取十二篇带摘要约 14 KB。
+
+```
+detail("10.13841/j.cnki.jxsj.2026.11.001")                          → 无摘要
+detail("10.13841/j.cnki.jxsj.2026.11.001", include_abstract=true)   → 带摘要
+detail(url, fields=["title","doi","pages"])                         → 只要三个字段
 ```
 
 `detail` 只需要 URL，**不用传 channel**。

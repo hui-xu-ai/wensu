@@ -4,6 +4,79 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.27] - 2026-11-09
+
+Closes 10 of the 11 items from the 2026-11-09 DSH-side test. W-10 is not done — see the end.
+
+### Fixed — `query_effective` was missing exactly where it mattered
+
+W-02. The field was added on the normal path and skipped by the two early returns for "nothing
+matched". A zero-result answer is when a caller most needs to see the expression that produced it,
+and it was the one case that came back `null`. All exit paths carry it now, including the cache, so a
+repeated search answers the same question the first one did.
+
+### Changed — `detail` and `detail_many` respect `include_abstract`, default false
+
+W-01. `search` had the switch; `detail` did not, so every lookup returned an abstract — 60–80% of the
+response, about 1200 characters on CNKI and 1000 on WoS. Both now default to hiding it, and both
+accept `fields`. A batch of twelve abstracts is roughly 14 KB, and that is the call where the cost
+multiplies.
+
+`url`, `quota_charged` and `quota_remaining` survive any projection: they keep a record followable and
+tell the caller what the call cost.
+
+### Fixed — `wensu browser start` no longer reports success for a browser that died
+
+W-03. Chromium exits with code 21 when it cannot write to its `--user-data-dir`, which is what a
+sandboxed or read-only mount produces. The command printed "started, pid N" and the bridge never
+appeared. It now waits 1.5 s and, if the process is gone, exits non-zero with the code and the likely
+cause.
+
+### Fixed — the bridge message distinguishes "not running" from "extension dropped"
+
+W-04. The text always said "click the extension icon", which is not possible when no browser is
+running — the most common case. `status.bridge.last_seen` carries the last timestamp in `host.log`,
+and the remediation is chosen from whether it exists.
+
+### Added — `status(brief=true)` and `search(count_only=true)`
+
+W-08 and W-09. The full status payload is about 500 tokens, mostly three static blocks; `brief`
+returns five fields in about 45. `count_only` drops `records` and keeps what explains the number, so
+testing whether an expression parses no longer costs a page of context.
+
+### Added — `export` writes markdown and csv
+
+W-07. The citation formats exist to be imported. When the goal is a document a person reads, a caller
+had to assemble it by hand, which meant pulling every abstract back through the context first. `csv`
+uses the standard module rather than joining with commas — titles contain commas and quotes, and a
+hand-rolled writer corrupts exactly the records worth keeping.
+
+### Docs — two claims in the skill were wrong
+
+W-05 and W-06, both mine:
+
+- The skill said `detail` serves from cache after a search. **True for WoS only.** CNKI list rows carry
+  no abstract, so nothing is cached and every detail costs 1. The price table said both.
+- The skill recommended `SU='x' and 年='2026'` for year filtering **without ever testing it**. It
+  returns 0. Removed, with a note that the CNKI form is unverified while `PY=(…)` on WoS is not.
+
+W-11: the bundle README said "four tools" (there are five), and the skill names only `site_sort` and
+`local_sort` now, mentioning the old aliases once.
+
+### Why this round had so many findings
+
+Two reasons, both mine. Several fixes were applied to the surface I happened to be looking at — 
+`query_effective` on the happy path, `fields` on `search` but not `detail` — so the feature existed
+and was invisible exactly where it was needed. And two skill paragraphs were written from intent
+rather than measurement: the cache claim and the CNKI year form. A document that states something
+untested is worse than a document that stays silent, because it is read as evidence.
+
+### Not done — W-10
+
+Index-based references (`detail_many(indices: [1, 5])`) need a "last search result" kept somewhere,
+and rules for when it is stale, missing, or from another channel. That is a feature with its own
+failure modes, not a fix. Left out rather than half-built.
+
 ## [0.12.26] - 2026-11-09
 
 ### Fixed — BUG-01 was not actually fixed in 0.12.21

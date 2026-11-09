@@ -10,6 +10,8 @@ rendered as generic and never silently relabelled as a journal article.
 
 from __future__ import annotations
 
+import csv
+import io
 from collections.abc import Iterable, Mapping
 from datetime import datetime
 from typing import Any
@@ -237,3 +239,86 @@ def to_endnote(records: Iterable[Record]) -> str:
             lines.append(f"%U {_clean(record.url)}")
         lines.append("")
     return "\n".join(lines)
+
+
+def to_markdown(records: Iterable[Record]) -> str:
+    """A readable document, one section per record.
+
+    The citation formats exist to be imported. When the goal is a document a person
+    reads — a literature review draft, a summary table — `markdown` is what a caller
+    would otherwise assemble by hand, which means pulling every abstract back
+    through the context first. Writing it directly costs nothing.
+    """
+
+    blocks: list[str] = []
+    for index, record in enumerate(records, start=1):
+        heading = _clean(record.title) or f"Record {index}"
+        blocks.append(f"## {index}. {heading}")
+        meta: list[str] = []
+        if record.authors:
+            meta.append("、".join(record.authors))
+        if record.source:
+            meta.append(_clean(record.source))
+        if record.year is not None:
+            meta.append(str(record.year))
+        if record.volume or record.issue or record.pages:
+            bits = "".join(
+                part for part in (
+                    f"{record.volume}" if record.volume else "",
+                    f"({record.issue})" if record.issue else "",
+                    f": {record.pages}" if record.pages else "",
+                )
+            )
+            meta.append(bits)
+        if meta:
+            blocks.append(" · ".join(meta))
+        if record.doi:
+            blocks.append(f"DOI: {_clean(record.doi)}")
+        if record.impact_factor is not None:
+            blocks.append(f"影响因子: {record.impact_factor}")
+        if record.citations is not None:
+            blocks.append(f"被引: {record.citations}")
+        if record.keywords:
+            blocks.append(f"关键词: {'; '.join(_clean(k) for k in record.keywords)}")
+        if record.abstract:
+            blocks.append("")
+            blocks.append(_clean(record.abstract))
+        if record.url:
+            blocks.append("")
+            blocks.append(f"<{_clean(record.url)}>")
+        blocks.append("")
+    return "\n".join(blocks)
+
+
+def to_csv(records: Iterable[Record]) -> str:
+    """One row per record, for a spreadsheet.
+
+    Written with the `csv` module rather than by joining with commas: titles contain
+    commas, quotes and newlines, and a hand-rolled writer would corrupt exactly the
+    records a user most wants to keep.
+    """
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\n")
+    writer.writerow([
+        "title", "authors", "source", "year", "volume", "issue", "pages",
+        "doi", "citations", "impact_factor", "doc_type", "keywords", "abstract", "url",
+    ])
+    for record in records:
+        writer.writerow([
+            _clean(record.title),
+            "; ".join(record.authors),
+            _clean(record.source),
+            record.year if record.year is not None else "",
+            record.volume or "",
+            record.issue or "",
+            record.pages or "",
+            record.doi or "",
+            record.citations if record.citations is not None else "",
+            record.impact_factor if record.impact_factor is not None else "",
+            record.doc_type or "",
+            "; ".join(record.keywords),
+            _clean(record.abstract),
+            record.url or "",
+        ])
+    return buffer.getvalue()

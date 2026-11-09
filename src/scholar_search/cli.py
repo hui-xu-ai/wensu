@@ -232,7 +232,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"extension found: {Path(recorded.extension_dir).is_dir()}")
             return 0
 
-        process = browser_cfg.start(recorded)
+        try:
+            process = browser_cfg.start(recorded)
+        except RuntimeError as error:
+            # A browser that died on launch is not a success, and saying "started"
+            # would send the caller looking for a bridge that cannot appear.
+            print(f"wensu: {error}", file=sys.stderr)
+            return 1
         print(f"started {recorded.browser} (pid {process.pid}) with profile {recorded.profile_dir}")
         print("if the toolbar icon is missing, load the unpacked extension once:")
         print(f"  chrome://extensions -> Load unpacked -> {recorded.extension_dir}")

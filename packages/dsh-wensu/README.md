@@ -3,7 +3,7 @@
 这是一个**配置型 bundle**：它不包含插件代码，只声明对 `@deepseek-ai/dsh-mcp-client`
 的依赖，并通过 `cordis.patch.yml` 插入一条 MCP 客户端实例。
 
-装好之后 agent 会拿到四个工具：`search` / `detail` / `export` / `status`，覆盖**知网**与
+装好之后 agent 会拿到五个工具：`search` / `detail` / `detail_many` / `export` / `status`，覆盖**知网**与
 **Web of Science** 两个渠道，WoS 记录自带期刊影响因子。不下载全文，只出题录。
 
 ## 版本对照

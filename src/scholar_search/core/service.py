@@ -29,7 +29,7 @@ from .contracts import (
     SearchQuery,
 )
 from .errors import ActionError, ChannelError, ParseError, PolicyError, ScholarSearchError
-from .export import to_endnote, to_ris
+from .export import to_csv, to_endnote, to_markdown, to_ris
 from .planner import Planner
 from .policy import PolicyEngine
 from .registry import ChannelRegistry, ChannelSpec
@@ -113,7 +113,11 @@ class ScholarService:
                         code="click.not_started",
                     )
                 empty = SearchPage(
-                    records=(), total=0, page=None, empty_reason="no_match"
+                    records=(),
+                    total=0,
+                    page=None,
+                    empty_reason="no_match",
+                    query_effective=self._effective_query(channel, query),
                 )
                 self._cache.set(key, _page_to(empty))
                 return empty
@@ -127,7 +131,11 @@ class ScholarService:
                 # by their own wording; ask the page before calling it a failure.
                 if self._looks_empty(channel, spec):
                     empty = SearchPage(
-                        records=(), total=0, page=None, empty_reason="no_match"
+                        records=(),
+                        total=0,
+                        page=None,
+                        empty_reason="no_match",
+                        query_effective=self._effective_query(channel, query),
                     )
                     self._cache.set(key, _page_to(empty))
                     return empty
@@ -299,15 +307,31 @@ class ScholarService:
         self._cache.set(key, _page_to(page))
         return page
 
-    def export(self, records: Sequence[Record], *, fmt: Literal["ris", "endnote"]) -> str:
+    def export(
+        self,
+        records: Sequence[Record],
+        *,
+        fmt: Literal["ris", "endnote", "markdown", "csv"],
+    ) -> str:
         if fmt == "ris":
             return to_ris(records)
         if fmt == "endnote":
             return to_endnote(records)
+        if fmt == "markdown":
+            return to_markdown(records)
+        if fmt == "csv":
+            return to_csv(records)
         raise ValueError(f"unsupported export format: {fmt!r}")
 
-    def status(self) -> dict[str, Any]:
-        return dict(self._status_provider())
+    def status(self, *, brief: bool = False) -> dict[str, Any]:
+        """Session state. `brief` returns only what a health check needs."""
+
+        provider: Any = self._status_provider
+        try:
+            return dict(provider(brief=brief))
+        except TypeError:
+            # Providers written before `brief` existed take no argument.
+            return dict(provider())
 
     # -- internals ------------------------------------------------------
 
@@ -331,7 +355,33 @@ class ScholarService:
         "restarting the browser brings up a different one with no bridge."
     )
 
+    def _effective_query(self, channel: Any, query: SearchQuery) -> str | None:
+        """What the channel will actually type, or None if it cannot say.
+
+        Used on **every** exit path, including the early returns for "nothing
+        matched". Those were the one place it mattered most — a zero-result answer
+        is exactly when a caller needs to see the expression that produced it — and
+        they were the one place it was missing.
+        """
+
+        hook = getattr(channel, "effective_query", None)
+        if hook is None:
+            return None
+        with contextlib.suppress(ChannelError, ValueError):
+            produced = hook(query)
+            return produced if isinstance(produced, str) else None
+        return None
+
     def _ensure_bridge(self) -> None:
+        """Fail before spending quota if no extension is listening."""
+
+        if self._bridge_probe():
+            return
+        raise ActionError(
+            "no live native host found: the browser extension is not connected",
+            verb="goto",
+            code="bridge.not_ready",
+        )
         """Fail before spending quota if no extension is listening.
 
         The reservation happens inside `planner.run`, so a dead bridge used to cost
@@ -431,6 +481,13 @@ def _page_to(page: SearchPage) -> dict[str, Any]:
         "total": page.total,
         "page": page.page,
         "page_count": page.page_count,
+        # Cached so a repeated search answers the same question the first one did.
+        # Without it a cached zero-result page reported `query_effective: null`
+        # while the identical live call reported the expression — the field was
+        # present or absent depending on a cache hit.
+        "query_effective": page.query_effective,
+        "empty_reason": page.empty_reason,
+        "dropped_year": page.dropped_year,
     }
 
 
@@ -440,6 +497,9 @@ def _page_from(payload: dict[str, Any]) -> SearchPage:
         total=payload.get("total"),
         page=payload.get("page"),
         page_count=payload.get("page_count"),
+        query_effective=payload.get("query_effective"),
+        empty_reason=payload.get("empty_reason"),
+        dropped_year=payload.get("dropped_year") or 0,
     )
 
 

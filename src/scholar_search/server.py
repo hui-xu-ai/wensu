@@ -59,6 +59,13 @@ def _filters_payload(page: Any, query: SearchQuery) -> dict[str, Any] | None:
     return applied
 
 
+# Never dropped by a projection. `url` is what `detail` needs to follow a record;
+# the quota pair is what tells the caller what the call cost. Projecting them away
+# would answer "here are your three fields" and silently hide both the next step and
+# the price of the one just taken.
+_PROJECTION_ALWAYS = frozenset({"url", "quota_charged", "quota_remaining"})
+
+
 def _project(records: list[dict[str, Any]], fields: list[str] | None) -> list[dict[str, Any]]:
     """Keep only the requested fields, always keeping enough to identify a record.
 
@@ -83,9 +90,7 @@ def _project(records: list[dict[str, Any]], fields: list[str] | None) -> list[di
             f"unknown field(s): {', '.join(sorted(unknown))}. "
             f"available: {', '.join(sorted(available))}"
         )
-    # `url` is what `detail` needs; dropping it silently would make the projection
-    # produce records the caller cannot follow up on.
-    kept = wanted | {"url"}
+    kept = wanted | _PROJECTION_ALWAYS
     return [{k: v for k, v in record.items() if k in kept} for record in records]
 
 
@@ -179,7 +184,8 @@ def _payload(
 
 
 def _quota(service: ScholarService) -> int | None:
-    value = service.status().get("quota_remaining")
+    # Brief: this runs twice per search, and the full payload is mostly constants.
+    value = service.status(brief=True).get("quota_remaining")
     return value if isinstance(value, int) else None
 
 
@@ -204,6 +210,7 @@ def build_server(service: ScholarService) -> FastMCP:
         site_sort: Literal["relevance", "date", "citation"] | None = None,
         local_sort: Literal["none", "citations", "year"] | None = None,
         fields: list[str] | None = None,
+        count_only: bool = False,
     ) -> dict[str, Any]:
         """Search a channel for bibliographic records. Read-only.
 
@@ -248,6 +255,11 @@ def build_server(service: ScholarService) -> FastMCP:
         `fields` projects each record to the listed keys (plus `url`, which `detail`
         needs). `include_abstract` on 25 rows is tens of kilobytes; most callers want
         a title, a year and a DOI.
+
+        `count_only` drops `records` entirely and returns the count plus the
+        diagnostics that explain it. Testing whether an expression parses and matches
+        anything should not cost a full page of context: the recorded advice was
+        `limit: 1, fields: ["title"]`, which still returns a record.
         """
 
         # The explicit names win; the older ones remain as aliases.
@@ -284,10 +296,25 @@ def build_server(service: ScholarService) -> FastMCP:
         # `status` call between every planning step to know whether it can afford
         # the next one.
         payload["quota_remaining"] = after
+        if count_only:
+            # Keep what explains the number: total alone cannot say whether the
+            # expression failed, matched nothing, or was filtered away.
+            explained = _page_payload(result_page, request)
+            keep = ("total", "query_effective", "empty_reason", "dropped_year",
+                    "filters", "cache_hit", "quota_charged", "quota_remaining")
+            for key in keep:
+                if key in explained:
+                    payload[key] = explained[key]
+            payload["records"] = []
         return payload
 
     @mcp.tool()
-    def detail(url: str, channel: str | None = None) -> dict[str, Any]:
+    def detail(
+        url: str,
+        channel: str | None = None,
+        include_abstract: bool = False,
+        fields: list[str] | None = None,
+    ) -> dict[str, Any]:
         """Fetch full metadata for one record.
 
         `url` may be either the URL `search` returned, or a bare DOI such as
@@ -295,6 +322,12 @@ def build_server(service: ScholarService) -> FastMCP:
         characters of encrypted signature — this one has no parameters but `v=` —
         so passing them back verbatim is easy to truncate. A DOI is short, stable and
         already in every record.
+
+        **`include_abstract` defaults to false**, matching `search`: a CNKI abstract
+        runs about 1200 characters and a WoS one about 1000, which is most of what a
+        detail response weighs. A caller that wants the volume, issue, pages and DOI
+        should not pay for text it will not read. `fields` projects the rest, and
+        always keeps `url` so the record stays followable.
 
         A DOI costs one extra search to resolve into a URL, because that is the only
         way to reach the detail page. A URL that is already cached costs nothing.
@@ -335,17 +368,28 @@ def build_server(service: ScholarService) -> FastMCP:
             max(0, before - after) if before is not None and after is not None else 0
         )
         result["quota_remaining"] = after
+        if not include_abstract:
+            result["abstract"] = None
+        if fields:
+            result = _project([result], fields)[0]
         return result
 
     @mcp.tool()
     def detail_many(
-        urls: list[str], channel: str | None = None
+        urls: list[str],
+        channel: str | None = None,
+        include_abstract: bool = False,
+        fields: list[str] | None = None,
     ) -> dict[str, Any]:
         """Fetch several records in one call.
 
         Each lookup costs the same as `detail` and they run in sequence on purpose:
         the policy layer serialises network actions anyway, so firing them in
         parallel would only queue them while each held a timeout budget.
+
+        `include_abstract` and `fields` behave as in `detail`. A batch of twelve
+        abstracts is roughly 14 KB, so the default is off here too — this is the call
+        that most needs it, since the cost multiplies by the batch size.
 
         A failure on one record does not abandon the rest — the response is
         `{"results": [{"url", "ok", "record"|"error"}], "ok_count", "failed_count"}`,
@@ -355,7 +399,7 @@ def build_server(service: ScholarService) -> FastMCP:
         results: list[dict[str, Any]] = []
         for url in urls:
             try:
-                record = detail(url, channel)
+                record = detail(url, channel, include_abstract, fields)
             except (RiskBlocked, ScholarSearchError) as error:
                 results.append({"url": url, "ok": False, "error": _payload(error)})
                 continue
@@ -373,7 +417,7 @@ def build_server(service: ScholarService) -> FastMCP:
     @mcp.tool()
     def export(
         records: list[dict[str, Any]],
-        format: Literal["ris", "endnote"] = "ris",
+        format: Literal["ris", "endnote", "markdown", "csv"] = "ris",
         out_path: str | None = None,
         include_abstract: bool = False,
     ) -> dict[str, Any]:
@@ -412,8 +456,16 @@ def build_server(service: ScholarService) -> FastMCP:
             return _payload(error if isinstance(error, Exception) else ValueError("bad record"))
 
     @mcp.tool()
-    def status() -> dict[str, Any]:
-        """Session state: channels, cooldown, quota, bridge readiness."""
-        return service.status()
+    def status(brief: bool = False) -> dict[str, Any]:
+        """Session state: channels, cooldown, quota, bridge readiness.
+
+        `brief` returns only `version`, `bridge_ready`, `bridge_last_seen`,
+        `quota_remaining` and `cooldown_until`. The full payload is about 500 tokens,
+        more than a search, and three of its blocks — `channel_capabilities`,
+        `detail_capabilities`, `action_cost` — are static. Poll `brief` while planning
+        and read the full answer once.
+        """
+
+        return service.status(brief=brief)
 
     return mcp

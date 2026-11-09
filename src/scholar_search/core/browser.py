@@ -230,8 +230,13 @@ def adopt(
     return config
 
 
-def start(config: BrowserConfig) -> subprocess.Popen[bytes]:
-    """Start the recorded profile.
+def start(config: BrowserConfig, *, settle_s: float = 1.5) -> subprocess.Popen[bytes]:
+    """Start the recorded profile and confirm it stayed up.
+
+    Chromium exits with code 21 when it cannot write to its `--user-data-dir` — a
+    read-only or sandboxed mount, most often. Reporting "started, pid N" for a
+    process that died a moment later sends the caller looking for a bridge that
+    could never appear; the report describes exactly that happening.
 
     `--load-extension` is passed as a best effort: recent Chromium builds ignore it
     unless the browser is started with developer mode, so a first-time user may still
@@ -253,11 +258,26 @@ def start(config: BrowserConfig) -> subprocess.Popen[bytes]:
         # Detach: wensu must not die with the browser, and the browser must not
         # inherit our stdio.
         creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-    return subprocess.Popen(
+    process = subprocess.Popen(
         args,
         close_fds=True,
         creationflags=creationflags,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         env={**os.environ},
+    )
+
+    # Give it a moment to fail, then check. A browser that is still running a second
+    # and a half later is one that opened its profile successfully; the ones that
+    # cannot write exit almost immediately.
+    try:
+        code = process.wait(timeout=settle_s)
+    except subprocess.TimeoutExpired:
+        return process
+
+    raise RuntimeError(
+        f"{config.browser} exited immediately with code {code}; "
+        f"it could not use {config.profile_dir}. "
+        "Chromium exit code 21 means the profile directory is not writable — "
+        "check permissions or sandbox mounts for that path."
     )

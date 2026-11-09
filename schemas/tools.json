@@ -53,6 +53,11 @@
             },
             "description": "Project each record to these keys. `url` is always kept because `detail` needs it. `institution` and `impact_factor` are usually only populated by `detail`, not by a list row — see `status.detail_capabilities`. Unknown keys are rejected rather than silently ignored."
           },
+          "count_only": {
+            "type": "boolean",
+            "default": false,
+            "description": "Drop `records` and return only the count plus the fields that explain it (total, query_effective, empty_reason, dropped_year, filters). Use this to test whether an expression parses and matches anything before paying for a page."
+          },
           "min_citations": { "type": ["integer", "null"], "minimum": 0 },
           "min_impact_factor": { "type": ["number", "null"], "minimum": 0 }
         }
@@ -101,7 +106,7 @@
         "required": ["records", "format"],
         "properties": {
           "records": { "type": "array", "items": { "$ref": "record.json" } },
-          "format": { "enum": ["ris", "endnote"] },
+          "format": { "enum": ["ris", "endnote", "markdown", "csv"] },
           "out_path": {
             "type": ["string", "null"],
             "description": "Write the text here and omit it from the response. Use this for a large export: pulling 143 records through the context just to save them is the expensive way."
