@@ -89,13 +89,22 @@ class ScholarService:
         if splitter is not None:
             head, tail = splitter(query)
             heads = self._run(head, spec)
-            landed = _click_landing(heads)
+            landed, settled = _click_landing(heads)
             is_results = getattr(channel, "is_results_url", None)
             # The click waits for the site to finish, so this URL is the final state,
             # not a sample taken mid-flight. A tab on anything other than a results
             # route means the query matched nothing: that is where the "no results"
             # answer lives, and reloading it would erase the evidence.
             if landed and is_results is not None and not is_results(landed):
+                if not settled:
+                    # The button never went busy, so the site may never have started
+                    # the query at all. Reporting "no results" here would hide a
+                    # failed click behind a confident answer.
+                    raise ActionError(
+                        "click did not start a query (the submit control never became busy)",
+                        verb="click",
+                        code="click.not_started",
+                    )
                 empty = SearchPage(
                     records=(), total=0, page=None, empty_reason="no_match"
                 )
@@ -376,8 +385,14 @@ def _narrow(records: Sequence[Record], query: SearchQuery) -> tuple[Record, ...]
     return narrowed
 
 
-def _click_landing(outcomes: Sequence[ActionOutcome]) -> str | None:
-    """Where the tab was after the click, as reported by the extension."""
+def _click_landing(outcomes: Sequence[ActionOutcome]) -> tuple[str | None, bool]:
+    """Where the tab was after the click, and whether the site acknowledged it.
+
+    `settled` is the extension's report that the submit control went busy and came
+    back — the site ran the query. A URL that never moved while `settled` is false
+    means the click most likely did nothing, which must not be reported as an empty
+    result.
+    """
 
     for outcome in outcomes:
         if outcome.action.verb != "click":
@@ -386,9 +401,9 @@ def _click_landing(outcomes: Sequence[ActionOutcome]) -> str | None:
         if not isinstance(data, dict):
             continue
         url = data.get("url")
-        if isinstance(url, str) and url:
-            return url
-    return None
+        settled = bool(data.get("settled"))
+        return (url if isinstance(url, str) and url else None), settled
+    return None, False
 
 
 def _html(outcomes: Sequence[ActionOutcome]) -> str:

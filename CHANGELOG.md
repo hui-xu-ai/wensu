@@ -4,6 +4,54 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.12] - 2026-11-09
+
+### Fixed — zero results are an answer on Web of Science
+
+A query that matches nothing does not navigate: the tab stays on the query builder, while a real
+search lands on `/wos/woscc/summary/...`. The plan reloaded the search form expecting a data stream,
+waited ten seconds and failed as `wait_for_failed: timeout` — 3–4 quota spent and nothing the caller
+could act on. The reload was itself destroying the evidence: it refreshed the page that had rendered
+the "no results" alert.
+
+`click` now waits for the submit control to go disabled and come back (`wait_until: enabled`) — the
+site's own "done" signal, which beats every fixed pause tried for this: 1.8–2.6 s was too short for
+long expressions and made a good search look empty. `plan_search` is split into
+`build_until_click` / `build_after_click`, and the second half only runs when the URL actually
+reached a results route.
+
+```
+zero result  {"records":[],"total":0,"empty_reason":"no_match"}   15.5s   (was a 29s timeout)
+normal       {"records":[3],"total":1184,"empty_reason":null}     17.3s
+```
+
+If the button never went busy, the call raises `click.not_started` instead — reporting "no results"
+there would hide a failed click behind a confident answer.
+
+### Added — structured errors, cost reporting, channel capabilities
+
+- **Errors** were `{status, error, kind}`: a different shape from a success payload and nothing a
+  caller could branch on. They now carry `code`, `channel`, `retryable` and `quota_charged`.
+  `retryable` is true only for transport timeouts; a policy refusal or parse failure repeats
+  identically, and a risk block must never be retried.
+- **`quota_charged`** is reported on success as well, so a caller sees what a search cost instead of
+  diffing `status` before and after.
+- **`status` reports `channel_capabilities`** from each manifest's `field_support`. CNKI's list rows
+  genuinely carry no abstract, keywords, volume or DOI; asking for `include_abstract` there returned
+  nulls with no explanation.
+- **`source_types`** gained an enum and `sort_by` / `sources_only` gained descriptions, so neither
+  needs to be discovered by trial.
+
+### Fixed — the cache no longer goes down with WAL
+
+`PRAGMA journal_mode=WAL` raised `OperationalError` when it could not be set, taking the whole cache
+with it. The pragma is best-effort now.
+
+### Chore
+
+- Deleted 4 cached Web of Science rows written while zero-result detection was broken; they stored
+  `records: []` for queries that do have results.
+
 ## [0.12.11] - 2026-11-09
 
 ### Fixed — issues found by real use of the MCP tools

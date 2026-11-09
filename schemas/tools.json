@@ -18,12 +18,27 @@
           "page": { "type": "integer", "minimum": 1, "maximum": 3, "default": 1 },
           "year_from": { "type": ["integer", "null"] },
           "year_to": { "type": ["integer", "null"] },
-          "source_types": { "type": "array", "items": { "type": "string" } },
+          "source_types": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["article", "review", "proceedings", "journal", "thesis", "book"]
+            },
+            "description": "Document types to keep. Values are the normalised vocabulary; a channel that does not implement this rejects the request rather than ignoring it."
+          },
+          "sources_only": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Exact source (journal) names to keep, matched case-insensitively."
+          },
           "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 20 },
           "include_abstract": { "type": "boolean", "default": false },
-          "sort_by": { "enum": ["none", "citations", "year"], "default": "none" },
+          "sort_by": {
+            "enum": ["none", "citations", "year"],
+            "default": "none",
+            "description": "Re-sort the fetched page locally: free, no browser action, no quota. `sort` asks the site to re-sort, which costs two clicks and quota but orders the whole result set. Use sort_by unless you need the site's own ordering."
+          },
           "min_citations": { "type": ["integer", "null"], "minimum": 0 },
-          "sources_only": { "type": "array", "items": { "type": "string" } },
           "min_impact_factor": { "type": ["number", "null"], "minimum": 0 }
         }
       }
