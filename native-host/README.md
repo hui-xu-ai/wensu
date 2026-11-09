@@ -19,12 +19,16 @@ extension.
 
 | File | Purpose |
 |---|---|
-| `%LOCALAPPDATA%\scholar-search\bridge.json` | `{port, token, pid, started}` for the MCP server |
+| `%LOCALAPPDATA%\scholar-search\host\bridge.json` | `{port, token, pid, started}` for the MCP server |
+| `%LOCALAPPDATA%\scholar-search\host\logs\host.log` | what the host did, and when it lost the extension |
 | stderr | diagnostics only; stdout carries protocol frames exclusively |
 
 `bridge.json` is written on start and removed on exit. A stale file means the
 host died without cleanup; the adapter surfaces the connection error instead of
 retrying forever.
+
+`wensu status` reports both paths, so a caller does not have to guess where they
+are — `bridge.endpoint` and `bridge.log_path`.
 
 ## Install
 
@@ -34,11 +38,12 @@ retrying forever.
 .\install.ps1 -ExtensionId <id>
 ```
 
-The script writes `run-host.cmd`, `com.scholar.search.json`, and the registry
-key under both Microsoft Edge and Google Chrome. Use `-Uninstall` to remove.
+The script writes `com.scholar.search.json` and the registry key under both
+Microsoft Edge and Google Chrome. There is no `run-host.cmd`: the launcher
+compiles to `scholar-host.exe` beside it, and the browser starts that directly
+through the registry entry. Use `-Uninstall` to remove.
 
 ## Security boundary
-
 - verbs are limited to the nine in `adapters/bridge/policy.py`;
 - `goto` is https-only and restricted to the CNKI host allowlist;
 - unknown parameters and oversized frames are rejected before reaching the page;

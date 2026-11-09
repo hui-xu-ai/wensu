@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from pathlib import Path
 from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
@@ -63,6 +65,10 @@ def _project(records: list[dict[str, Any]], fields: list[str] | None) -> list[di
     `include_abstract` on 25 rows is tens of kilobytes, and most callers want a
     title, a year and a DOI. Projection is applied after serialisation so the
     derived `doc_type_unified` can be requested like any other field.
+
+    An unknown key raises instead of being ignored: a caller that asked for
+    `["titel", "year"]` and received an empty record would have no way to notice the
+    typo, and the empty result looks exactly like a channel with no metadata.
     """
 
     if not fields:
@@ -70,6 +76,13 @@ def _project(records: list[dict[str, Any]], fields: list[str] | None) -> list[di
     wanted = {name.strip() for name in fields if name.strip()}
     if not wanted:
         return records
+    available = set(records[0]) if records else set()
+    unknown = wanted - available
+    if unknown:
+        raise ValueError(
+            f"unknown field(s): {', '.join(sorted(unknown))}. "
+            f"available: {', '.join(sorted(available))}"
+        )
     # `url` is what `detail` needs; dropping it silently would make the projection
     # produce records the caller cannot follow up on.
     kept = wanted | {"url"}
@@ -91,6 +104,9 @@ def _page_payload(page: Any, query: SearchQuery | None = None,
         "empty_reason": page.empty_reason,
         # True means nothing was spent: the answer came from the cache.
         "cache_hit": page.cache_hit,
+        # The expression that actually reached the site, when it differs from the
+        # query the caller typed. Absent when the channel does not reshape queries.
+        "query_effective": page.query_effective,
     }
     if query is not None:
         applied = _filters_payload(page, query)
@@ -203,10 +219,17 @@ def build_server(service: ScholarService) -> FastMCP:
         the channel from the URL.
 
         An empty records list is a normal answer, not a failure: read `total` and
-        `dropped_year` before concluding that a topic has no papers. year_from /
-        year_to filter only the page just fetched, so an empty page means "nothing
-        on this page matched", and `dropped_year` says how many were removed. Widen
-        the query or try a synonym rather than concluding absence.
+        `dropped_year` before concluding that a topic has no papers.
+
+        **`total` is the site's count for the query, before any local filter.** With
+        a year range applied, `total: 363` alongside nine records does NOT mean
+        "363 papers in that year" — it means the site matched 363 and this page lost
+        11 of its 20 to the year filter. `filters.year_scope: "page"` says so
+        explicitly, and `filters.dropped.year` gives the count. To get a year-accurate
+        total, put the year in the query (`PY=(2026)` on Web of Science,
+        `SU='x' and 年='2026'` on CNKI) or use `site_sort=date` and read the newest
+        page. `empty_reason: "all_dropped_by_year"` is the case where the whole page
+        was filtered away.
 
         min_impact_factor is honoured by channels that ship journal metrics
         (currently webofscience); records whose journal has no metric are dropped,
@@ -285,36 +308,107 @@ def build_server(service: ScholarService) -> FastMCP:
 
         before = _quota(service)
         try:
+            result: dict[str, Any]
             if is_doi:
-                record: dict[str, Any] = service.detail_by_doi(
-                    identifier, channel=channel
-                ).to_dict()
-                return record
-            resolved = channel or service.channel_for_url(identifier)
-            if resolved is None:
-                return {
-                    "status": "error",
-                    "code": "UNKNOWN_CHANNEL",
-                    "message": f"no channel claims the host of {identifier!r}",
-                    "channel": None,
-                    "retryable": False,
-                    "quota_charged": 0,
-                }
-            return service.detail(identifier, channel=resolved).to_dict()
+                result = service.detail_by_doi(identifier, channel=channel).to_dict()
+            else:
+                resolved = channel or service.channel_for_url(identifier)
+                if resolved is None:
+                    return {
+                        "status": "error",
+                        "code": "UNKNOWN_CHANNEL",
+                        "message": f"no channel claims the host of {identifier!r}",
+                        "channel": None,
+                        "retryable": False,
+                        "quota_charged": 0,
+                    }
+                result = service.detail(identifier, channel=resolved).to_dict()
         except (RiskBlocked, ScholarSearchError) as error:
             after = _quota(service)
             charged = (before - after) if before is not None and after is not None else 0
             return _payload(error, channel=channel, quota_charged=max(0, charged))
+        # `detail` spends quota exactly like `search` does, but used to return no
+        # quota field at all — so a caller tracking its budget had to insert a
+        # `status` call after every lookup to find out what it had just spent.
+        after = _quota(service)
+        result["quota_charged"] = (
+            max(0, before - after) if before is not None and after is not None else 0
+        )
+        result["quota_remaining"] = after
+        return result
+
+    @mcp.tool()
+    def detail_many(
+        urls: list[str], channel: str | None = None
+    ) -> dict[str, Any]:
+        """Fetch several records in one call.
+
+        Each lookup costs the same as `detail` and they run in sequence on purpose:
+        the policy layer serialises network actions anyway, so firing them in
+        parallel would only queue them while each held a timeout budget.
+
+        A failure on one record does not abandon the rest — the response is
+        `{"results": [{"url", "ok", "record"|"error"}], "ok_count", "failed_count"}`,
+        so a caller can retry just the ones that failed.
+        """
+
+        results: list[dict[str, Any]] = []
+        for url in urls:
+            try:
+                record = detail(url, channel)
+            except (RiskBlocked, ScholarSearchError) as error:
+                results.append({"url": url, "ok": False, "error": _payload(error)})
+                continue
+            if record.get("status") == "error":
+                results.append({"url": url, "ok": False, "error": record})
+            else:
+                results.append({"url": url, "ok": True, "record": record})
+
+        return {
+            "results": results,
+            "ok_count": sum(1 for item in results if item["ok"]),
+            "failed_count": sum(1 for item in results if not item["ok"]),
+        }
 
     @mcp.tool()
     def export(
-        records: list[dict[str, Any]], format: Literal["ris", "endnote"] = "ris"
+        records: list[dict[str, Any]],
+        format: Literal["ris", "endnote"] = "ris",
+        out_path: str | None = None,
+        include_abstract: bool = False,
     ) -> dict[str, Any]:
-        """Render records as RIS or EndNote text. No file is written."""
+        """Render records as RIS or EndNote text.
+
+        With `out_path`, the text is written there and **not** returned: a caller
+        that wants 143 records on disk should not have to pull them through its
+        context to do it. Without it, the text comes back inline as before.
+
+        `include_abstract` defaults to false here even though the records may carry
+        one. An `AB` field roughly quadruples an RIS entry, and an export is usually
+        for a reference manager, which fetches abstracts on its own.
+        """
+
         try:
             typed = [record_from_payload(item) for item in records]
-            return {"format": format, "text": service.export(typed, fmt=format)}
-        except (RiskBlocked, ScholarSearchError, TypeError, ValueError) as error:
+            if not include_abstract:
+                typed = [replace(record, abstract=None) for record in typed]
+            text = service.export(typed, fmt=format)
+            if out_path:
+                target = Path(out_path).expanduser()
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(text, encoding="utf-8")
+                # The body is deliberately omitted: it is on disk, and returning it
+                # anyway would defeat the point of writing it there.
+                return {
+                    "written": True,
+                    "path": str(target.resolve()),
+                    "format": format,
+                    "records": len(typed),
+                    "bytes": len(text.encode("utf-8")),
+                    "include_abstract": include_abstract,
+                }
+            return {"format": format, "text": text, "records": len(typed)}
+        except (RiskBlocked, ScholarSearchError, TypeError, ValueError, OSError) as error:
             return _payload(error if isinstance(error, Exception) else ValueError("bad record"))
 
     @mcp.tool()

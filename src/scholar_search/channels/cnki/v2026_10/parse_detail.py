@@ -8,6 +8,7 @@ articles have a publication date instead.
 
 from __future__ import annotations
 
+import datetime as dt
 import re
 
 from bs4 import BeautifulSoup, Tag
@@ -246,4 +247,9 @@ def parse(html: str, url: str) -> Record:
         keywords=keywords,
         url=url,
         doc_type=doc_type,
+        # Stamped here because this is the moment the page was read. Without it a
+        # CNKI detail carried `fetched_at: null` while a Web of Science one carried a
+        # timestamp, and a caller had no way to tell a fresh record from a stale one
+        # or to know whether the cache had served it.
+        fetched_at=dt.datetime.now(dt.UTC),
     )

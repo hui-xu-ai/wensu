@@ -14,14 +14,9 @@
         "properties": {
           "query": { "type": "string", "minLength": 1 },
           "channel": { "type": "string", "default": "cnki" },
-          "sort": {
-            "enum": ["relevance", "date", "citation"],
-            "default": "relevance",
-            "description": "Deprecated alias of `site_sort` — same meaning, same quota cost. Kept so existing callers keep working."
-          },
           "site_sort": {
             "enum": ["relevance", "date", "citation"],
-            "description": "Ask the SITE to re-sort the whole result set: two extra clicks, costs quota. For ordering the current page only, use `local_sort`, which is free."
+            "description": "Ask the SITE to re-sort the whole result set: two extra clicks, costs quota (about 5). For ordering the current page only, use `local_sort`, which is free."
           },
           "page": { "type": "integer", "minimum": 1, "maximum": 3, "default": 1 },
           "year_from": { "type": ["integer", "null"] },
@@ -41,19 +36,22 @@
           },
           "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 20 },
           "include_abstract": { "type": "boolean", "default": false },
-          "sort_by": {
-            "enum": ["none", "citations", "year"],
-            "default": "none",
-            "description": "Deprecated alias of `local_sort` — same meaning, same zero cost. Kept so existing callers keep working."
-          },
           "local_sort": {
             "enum": ["none", "citations", "year"],
-            "description": "Re-order the page already in hand: free, no browser action, no quota. Orders only this page, not the whole result set — use `site_sort` for that."
+            "description": "Re-order the page already in hand: free, no browser action, no quota (0). Orders only this page, not the whole result set — use `site_sort` for that."
           },
           "fields": {
             "type": "array",
-            "items": { "type": "string" },
-            "description": "Project each record to these keys, e.g. [\"title\",\"year\",\"doi\"]. `url` is always kept because `detail` needs it. `include_abstract` on 25 rows is tens of kilobytes; most callers want three fields."
+            "items": {
+              "type": "string",
+              "enum": [
+                "channel", "title", "authors", "institution", "source", "year",
+                "volume", "issue", "pages", "doi", "abstract", "keywords",
+                "citations", "downloads", "impact_factor", "url", "fetched_at",
+                "doc_type", "doc_type_unified"
+              ]
+            },
+            "description": "Project each record to these keys. `url` is always kept because `detail` needs it. `institution` and `impact_factor` are usually only populated by `detail`, not by a list row — see `status.detail_capabilities`. Unknown keys are rejected rather than silently ignored."
           },
           "min_citations": { "type": ["integer", "null"], "minimum": 0 },
           "min_impact_factor": { "type": ["number", "null"], "minimum": 0 }
@@ -75,14 +73,23 @@
     },
     {
       "name": "export",
-      "description": "Render records as RIS or EndNote text. No file is written.",
+      "description": "Render records as RIS or EndNote text. With `out_path` the text is written to that file and omitted from the response, which is how a large export should be done; without it the text comes back inline.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
         "required": ["records", "format"],
         "properties": {
           "records": { "type": "array", "items": { "$ref": "record.json" } },
-          "format": { "enum": ["ris", "endnote"] }
+          "format": { "enum": ["ris", "endnote"] },
+          "out_path": {
+            "type": ["string", "null"],
+            "description": "Write the text here and omit it from the response. Use this for a large export: pulling 143 records through the context just to save them is the expensive way."
+          },
+          "include_abstract": {
+            "type": "boolean",
+            "default": false,
+            "description": "Keep the abstract in each entry. Off by default: an AB field roughly quadruples an RIS entry, and reference managers fetch abstracts themselves."
+          }
         }
       }
     },

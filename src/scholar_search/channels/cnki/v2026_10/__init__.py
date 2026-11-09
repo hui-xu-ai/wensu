@@ -49,6 +49,16 @@ class CnkiChannel:
         """Whether the page itself says the query matched nothing."""
         return parse_search.is_empty_page(text)
 
+    def effective_query(self, query: SearchQuery) -> str:
+        """The expression this channel will actually type.
+
+        A bare keyword is wrapped as `SU='…'`; anything carrying a field code passes
+        through. Reporting it lets a caller see why a search matched nothing — the
+        text it sent is not the text the site matched against.
+        """
+
+        return plan_search.effective_expression(query.text)
+
     def sort_fix(self, query: SearchQuery, html: str) -> Plan | None:
         """Return a corrective plan when the grid ended up ascending."""
 

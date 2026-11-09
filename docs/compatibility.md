@@ -71,10 +71,26 @@ wensu status
 
 | 症状 | 说明 | 处理 |
 |---|---|---|
-| `bridge_ready: false` | 宿主没连上，或协议版本不匹配 | 重载扩展 + 刷新页面；仍不行看 `host` 日志 |
+| `bridge_ready: false` | 宿主没连上，或协议版本不匹配 | 先看 `status.bridge.remediation`；再看 `status.bridge.log_path` 指向的日志 |
 | `channels` 少一个 | 渠道目录缺失或 manifest 被拒 | 检查 `channels/*/manifest.json` |
 | `version` 与扩展详情页不一致 | 装的是不同批次 | 重装配套的那一套 |
 | 工具在 DSH 里没出现 | bundle 的 MCP 客户端没连上 | 看 DSH 侧 `dsh-mcp-client` 的启动错误 |
+
+### 版本号不一致时，哪些情况真有问题
+
+`version` 是**发行批次**，`bridge_protocol` 是**线上协议**。判断兼容只看后者：
+
+| 情况 | 是否兼容 | 说明 |
+|---|---|---|
+| `version` 相同，`bridge_protocol` 相同 | ✅ | 配套 |
+| `version` 差几版，`bridge_protocol` **相同** | ✅ | **正常**。协议没变就能通；例如扩展 0.12.15 + MCP 0.12.20 |
+| `bridge_protocol` **不同** | ❌ | 协议断了。扩展侧会在连接时拒绝并写日志 |
+
+**所以：看到版本号不同先别急着重装**，先跑 `wensu status` 比 `bridge_protocol`。
+两侧都强制校验这个数字，不匹配会在握手阶段直接断掉，不会静默出错。
+
+扩展**不需要**跟 MCP 同步升级——只有当 `bridge_protocol` 变了才需要。ADR 里记着当前值，
+`check-versions.py` 会校验两侧一致。
 
 ## 发版
 

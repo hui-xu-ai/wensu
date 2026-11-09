@@ -6,6 +6,7 @@ never exposes browser details to callers.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 from collections.abc import Callable, Sequence
@@ -184,6 +185,22 @@ class ScholarService:
             page = replace(page, records=records)
         if dropped_year:
             page = replace(page, dropped_year=dropped_year)
+            # The site had results and this page lost all of them to the year
+            # filter. Reporting `empty_reason: null` there left the caller to work it
+            # out from `dropped_year == total` — and one concluded "this topic has no
+            # literature" when the years simply did not match.
+            if not records and page.empty_reason is None:
+                page = replace(page, empty_reason="all_dropped_by_year")
+        # What the channel actually typed. A bare keyword becomes `SU='…'` on CNKI,
+        # and Web of Science appends `AND PY=(…)` when no year range was given — so
+        # the query that ran is often not the query the caller sent, and a
+        # zero-result answer is otherwise undiagnosable.
+        effective = getattr(channel, "effective_query", None)
+        if effective is not None and page.query_effective is None:
+            # A channel that cannot describe its query is not an error: the field
+            # stays None and the response is still complete without it.
+            with contextlib.suppress(ChannelError, ValueError):
+                page = replace(page, query_effective=effective(query))
         self._cache.set(key, _page_to(page))
         return page
 

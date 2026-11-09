@@ -231,6 +231,12 @@ class SearchPage:
     # True when this answer came from the cache, so nothing was spent. Without it a
     # caller cannot tell a free repeat from a charged search.
     cache_hit: bool = False
+    # The expression that actually went to the site, when it differs from what the
+    # caller typed. A bare keyword becomes `SU='…'` on CNKI, and Web of Science
+    # appends `AND PY=(…)` when no year range was given. Without this echo, a
+    # zero-result search gives the caller nothing to diagnose: the query it sent is
+    # not the query that ran.
+    query_effective: str | None = None
 
 
 # --------------------------------------------------------------------------

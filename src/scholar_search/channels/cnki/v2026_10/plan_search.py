@@ -76,6 +76,16 @@ def _quote(text: str) -> str:
     return text.replace("'", "''").strip()
 
 
+def effective_expression(text: str) -> str:
+    """What will be typed, given what the caller asked for.
+
+    Shared by the plan builder and by the channel's `effective_query` hook so the
+    reported expression cannot drift from the one actually submitted.
+    """
+
+    return text if is_expression(text) else f"SU='{_quote(text)}'"
+
+
 def _pagination(query: SearchQuery) -> tuple[Action, ...]:
     actions: list[Action] = []
     for index in range(max(0, query.page - 1)):
@@ -147,7 +157,7 @@ def build(query: SearchQuery) -> Plan:
     # search, so keeping both made the caller pick between two ways to say the same
     # thing. A bare keyword is wrapped as `SU='...'`; anything already carrying a
     # field code is passed through untouched.
-    expression = query.text if is_expression(query.text) else f"SU='{_quote(query.text)}'"
+    expression = effective_expression(query.text)
 
     actions = (
         Action("goto", {"url": f"{EXPERT['page']}&t={nonce}"}, timeout_ms=NAV_TIMEOUT_MS),

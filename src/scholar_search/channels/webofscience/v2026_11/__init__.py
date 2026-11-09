@@ -21,6 +21,7 @@ from ....core.contracts import (
 )
 from ....core.errors import ChannelError
 from . import parse_records, plan_search
+from . import query as expression
 
 
 def _load_manifest() -> ChannelManifest:
@@ -70,6 +71,17 @@ class WebOfScienceChannel:
     def is_empty_page(self, text: str) -> bool:
         """Whether the page itself says the query matched nothing."""
         return parse_records.is_empty_page(text)
+
+    def effective_query(self, query: SearchQuery) -> str:
+        """The expression this channel will actually type.
+
+        Web of Science gets an extra `AND PY=(…)` when the caller gave no year range,
+        and `PY=(2026-2026)` is collapsed to `PY=(2026)`. Neither is visible in the
+        query the caller sent, so a zero-result search would otherwise be
+        undiagnosable.
+        """
+
+        return expression.build(query)
 
     def plan_detail(self, url: str) -> Plan:
         raise ChannelError("webofscience channel does not implement detail yet")

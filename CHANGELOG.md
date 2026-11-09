@@ -4,6 +4,82 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.24] - 2026-11-09
+
+Closes the remaining items from the 2026-11-09 incident report: BUG-04 through BUG-12, and DOC-01
+through DOC-03. BUG-01/02/03 shipped in 0.12.21.
+
+### Fixed — an empty page now says why it is empty
+
+When the year filter removed every record on the page, `empty_reason` stayed `null` and
+`dropped_year` was the only clue. The report records a caller concluding "this topic has no
+literature" when the years simply did not match. It now reports
+`empty_reason: "all_dropped_by_year"`.
+
+### Fixed — `detail` reports what it spent
+
+`detail` spends quota exactly like `search` but returned no quota field at all, so tracking a budget
+required a `status` call after every lookup. Both `quota_charged` and `quota_remaining` are now on
+every `detail` response.
+
+### Fixed — CNKI detail records carry `fetched_at`
+
+A CNKI detail had `fetched_at: null` while a Web of Science one had a timestamp, so a caller could
+not tell a fresh record from a cached one. Stamped at parse time.
+
+### Added — `query_effective` on every search
+
+A bare keyword becomes `SU='…'` on CNKI, and Web of Science appends `AND PY=(2022-2026)` when no year
+range is given. **The query that ran is often not the query the caller sent**, and a zero-result
+answer gave no way to see that. Both channels now expose the expression they will actually type, and
+it is echoed in the response.
+
+```json
+"query_effective": "(TS=(ionic AND actuator)) AND PY=(2022-2026)"
+```
+
+### Added — `export` can write to disk
+
+```json
+{"out_path": "D:\\out\\results.ris", "format": "ris"}
+→ {"written": true, "path": "…", "records": 143, "bytes": 284113}
+```
+
+The text is deliberately omitted from that response: pulling 143 records through the context just to
+save them is the expensive way to do it. `include_abstract` defaults to false here as well — an `AB`
+field roughly quadruples an RIS entry.
+
+### Added — `detail_many`
+
+N records, one call, sequential on purpose (the policy layer serialises network actions anyway).
+A failure on one record does not abandon the rest:
+`{"results": [{"url", "ok", "record"|"error"}], "ok_count", "failed_count"}`.
+
+### Changed — `fields` rejects unknown keys
+
+A caller that wrote `["titel", "year"]` used to receive records with no title and no complaint. The
+error names the bad key and lists the available ones. The schema now enumerates them too, so the
+typo is caught before the call.
+
+### Changed — the schema lists two sort parameters, not four
+
+`site_sort` and `local_sort` are what the tool documents now. `sort` and `sort_by` still work as
+aliases for existing callers, but they are no longer in the parameter list — the four names side by
+side required the reader to work out which pair mattered.
+
+### Docs — BUG-04, DOC-01, DOC-02, DOC-03
+
+- **`total` is the site's count before local filtering.** The `search` docstring now spells out that
+  `total: 363` with nine records does not mean "363 papers that year", and names the two ways to get
+  a year-accurate answer.
+- **`bridge.json` is under `host\`, not the root.** The native-host README said otherwise, and now
+  also lists the log path.
+- **There is no `run-host.cmd`.** The launcher compiles to `scholar-host.exe` and the browser starts
+  that through the registry.
+- **A version gap between extension and MCP is usually fine.** `docs/compatibility.md` now has a
+  table: compare `bridge_protocol`, not `version`. The extension only needs upgrading when the
+  protocol number changes.
+
 ## [0.12.23] - 2026-11-09
 
 ### Added — adopt an existing profile instead of rebuilding it
