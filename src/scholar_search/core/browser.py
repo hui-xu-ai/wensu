@@ -19,6 +19,8 @@ looks at, starts, or stops any other profile.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import os
 import subprocess
@@ -140,7 +142,89 @@ def create(
         executable=str(exe),
         profile_dir=str(profile),
         extension_dir=str(ext),
-        extension_id=extension_id,
+        extension_id=extension_id or derive_extension_id(ext),
+    )
+    save(config)
+    return config
+
+
+def derive_extension_id(extension_dir: str | Path) -> str | None:
+    """The id Chromium will assign to this unpacked extension.
+
+    An unpacked extension's id is a hash of the `key` field in its manifest when one
+    is present, and of the absolute path otherwise. Ours ships a `key`, so the id is
+    the same on every machine — which is what lets the native-messaging manifest
+    list it in `allowed_origins` ahead of time.
+    """
+
+    manifest = Path(extension_dir) / "manifest.json"
+    if not manifest.is_file():
+        return None
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return None
+    key = data.get("key")
+    if not isinstance(key, str) or not key:
+        return None
+    try:
+        digest = hashlib.sha256(base64.b64decode(key)).hexdigest()[:32]
+    except (ValueError, TypeError):
+        return None
+    alphabet = "abcdefghijklmnop"
+    return "".join(alphabet[int(ch, 16)] for ch in digest)
+
+
+def is_profile_dir(path: Path) -> bool:
+    """Whether this looks like a Chromium `--user-data-dir`.
+
+    Chrome and Edge both write `Local State` at the root and a `Default/` profile
+    directory beside it. Checking for those two is enough to tell a profile apart
+    from an arbitrary folder, and it is much safer than starting a browser with
+    whatever path someone typed.
+    """
+
+    return (path / "Local State").is_file() and (path / "Default").is_dir()
+
+
+def adopt(
+    profile_dir: str | Path,
+    *,
+    browser: str = "edge",
+    executable: str | None = None,
+    extension_dir: str | None = None,
+    extension_id: str | None = None,
+) -> BrowserConfig:
+    """Record an existing profile instead of creating a new one.
+
+    Most users who already have a working setup built it by hand — a dedicated
+    profile on another drive, already signed in, extension already installed.
+    Rebuilding it as `profiles/edge` would throw that away and force them to
+    reinstall the extension. Taking the path they already use is strictly better.
+    """
+
+    path = Path(profile_dir).expanduser()
+    if not path.is_dir():
+        raise FileNotFoundError(f"{path} is not a directory")
+    if not is_profile_dir(path):
+        raise ValueError(
+            f"{path} does not look like a browser user-data-dir "
+            "(expected a 'Local State' file and a 'Default' directory beside it)"
+        )
+
+    exe = executable or find_executable(browser)
+    if exe is None:
+        raise FileNotFoundError(
+            f"could not find a {browser} executable; pass --executable explicitly"
+        )
+
+    ext = Path(extension_dir) if extension_dir else app_home() / "browser" / "extension"
+    config = BrowserConfig(
+        browser=browser.casefold(),
+        executable=str(exe),
+        profile_dir=str(path.resolve()),
+        extension_dir=str(ext),
+        extension_id=extension_id or derive_extension_id(ext),
     )
     save(config)
     return config

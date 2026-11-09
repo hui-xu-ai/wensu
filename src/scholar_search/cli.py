@@ -102,6 +102,13 @@ def build_parser() -> argparse.ArgumentParser:
     browser_sub = browser_cmd.add_subparsers(dest="browser_command", required=True)
     browser_sub.add_parser("start", help="launch the recorded profile")
     browser_sub.add_parser("show", help="print the recorded profile and whether it exists")
+    adopt = browser_sub.add_parser(
+        "adopt", help="record an existing profile instead of creating one"
+    )
+    adopt.add_argument("path", help="the existing --user-data-dir, e.g. E:\\LiteratureEdgeProfile")
+    adopt.add_argument("--browser", choices=["edge", "chrome"], default="edge")
+    adopt.add_argument("--executable", default=None, help="browser executable if not auto-detected")
+    adopt.add_argument("--extension-id", default=None)
 
     return parser
 
@@ -194,6 +201,22 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "browser":
         from .core import browser as browser_cfg
+
+        if args.browser_command == "adopt":
+            try:
+                adopted = browser_cfg.adopt(
+                    args.path,
+                    browser=args.browser,
+                    executable=args.executable,
+                    extension_id=args.extension_id,
+                )
+            except (FileNotFoundError, ValueError) as error:
+                print(f"wensu: {error}", file=sys.stderr)
+                return 2
+            print(f"adopted : {adopted.profile_dir}")
+            print(f"recorded: {browser_cfg.config_path()}")
+            print("next    : wensu browser start")
+            return 0
 
         recorded = browser_cfg.load()
         if recorded is None:

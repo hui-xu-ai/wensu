@@ -4,6 +4,48 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.23] - 2026-11-09
+
+### Added — adopt an existing profile instead of rebuilding it
+
+Most people who already have a working setup built it by hand: a dedicated profile on another drive,
+already signed in, extension already loaded. `wensu setup --browser edge` would create a *new*
+profile and leave that working setup untouched but unused, and the user reinstalling an extension
+they already had.
+
+```powershell
+wensu browser adopt "E:\LiteratureEdgeProfile"
+```
+
+```
+adopted : E:\LiteratureEdgeProfile
+recorded: C:\Users\…\scholar-search\browser.json
+next    : wensu browser start
+```
+
+The path is validated as a real Chromium `--user-data-dir` (a `Local State` file and a `Default`
+directory beside it) before being recorded, because starting a browser on an arbitrary path is worse
+than refusing.
+
+### Added — the extension id is derived, not typed
+
+`wensu browser adopt` now reads `manifest.json` from the extension directory and derives the id
+Chromium will assign. Our manifest ships a `key`, so the id is the same on every machine:
+
+```
+gmaimbocfjkolcpljeekjcomakipoaph
+```
+
+That is the id the native-messaging manifest already lists in `allowed_origins`, which is what lets
+`wensu browser start` load the unpacked extension via `--load-extension` and have the native host
+accept it — no reinstall, on any machine.
+
+### Note
+
+The adopted profile in the report's case had 10 extensions and none of them was wensu's: the user had
+been loading it via `--load-extension` rather than installing it. That still works, and now it is
+what `browser start` does by default.
+
 ## [0.12.22] - 2026-11-09
 
 ### Added — wensu now owns and remembers a browser profile
