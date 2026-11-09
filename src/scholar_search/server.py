@@ -94,8 +94,15 @@ def _project(records: list[dict[str, Any]], fields: list[str] | None) -> list[di
     return [{k: v for k, v in record.items() if k in kept} for record in records]
 
 
-def _page_payload(page: Any, query: SearchQuery | None = None,
-                  fields: list[str] | None = None) -> dict[str, Any]:
+def _page_payload(
+    page: Any,
+    query: SearchQuery | None = None,
+    fields: list[str] | None = None,
+    *,
+    quota_charged: int | None = None,
+    quota_remaining: int | None = None,
+    count_only: bool = False,
+) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "records": _project([record.to_dict() for record in page.records], fields),
         "total": page.total,
@@ -117,6 +124,44 @@ def _page_payload(page: Any, query: SearchQuery | None = None,
         applied = _filters_payload(page, query)
         if applied is not None:
             payload["filters"] = applied
+    # The price and the balance belong to every surface. They were added in the MCP
+    # tool, outside this function, so the CLI silently returned neither — the fifth
+    # time a field was added to one entry point and not the other.
+    if quota_charged is not None:
+        payload["quota_charged"] = quota_charged
+    if quota_remaining is not None:
+        payload["quota_remaining"] = quota_remaining
+    if count_only:
+        # Keep what explains the number: `total` alone cannot say whether the
+        # expression failed, matched nothing, or was filtered away.
+        payload["records"] = []
+    return payload
+
+
+def _detail_payload(
+    record: dict[str, Any],
+    *,
+    include_abstract: bool,
+    fields: list[str] | None,
+    quota_charged: int | None = None,
+    quota_remaining: int | None = None,
+) -> dict[str, Any]:
+    """Shape a detail response for either entry point.
+
+    Exists because the CLI held its own copy of this logic and got it backwards: it
+    returned the abstract when not asked and dropped it when asked. The switch lives
+    here now, and both callers use it.
+    """
+
+    payload = dict(record)
+    if not include_abstract:
+        payload["abstract"] = None
+    if quota_charged is not None:
+        payload["quota_charged"] = quota_charged
+    if quota_remaining is not None:
+        payload["quota_remaining"] = quota_remaining
+    if fields:
+        payload = _project([payload], fields)[0]
     return payload
 
 
@@ -293,24 +338,17 @@ def build_server(service: ScholarService) -> FastMCP:
             after = _quota(service)
             charged = (before - after) if before is not None and after is not None else 0
             return _payload(error, channel=channel, quota_charged=max(0, charged))
-        payload = _page_payload(result_page, request, fields)
         after = _quota(service)
-        spent = max(0, before - after) if before is not None and after is not None else 0
-        payload["quota_charged"] = spent
-        # The balance, not just the price. Without it a caller has to insert a
-        # `status` call between every planning step to know whether it can afford
-        # the next one.
-        payload["quota_remaining"] = after
-        if count_only:
-            # Keep what explains the number: total alone cannot say whether the
-            # expression failed, matched nothing, or was filtered away.
-            explained = _page_payload(result_page, request)
-            keep = ("total", "query_effective", "empty_reason", "dropped_year",
-                    "filters", "cache_hit", "quota_charged", "quota_remaining")
-            for key in keep:
-                if key in explained:
-                    payload[key] = explained[key]
-            payload["records"] = []
+        payload = _page_payload(
+            result_page,
+            request,
+            fields,
+            quota_charged=(
+                max(0, before - after) if before is not None and after is not None else 0
+            ),
+            quota_remaining=after,
+            count_only=count_only,
+        )
         return payload
 
     @mcp.tool()
@@ -365,19 +403,16 @@ def build_server(service: ScholarService) -> FastMCP:
             after = _quota(service)
             charged = (before - after) if before is not None and after is not None else 0
             return _payload(error, channel=channel, quota_charged=max(0, charged))
-        # `detail` spends quota exactly like `search` does, but used to return no
-        # quota field at all — so a caller tracking its budget had to insert a
-        # `status` call after every lookup to find out what it had just spent.
         after = _quota(service)
-        result["quota_charged"] = (
-            max(0, before - after) if before is not None and after is not None else 0
+        return _detail_payload(
+            result,
+            include_abstract=include_abstract,
+            fields=fields,
+            quota_charged=(
+                max(0, before - after) if before is not None and after is not None else 0
+            ),
+            quota_remaining=after,
         )
-        result["quota_remaining"] = after
-        if not include_abstract:
-            result["abstract"] = None
-        if fields:
-            result = _project([result], fields)[0]
-        return result
 
     @mcp.tool()
     def detail_many(

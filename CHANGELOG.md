@@ -4,6 +4,43 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.30] - 2026-11-09
+
+### Fixed — the CLI and the MCP tool diverged four more times
+
+Testing the release the way a user would, instead of the way the tests do, found the same class of
+defect four more times. **This is the seventh occurrence today**, so the pattern is stated here
+plainly: the tool and the CLI each build their own response, and every field added to one is missing
+from the other until someone runs the command.
+
+| Missing from the CLI | Consequence |
+|---|---|
+| `--count-only` | rejected the flag outright |
+| `quota_charged` / `quota_remaining` on `search` | the price was never reported |
+| `include_abstract` / `fields` on `detail` | **returned the abstract when not asked, dropped it when asked** |
+| the `export` command | did not exist at all |
+
+The payload shaping for both `search` and `detail` now lives in one function each in `server.py`, and
+the CLI calls them. `detail` returns through `_detail_payload`, which is where the switch belongs —
+the CLI's own copy had it inverted.
+
+### Verified by running the commands
+
+```
+search "离子柔性驱动器" --count-only   → query_effective: SU='离子柔性驱动器', total 0, charged 3
+search "离子 柔性 驱动器" --field title → total 128, keys title,year,url
+detail <doi>                 → abstract null,  charged 0 (cached)
+detail <doi> --abstract      → abstract 198 chars, charged 0
+detail <doi> --field title --field doi --field pages
+                             → keys title,pages,doi,url,quota_charged,quota_remaining
+export records.json --format markdown --out refs.md
+                             → {"written": true, "records": 3, "bytes": 1113}
+```
+
+Also fixed: `wensu setup --browser edge` no longer overwrites a profile recorded by
+`wensu browser adopt`. It did, during this session's own testing, and moved the tool from the user's
+`E:\LiteratureEdgeProfile` to a fresh `profiles/edge`.
+
 ## [0.12.29] - 2026-11-09
 
 Closes WS-01, WS-02, WS-03, WS-04 and WS-16 — the five items that blocked a whole session.

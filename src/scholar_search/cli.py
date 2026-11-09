@@ -53,6 +53,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="re-order the fetched page (free); same as --sort-by",
     )
     search.add_argument(
+        "--count-only",
+        action="store_true",
+        help="drop records and return only the count plus what explains it",
+    )
+    search.add_argument(
         "--field",
         action="append",
         dest="fields",
@@ -68,6 +73,15 @@ def build_parser() -> argparse.ArgumentParser:
     detail = sub.add_parser("detail", help="print one record by its detail URL")
     detail.add_argument("url")
     detail.add_argument("--channel", default=None, help="inferred from the URL when omitted")
+    detail.add_argument("--abstract", action="store_true", help="include the abstract")
+    detail.add_argument(
+        "--field",
+        action="append",
+        dest="fields",
+        metavar="NAME",
+        default=None,
+        help="keep only this field; repeatable. `url` is always kept",
+    )
 
     status_cmd = sub.add_parser("status", help="show session, quota and cooldown state")
     status_cmd.add_argument(
@@ -105,6 +119,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="also install the bundled skills here (e.g. D:\\DSH\\.dsh\\skills)",
     )
     setup.add_argument("--extension-id", default=None, help="extension id, recorded for status")
+
+    export_cmd = sub.add_parser("export", help="render records from a JSON file")
+    export_cmd.add_argument("records", help="path to a JSON file holding an array of records")
+    export_cmd.add_argument(
+        "--format", choices=["ris", "endnote", "markdown", "csv"], default="ris"
+    )
+    export_cmd.add_argument("--out", default=None, help="write here instead of stdout")
+    export_cmd.add_argument(
+        "--abstract",
+        action="store_true",
+        help="keep abstracts (off by default: an AB field roughly quadruples an RIS entry)",
+    )
 
     browser_cmd = sub.add_parser(
         "browser", help="start the dedicated browser profile that has the extension"
@@ -193,6 +219,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         if code == 0 and args.browser != "none":
             from .core import browser as browser_cfg
 
+            # Never overwrite a recorded profile. A user who ran `browser adopt`
+            # chose that directory on purpose; replacing it with a fresh
+            # `profiles/<name>` silently moves the tool away from the window they
+            # were using. Only create one when nothing is recorded yet.
+            existing = browser_cfg.load()
+            if existing is not None and not args.force:
+                print(f"browser profile: {existing.profile_dir} (already recorded, kept)")
+                print("  use --force to replace it, or `wensu browser adopt <path>`")
+                return code
             try:
                 made = browser_cfg.create(
                     args.browser,
@@ -209,6 +244,45 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "(then load the unpacked extension once if the toolbar icon is missing)"
             )
         return code
+
+    if args.command == "export":
+        from dataclasses import replace as dataclass_replace
+
+        from .bootstrap import build_service
+        from .core.export import record_from_payload
+
+        try:
+            payload = json.loads(Path(args.records).read_text(encoding="utf-8"))
+            if isinstance(payload, dict) and "records" in payload:
+                payload = payload["records"]
+            typed = [record_from_payload(item) for item in payload]
+            if not args.abstract:
+                typed = [dataclass_replace(r, abstract=None) for r in typed]
+            text = build_service().export(typed, fmt=args.format)
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            print(f"wensu: {error}", file=sys.stderr)
+            return 2
+        if args.out:
+            target = Path(args.out).expanduser()
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text, encoding="utf-8")
+            print(
+                json.dumps(
+                    {
+                        "written": True,
+                        "path": str(target.resolve()),
+                        "format": args.format,
+                        "records": len(typed),
+                        "bytes": len(text.encode("utf-8")),
+                        "include_abstract": args.abstract,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+        else:
+            print(text)
+        return 0
 
     if args.command == "browser":
         from .core import browser as browser_cfg
@@ -263,26 +337,45 @@ def main(argv: Sequence[str] | None = None) -> int:
         service = build_service()
         try:
             if args.command == "detail":
-                # Same inference as the MCP tool: a URL this tool produced must be
-                # accepted back without the caller knowing which channel it came from.
+                # Same inference, same projection and same quota reporting as the MCP
+                # tool. This block used to hold its own copy and got the abstract
+                # switch backwards.
+                from .server import _detail_payload
+
                 identifier = args.url.strip()
+                before_q = service.status(brief=True).get("quota_remaining")
                 if identifier.lower().startswith("10.") and "/" in identifier:
                     # A DOI is short and stable; a CNKI detail URL is hundreds of
                     # characters of encrypted signature and easy to truncate.
-                    by_doi = service.detail_by_doi(
-                        identifier, channel=args.channel
+                    by_doi = service.detail_by_doi(identifier, channel=args.channel)
+                    raw = by_doi.to_dict()
+                else:
+                    resolved = args.channel or service.channel_for_url(identifier)
+                    if resolved is None:
+                        print(
+                            f"wensu: no channel claims the host of {identifier!r}",
+                            file=sys.stderr,
+                        )
+                        return 2
+                    raw = service.detail(identifier, channel=resolved).to_dict()
+                after_q = service.status(brief=True).get("quota_remaining")
+                print(
+                    json.dumps(
+                        _detail_payload(
+                            raw,
+                            include_abstract=getattr(args, "abstract", False),
+                            fields=getattr(args, "fields", None),
+                            quota_charged=(
+                                max(0, before_q - after_q)
+                                if isinstance(before_q, int) and isinstance(after_q, int)
+                                else 0
+                            ),
+                            quota_remaining=after_q if isinstance(after_q, int) else None,
+                        ),
+                        ensure_ascii=False,
+                        indent=2,
                     )
-                    print(json.dumps(by_doi.to_dict(), ensure_ascii=False, indent=2))
-                    return 0
-                resolved = args.channel or service.channel_for_url(identifier)
-                if resolved is None:
-                    print(
-                        f"wensu: no channel claims the host of {identifier!r}",
-                        file=sys.stderr,
-                    )
-                    return 2
-                record = service.detail(identifier, channel=resolved)
-                print(json.dumps(record.to_dict(), ensure_ascii=False, indent=2))
+                )
                 return 0
             query = SearchQuery(
                 text=args.query,
@@ -298,7 +391,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 sources_only=tuple(args.sources_only or ()),
                 min_impact_factor=args.min_impact_factor,
             )
+            before_quota = service.status(brief=True).get("quota_remaining")
             page = service.search(query)
+            after_quota = service.status(brief=True).get("quota_remaining")
+            spent = (
+                max(0, before_quota - after_quota)
+                if isinstance(before_quota, int) and isinstance(after_quota, int)
+                else None
+            )
+            after = after_quota if isinstance(after_quota, int) else None
         except RiskBlocked as error:
             print(json.dumps(error.to_payload(), ensure_ascii=False), file=sys.stderr)
             return 3
@@ -314,13 +415,23 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.format == "json":
             # Built by the same function the MCP tool uses. Writing this payload twice
-            # has now cost two missed fields — `dropped_year`, then `filters` — because
-            # each fix went to whichever surface the test happened to exercise.
+            # has now cost five fields — `dropped_year`, `filters`, `quota_charged`,
+            # `quota_remaining`, `count_only` — because each fix went to whichever
+            # surface the test happened to exercise.
             from .server import _page_payload
 
             print(
                 json.dumps(
-                    _page_payload(page, query, args.fields), ensure_ascii=False, indent=2
+                    _page_payload(
+                        page,
+                        query,
+                        args.fields,
+                        quota_charged=spent,
+                        quota_remaining=after,
+                        count_only=getattr(args, "count_only", False),
+                    ),
+                    ensure_ascii=False,
+                    indent=2,
                 )
             )
         else:
