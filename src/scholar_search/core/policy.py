@@ -73,12 +73,21 @@ class PolicyEngine:
         return date.today().isoformat()
 
     @property
+    def state_path(self) -> Path:
+        return self._state_path
+
+    @property
     def state_dir(self) -> Path:
         return self._state_path.parent
 
     def _read(self) -> QuotaState:
         try:
-            text = self._state_path.read_text(encoding="utf-8")
+            # `utf-8-sig` strips a leading BOM. The file is written without one, but
+            # an editor, a PowerShell `Set-Content -Encoding utf8` on 5.1, or a hand
+            # edit will add it, and plain utf-8 then leaves \ufeff in the text so
+            # json.loads fails on a file that looks perfectly fine. Reading leniently
+            # is better than telling the user their quota state is corrupt.
+            text = self._state_path.read_text(encoding="utf-8-sig")
         except FileNotFoundError:
             self._state_error = None
             return QuotaState(day=self._today())
@@ -129,8 +138,28 @@ class PolicyEngine:
         return self._degraded
 
     @property
-    def remaining_today(self) -> int:
-        return max(0, self._limits.daily_request_limit - self.used_today)
+    def state_error(self) -> str | None:
+        """Why the quota file could not be used, or None when it is fine."""
+
+        self._read()
+        return self._state_error
+
+    @property
+    def remaining_today(self) -> int | None:
+        """How many requests are left, or None when that cannot be known.
+
+        Returning None rather than the full limit is the point: `search` refuses to
+        run while the state is unreadable, so reporting 300 here made `status` and
+        `search` contradict each other — one said "full quota", the other said
+        "corrupt".
+        """
+
+        if self._degraded:
+            return max(0, self._limits.daily_request_limit - self._fallback.used)
+        state = self._read()
+        if self._state_error is not None:
+            return None
+        return max(0, self._limits.daily_request_limit - state.used)
 
     # -- validation ----------------------------------------------------
 
@@ -205,7 +234,9 @@ class PolicyEngine:
             state = self._read()
             if self._state_error is not None:
                 raise PolicyError(
-                    f"quota state is {self._state_error}; refusing new network actions",
+                    f"quota state is {self._state_error} at {self._state_path}; "
+                    "delete the file to start a fresh day count, or repair it to "
+                    '{"day": "YYYY-MM-DD", "used": N, "last": null}',
                     rule="quota.state",
                 )
             if state.used >= self._limits.daily_request_limit:

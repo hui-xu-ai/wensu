@@ -69,6 +69,8 @@ def _page_payload(page: Any, query: SearchQuery | None = None) -> dict[str, Any]
         # "no_match" means the channel proved the query matched nothing. Without it
         # an empty page is indistinguishable from a failed capture.
         "empty_reason": page.empty_reason,
+        # True means nothing was spent: the answer came from the cache.
+        "cache_hit": page.cache_hit,
     }
     if query is not None:
         applied = _filters_payload(page, query)
@@ -203,9 +205,12 @@ def build_server(service: ScholarService) -> FastMCP:
             return _payload(error, channel=channel, quota_charged=max(0, charged))
         payload = _page_payload(result_page, request)
         after = _quota(service)
-        payload["quota_charged"] = (
-            max(0, before - after) if before is not None and after is not None else 0
-        )
+        spent = max(0, before - after) if before is not None and after is not None else 0
+        payload["quota_charged"] = spent
+        # The balance, not just the price. Without it a caller has to insert a
+        # `status` call between every planning step to know whether it can afford
+        # the next one.
+        payload["quota_remaining"] = after
         return payload
 
     @mcp.tool()

@@ -228,6 +228,9 @@ class SearchPage:
     # page is indistinguishable from a capture failure or a filter that removed
     # everything, all three of which look like `records: []`.
     empty_reason: str | None = None
+    # True when this answer came from the cache, so nothing was spent. Without it a
+    # caller cannot tell a free repeat from a charged search.
+    cache_hit: bool = False
 
 
 # --------------------------------------------------------------------------

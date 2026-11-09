@@ -81,7 +81,7 @@ class ScholarService:
             # A cache hit sends nothing to the site, so a cooldown should not hide
             # it: the cooldown exists to stop traffic, not to withhold data already
             # retrieved. Checking readiness first made it do the latter.
-            return _page_from(cached)
+            return replace(_page_from(cached), cache_hit=True)
 
         self._ensure_ready()
 

@@ -48,7 +48,21 @@ def build_service() -> ScholarService:
                 for spec in registry.discover()
             },
             "cooldown_until": until.isoformat() if until else None,
+            # None when the quota file cannot be read. Reporting the full limit there
+            # made status contradict search, which refuses to run in the same state.
             "quota_remaining": policy.remaining_today,
+            "quota_state_error": policy.state_error,
+            "quota_state_path": str(policy.state_path),
+            # Rough price of one search per channel, so a caller can budget without
+            # discovering the cost by spending it.
+            "action_cost": {
+                "search": {"cnki": 3, "webofscience": 4},
+                "page_turn": 4,
+                "site_sort": 5,
+                "local_sort": 0,
+                "detail_cached": 0,
+                "detail_live": {"cnki": 1},
+            },
             "bridge_endpoint": str(endpoint),
             "bridge_ready": BridgeAdapter.probe(),
         }
