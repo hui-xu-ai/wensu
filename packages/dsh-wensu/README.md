@@ -3,17 +3,21 @@
 这是一个**配置型 bundle**：它不包含插件代码，只声明对 `@deepseek-ai/dsh-mcp-client`
 的依赖，并通过 `cordis.patch.yml` 插入一条 MCP 客户端实例。
 
+装好之后 agent 会拿到四个工具：`search` / `detail` / `export` / `status`，覆盖**知网**与
+**Web of Science** 两个渠道，WoS 记录自带期刊影响因子。不下载全文，只出题录。
+
 ## 版本对照
 
-两个独立版本流，互相不需要同步升级：
+两个发行物流共用同一个版本号（ADR 0013）：看到数字不同，就说明装错了批次。
 
 | 装什么 | 版本在哪看 | 当前 |
 |---|---|---|
-| DSH bundle（本目录） | npm / 插件市场 | **0.4.4** |
-| `wensu` 命令本体（Python 包） | PyPI | **0.12.9**（`pip install -U wensu`）|
+| DSH bundle（本目录） | npm / 插件市场 | **0.12.14** |
+| `wensu` 命令本体（Python 包） | PyPI | **0.12.14**（`pip install -U wensu`）|
 
-市场显示 0.4.4 而 `pip show wensu` 是 0.12.9 属于正常现象；bundle 只负责把 MCP 客户端接进 DSH，
-不含服务端代码。本 bundle 走 npm 发布，**不产生 GitHub Release**；Release 只跟 Python 包的发版。
+两个发行物同号，看到不一致就是装错了批次。bundle 只负责把 MCP 客户端接进 DSH，不含服务端
+代码，所以它内容很少变——版本号跟着 Python 包走，只是为了让人一眼能对上。
+本 bundle 走 npm 发布，**不产生 GitHub Release**；Release 只跟 Python 包的发版。
 
 bundle 提供的工具有哪些，取决于装的那份 `wensu` 认不认渠道：
 

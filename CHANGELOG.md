@@ -4,6 +4,48 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.15] - 2026-11-09
+
+### Removed — what was left of the CNKI one-box search
+
+`SEARCH["input"]`, `SEARCH["submit"]` and `SEARCH_PAGE` had no caller since the expert form
+became the only path, but they were still there. Keeping them implied a second entry point that
+no longer exists. The rest of the `SEARCH` dict stays: those selectors parse the result grid,
+which the expert form produces the same way.
+
+Note for anyone reading a screenshot: the search box at the top of every CNKI page is the site's
+own global navigation. It is present on the expert page too and is not something this tool opens.
+
+### Added — CNKI's zero-result wording
+
+The marker list was missing the one CNKI actually renders:
+
+```html
+<div id="briefBox"><p class="no-content">抱歉，暂无数据，请稍后重试。</p></div>
+```
+
+Without it a zero-result CNKI search was still surfacing as a timeout. The channel keeps its own
+detection — text markers, no URL comparison — deliberately separate from Web of Science, which
+compares URLs because it navigates and CNKI does not.
+
+### Fixed — the bundle README still advertised 0.4.4
+
+`packages/dsh-wensu/README.md` carried a version table stuck at bundle 0.4.4 / Python 0.12.9, and
+npm renders that file on the package page. It now states that both artefacts share one version
+number, which has been true since 0.12.10.
+
+### Verified
+
+```
+wos normal  2 records, total 1842,  empty null,     17.9 s
+wos zero    0 records, total 0,     empty no_match, 19.5 s
+cnki zero   0 records, total 0,     empty no_match, 19.6 s
+```
+
+CNKI's normal path was measured earlier in this session (`SU='柔性驱动器'` → 2 records,
+total 363, 13 s); the last run used a malformed expression by accident and correctly reported
+no match.
+
 ## [0.12.14] - 2026-11-09
 
 ### Added — a shared document-type vocabulary, and a report of what was filtered

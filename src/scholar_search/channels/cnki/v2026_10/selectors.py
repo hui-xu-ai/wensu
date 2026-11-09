@@ -5,9 +5,11 @@ Verified against live pages on 2026-10-20. Change them only with a fixture.
 
 from __future__ import annotations
 
+# Only the result-grid selectors are used now. The one-box search form
+# (`input.search-input` / `input.search-btn` on `kns8s/search`) has been removed:
+# every query goes through the expert form, so those two selectors had no caller
+# left. Keeping them around implied a second entry point that no longer exists.
 SEARCH = {
-    "input": "input.search-input",
-    "submit": "input.search-btn",
     "row": ".result-table-list tbody tr",
     "title_link": "td.name a.fz14",
     "authors": "td.author a.KnowledgeNetLink",
@@ -54,6 +56,7 @@ DETAIL = {
     "top_tip": ".doc-top",
 }
 
-SEARCH_PAGE = "https://kns.cnki.net/kns8s/search"
-SEARCH_READY = ".result-table-list tbody tr"
 DETAIL_READY = ".wx-tit h1, #ChDivSummary"
+# The result grid appearing. Still very much in use: it is the plan's readiness
+# signal after the expert form submits.
+SEARCH_READY = ".result-table-list tbody tr"
