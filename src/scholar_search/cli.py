@@ -99,6 +99,11 @@ def build_parser() -> argparse.ArgumentParser:
     setup.add_argument(
         "--executable", default=None, help="browser executable, if not auto-detected"
     )
+    setup.add_argument(
+        "--skills-dir",
+        default=None,
+        help="also install the bundled skills here (e.g. D:\\DSH\\.dsh\\skills)",
+    )
     setup.add_argument("--extension-id", default=None, help="extension id, recorded for status")
 
     browser_cmd = sub.add_parser(
@@ -173,6 +178,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 force=args.force,
                 python=args.python,
                 register_host=not args.no_host,
+                skills_dir=Path(args.skills_dir) if args.skills_dir else None,
             )
         except FileExistsError as error:
             # Already-installed assets are not a failure to re-run setup: the point

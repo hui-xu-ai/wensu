@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "wensu"
-version = "0.12.28"
+version = "0.12.29"
 description = "文溯 · 文献题录检索 MCP（只读，知网 + Web of Science，含期刊影响因子）"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -67,6 +67,14 @@ packages = ["src/scholar_search"]
 "extension/content/actions.js" = "scholar_search/assets/extension/content/actions.js"
 "schemas/record.json" = "scholar_search/assets/schemas/record.json"
 "schemas/tools.json" = "scholar_search/assets/schemas/tools.json"
+# The skills travel with the wheel for the same reason: a caller that installs from
+# the package should get the guidance, not only the tools. They were written in
+# 0.12.x and never shipped, so an agent looking at the skill directory saw nothing
+# for this tool and had to discover the query semantics by spending quota.
+"skills/scholar-search/SKILL.md" = "scholar_search/assets/skills/scholar-search/SKILL.md"
+"skills/scholar-detail/SKILL.md" = "scholar_search/assets/skills/scholar-detail/SKILL.md"
+"skills/scholar-export/SKILL.md" = "scholar_search/assets/skills/scholar-export/SKILL.md"
+"skills/scholar-install/SKILL.md" = "scholar_search/assets/skills/scholar-install/SKILL.md"
 
 [tool.hatch.build.targets.sdist]
 include = [

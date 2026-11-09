@@ -44,28 +44,46 @@ def _last_host_activity() -> str | None:
     return None
 
 
-def _bridge_remediation(last_seen: str | None) -> str:
-    """What to do, based on when the host was last alive.
+def _bridge_remediation(last_seen: str | None) -> dict[str, object]:
+    """What to do, as data rather than prose.
 
-    The fixed text told every caller to click the extension icon. The most common
-    case is that the browser is simply not running, where clicking an icon is not
-    possible — and the JSON right beside it already carried `browser_profile`.
+    The previous version returned a sentence, and the sentence was the same for two
+    different situations. That was the bug: a caller that is told "click the
+    extension icon" when no browser is running has been sent to do something
+    impossible, and it has no way to notice.
+
+    The diagnosis now comes from whether the profile is actually in use, and the
+    answer names a command.
     """
 
-    if last_seen is None:
-        return (
-            "No host has ever logged to host.log, so the browser is probably not "
-            "running. Start it with `wensu browser start`, then load the extension "
-            "once if the toolbar icon is missing. Do NOT start, stop or kill browser "
-            "processes yourself."
-        )
-    return (
-        f"The host last logged at {last_seen}, so a browser is running but the "
-        "extension is not connected. Click the wensu icon in that window to "
-        "reconnect. Do NOT start, stop, reload or kill the user's browser processes: "
-        "the extension lives in one profile only, and restarting the browser brings "
-        "up a different one with no bridge."
-    )
+    from .core import browser as browser_cfg
+
+    recorded = browser_cfg.load()
+    if recorded is None:
+        return {
+            "diagnosis": "no browser profile recorded",
+            "next_action": "setup",
+            "command": "wensu setup --browser edge",
+            "human_step_required": True,
+        }
+
+    running = browser_cfg.profile_is_running(recorded)
+    if not running:
+        return {
+            "diagnosis": "the wensu profile browser is not running",
+            "next_action": "browser_start",
+            "command": "wensu browser start",
+            "profile_dir": recorded.profile_dir,
+            "human_step_required": False,
+        }
+    return {
+        "diagnosis": "a browser is using the profile, but the extension is not connected",
+        "next_action": "reload_extension",
+        "command": None,
+        "profile_dir": recorded.profile_dir,
+        "last_seen": last_seen,
+        "human_step_required": True,
+    }
 
 
 def _browser_summary() -> dict[str, object] | None:
@@ -121,6 +139,10 @@ def build_service() -> ScholarService:
                 "version": __version__,
                 "bridge_ready": bridge_up,
                 "bridge_last_seen": last_seen,
+                # Enough to act on without pulling the full payload: the report
+                # needed `remediation` and `start_with` and had to spend 500 tokens
+                # on three static blocks to get them.
+                "bridge_next_action": None if bridge_up else _bridge_remediation(last_seen),
                 "quota_remaining": policy.remaining_today,
                 "cooldown_until": until.isoformat() if until else None,
             }

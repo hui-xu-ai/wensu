@@ -14,6 +14,48 @@ from pathlib import Path
 ASSET_DIRS = ("native-host", "extension", "schemas")
 
 
+def skills_root() -> Path | None:
+    """Where the SKILL.md files live, or None when this install has none.
+
+    Kept separate from the browser assets: those are copied into the tool's own
+    runtime directory, while skills belong wherever the agent looks for them.
+    """
+
+    packaged = Path(str(files("scholar_search"))) / "assets" / "skills"
+    if packaged.is_dir():
+        return packaged
+    checkout = Path(__file__).resolve().parent.parent.parent / "skills"
+    if checkout.is_dir():
+        return checkout
+    return None
+
+
+def install_skills(target: Path, *, force: bool = False) -> list[Path]:
+    """Copy the bundled skills into a skill directory.
+
+    Each skill is its own directory containing `SKILL.md`, which is the layout the
+    harness expects. An existing directory is left alone unless `force` is set: a
+    user who edited a skill should not lose that because a later `setup` ran.
+    """
+
+    root = skills_root()
+    if root is None:
+        return []
+    target.mkdir(parents=True, exist_ok=True)
+    copied: list[Path] = []
+    for skill in sorted(root.iterdir()):
+        if not skill.is_dir() or not (skill / "SKILL.md").is_file():
+            continue
+        destination = target / skill.name
+        if destination.exists():
+            if not force:
+                continue
+            shutil.rmtree(destination)
+        shutil.copytree(skill, destination)
+        copied.append(destination)
+    return copied
+
+
 def assets_root() -> Path:
     """Where the browser assets live: the wheel's package data, or the repo."""
 

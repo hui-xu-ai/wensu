@@ -4,6 +4,83 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.29] - 2026-11-09
+
+Closes WS-01, WS-02, WS-03, WS-04 and WS-16 — the five items that blocked a whole session.
+
+### Fixed — the bridge message sent callers to do something impossible
+
+WS-01. `remediation` was one sentence: "open the profile and click the extension icon". That assumes a
+browser is running with the extension merely disconnected. The case that actually blocked the session
+was that **no browser was running at all** — the user's everyday Edge was up, but without the
+extension. The caller relayed the instruction, and the user answered "did you forget
+E:\LiteratureEdgeProfile".
+
+The diagnosis now comes from whether the profile is in use (`Default/LOCK` is held while Chromium has
+it open — `SingletonLock` is unreliable on Windows), and the answer is data with a command:
+
+```json
+{"diagnosis": "the wensu profile browser is not running",
+ "next_action": "browser_start",
+ "command": "wensu browser start",
+ "profile_dir": "E:\\LiteratureEdgeProfile",
+ "human_step_required": false}
+```
+
+When the profile *is* in use, the answer is `reload_extension` with `human_step_required: true`,
+because clicking an icon genuinely is the right move there.
+
+### Fixed — `retryable: true` invited a retry loop that could never succeed
+
+WS-02. A dead bridge cannot fix itself; retrying waits wall-clock time and fails identically. The
+report observed it directly: a retry 25 seconds later still found the bridge down. The field is now
+`retryable: false` with `requires: "external_state_change"`.
+
+### Added — `brief` carries the two fields that make it actionable
+
+WS-03. `status(brief)` was cheap (45 tokens) and incomplete: seeing `bridge_ready: false` meant
+pulling the full 500-token payload just to learn what to do. `bridge_next_action` now carries the same
+diagnosis object.
+
+### Fixed — `browser start` names the sandbox case
+
+WS-04. The message was accurate ("exit code 21 means the profile directory is not writable") but did
+not say the likely cause when running confined: the command needs full file access. Added to the
+message; `status.browser_profile` is unchanged.
+
+### Fixed — the skills existed but were never installed
+
+WS-16, and this is the one that explains a lot. Four `SKILL.md` files had been in the repository for
+several releases. **None of them was in the wheel**, so a package install shipped zero skills: an
+agent looked at the skill directory, found nothing for this tool, and worked out the CNKI query
+semantics by spending quota — 12 of them, per the report.
+
+- The wheel now carries all four under `scholar_search/assets/skills/`.
+- `wensu setup --skills-dir <path>` installs them as `<path>/<name>/SKILL.md`.
+- Skills are installed **before** the browser assets and independently of them: the first live test
+  showed an already-present asset tree aborting setup before the skills were touched.
+
+### Verified
+
+Every claim above was exercised before this release, and the two branches of the remediation are
+covered by tests — the "browser not running" branch cannot be reached on a machine where the profile
+happens to be open, which is exactly why it was wrong for so long.
+
+```
+remediation (profile running) → reload_extension,         human_step_required: true
+remediation (profile stopped) → browser_start,            human_step_required: false
+error payload                 → retryable: false, requires: external_state_change
+wensu setup --skills-dir D:\DSH\.dsh\skills → 4 directories installed
+```
+
+### Still open
+
+WS-05 through WS-15 and WS-17/18 — query semantics documentation (largely covered in the skill that
+is now actually installed), `query_mode`, a cheap `probe`, `next_action` as a single enum,
+`page_count`/`publication_status`, duplicate papers, schema slimming, `sort_effective`, and the
+`detail_many(out_path=…)` harvest path. These are real, and none of them blocks a session the way the
+five above did.
+
 ## [0.12.28] - 2026-11-09
 
 ### Fixed — the tool schema did not describe the tools

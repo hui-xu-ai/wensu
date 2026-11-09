@@ -179,7 +179,12 @@ def _payload(
     action_error = error if isinstance(error, ActionError) else None
     if action_error is not None and (action_error.code or "").startswith("bridge."):
         payload["remediation"] = ScholarService.BRIDGE_REMEDIATION
-        payload["retryable"] = True
+        # NOT retryable. Retrying is guaranteed to fail until something outside the
+        # caller changes: a browser has to start, or an extension has to reconnect.
+        # `retryable: true` here invited a retry loop that spent wall-clock time and
+        # could never succeed, which the report observed directly.
+        payload["retryable"] = False
+        payload["requires"] = "external_state_change"
     return payload
 
 

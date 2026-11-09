@@ -12,7 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .assets import copy_assets
+from .assets import copy_assets, install_skills
 from .core import config
 
 # Pinned by the ``key`` field in extension/manifest.json, so an unpacked load
@@ -26,14 +26,33 @@ def setup_browser(
     force: bool = False,
     python: str | None = None,
     register_host: bool = True,
+    skills_dir: Path | None = None,
 ) -> int:
     """Copy the assets, register the host, and print the remaining steps."""
 
+    # Skills first, and independently of the assets. They go where the agent reads
+    # them, not into the tool's runtime directory, and an already-installed asset
+    # tree used to abort this function before the skills were ever touched — the
+    # first live test of this feature installed nothing.
+    installed = install_skills(skills_dir, force=force) if skills_dir else []
+    if installed:
+        print(f"skills: {skills_dir}")
+        for path in installed:
+            print(f"  {path.name}")
+    elif skills_dir:
+        print(f"skills: nothing to install (none bundled, or all present in {skills_dir})")
+
     destination = target if target is not None else config.app_home() / "browser"
-    copied = copy_assets(destination, force=force)
-    print(f"assets: {destination}")
-    for path in copied:
-        print(f"  {path.name}")
+    try:
+        copied = copy_assets(destination, force=force)
+    except FileExistsError as error:
+        # Not fatal: re-running setup is usually about the profile or the skills.
+        print(f"assets: {error}", file=sys.stderr)
+        copied = []
+    else:
+        print(f"assets: {destination}")
+        for path in copied:
+            print(f"  {path.name}")
 
     extension = destination / "extension"
     print()

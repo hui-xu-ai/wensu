@@ -47,19 +47,93 @@ def test_ensure_bridge_passes_when_an_extension_is_listening(
     monkeypatch.setattr(BridgeAdapter, "probe", classmethod(lambda cls: True))
     service._ensure_bridge()  # must not raise
 
-def test_bridge_remediation_forbids_touching_the_browser() -> None:
-    """The one instruction that keeps an agent from improvising.
+def test_bridge_remediation_names_a_command_not_a_gesture() -> None:
+    """The remediation must be actionable, and it must forbid touching the browser.
 
-    A caller was left to interpret `bridge_ready: false` on its own; it read the host
-    log, concluded Edge was "stuck in the background", killed every `msedge` process
-    and restarted the browser. The extension lived in one profile, so the restart
-    brought up a different one and the bridge never came back.
+    The previous version was one sentence that said to click the extension icon. When
+    no browser was running — the common case — that sent the user to click an icon in
+    a window that did not exist. The report hit exactly this: it relayed the
+    instruction, and the user answered "did you forget E:\\LiteratureEdgeProfile".
     """
 
     from scholar_search.core.service import ScholarService
 
-    text = ScholarService.BRIDGE_REMEDIATION.casefold()
-    assert "do not" in text
-    for forbidden in ("start", "stop", "kill", "reload"):
-        assert forbidden in text, f"the remediation should forbid {forbidden!r}"
-    assert "profile" in text, "the reason matters: the extension lives in one profile"
+    payload = ScholarService.BRIDGE_REMEDIATION
+    assert payload["next_action"] == "browser_start"
+    assert payload["command"] == "wensu browser start"
+    assert payload["human_step_required"] is False
+
+    note = str(payload["note"]).casefold()
+    for forbidden in ("never", "start", "stop", "kill"):
+        assert forbidden in note, f"the note should forbid {forbidden!r}"
+
+
+def test_remediation_says_start_the_browser_when_it_is_not_running(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The branch that the report actually hit.
+
+    It was told to click an extension icon, relayed that to the user, and the user
+    answered "did you forget E:\\LiteratureEdgeProfile" — because no browser was
+    running to click anything in. The diagnosis has to come from whether the profile
+    is in use, not from when a host last logged.
+    """
+
+    from scholar_search.core import browser as browser_cfg
+
+    recorded = browser_cfg.BrowserConfig(
+        browser="edge",
+        executable="msedge.exe",
+        profile_dir=r"E:\LiteratureEdgeProfile",
+        extension_dir="ext",
+    )
+    monkeypatch.setattr(browser_cfg, "load", lambda: recorded)
+    monkeypatch.setattr(browser_cfg, "profile_is_running", lambda config: False)
+
+    from scholar_search.bootstrap import _bridge_remediation
+
+    result = _bridge_remediation(None)
+    assert result["next_action"] == "browser_start"
+    assert result["command"] == "wensu browser start"
+    assert result["human_step_required"] is False
+    assert result["profile_dir"] == r"E:\LiteratureEdgeProfile"
+
+
+def test_remediation_says_reload_the_extension_when_the_browser_is_running(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scholar_search.core import browser as browser_cfg
+
+    recorded = browser_cfg.BrowserConfig(
+        browser="edge",
+        executable="msedge.exe",
+        profile_dir=r"E:\LiteratureEdgeProfile",
+        extension_dir="ext",
+    )
+    monkeypatch.setattr(browser_cfg, "load", lambda: recorded)
+    monkeypatch.setattr(browser_cfg, "profile_is_running", lambda config: True)
+
+    from scholar_search.bootstrap import _bridge_remediation
+
+    result = _bridge_remediation("2026-11-09 17:09:27")
+    assert result["next_action"] == "reload_extension"
+    assert result["command"] is None
+    assert result["human_step_required"] is True
+
+
+def test_bridge_error_is_not_retryable() -> None:
+    """Retrying a dead bridge cannot work, so saying it can invites a loop.
+
+    The report observed the retry directly: it waited 25 seconds, retried `status`,
+    and the bridge was still down. Nothing the caller can do changes that.
+    """
+
+    from scholar_search.core.errors import ActionError
+    from scholar_search.server import _payload
+
+    payload = _payload(
+        ActionError("no live native host", verb="goto", code="bridge.not_ready"),
+        channel="cnki",
+    )
+    assert payload["retryable"] is False
+    assert payload["requires"] == "external_state_change"

@@ -230,6 +230,23 @@ def adopt(
     return config
 
 
+def profile_is_running(config: BrowserConfig) -> bool:
+    """Whether a browser is currently using this profile.
+
+    Chromium holds `Default/LOCK` for as long as it has the profile open. That file
+    is the signal the remediation message needed: the previous version decided from
+    `host.log`'s last timestamp, which says when a host last ran — not whether one is
+    running now. A stale log line made "the browser is not started" look like "the
+    extension dropped", and the instruction sent the user to click an icon in a window
+    that did not exist.
+
+    Best effort by nature: a crashed browser can leave the lock behind. The cost of
+    being wrong is one wasted instruction, which is what the message already was.
+    """
+
+    return (Path(config.profile_dir) / "Default" / "LOCK").exists()
+
+
 def start(config: BrowserConfig, *, settle_s: float = 1.5) -> subprocess.Popen[bytes]:
     """Start the recorded profile and confirm it stayed up.
 

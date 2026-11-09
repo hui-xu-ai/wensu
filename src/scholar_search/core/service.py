@@ -12,7 +12,7 @@ import json
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 from urllib.parse import urlparse
 
 from .. import __version__
@@ -346,14 +346,17 @@ class ScholarService:
         if prefixes and not any(path.startswith(prefix) for prefix in prefixes):
             raise PolicyError(f"detail URL path is not allowed: {path}", rule="url.detail_path")
 
-    # The only permitted reaction to a missing bridge. Stated in one place so the
-    # error payload and `status` cannot drift apart.
-    BRIDGE_REMEDIATION = (
-        "Open the browser profile that has the wensu extension installed and click "
-        "the extension icon to reconnect. Do NOT start, stop, reload or kill the "
-        "user's browser processes: the extension lives in one profile only, and "
-        "restarting the browser brings up a different one with no bridge."
-    )
+    # The permitted reaction to a missing bridge, as data. `bootstrap` fills in the
+    # diagnosis (profile running or not) and names the command; this is the fallback
+    # for callers that only see the error payload.
+    BRIDGE_REMEDIATION: ClassVar[dict[str, object]] = {
+        "diagnosis": "the browser extension is not connected",
+        "next_action": "browser_start",
+        "command": "wensu browser start",
+        "human_step_required": False,
+        "note": "If a browser is already using the profile, click the wensu icon in "
+        "that window instead. Never start, stop, reload or kill browser processes.",
+    }
 
     def _effective_query(self, channel: Any, query: SearchQuery) -> str | None:
         """What the channel will actually type, or None if it cannot say.
