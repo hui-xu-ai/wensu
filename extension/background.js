@@ -237,7 +237,14 @@ async function onHostMessage(message, channel) {
       result = await sendToTab();
     }
     if (!result) throw new Error("dom_failed");
-    return reply({ ok: Boolean(result.ok), error: result.error, data: result.data || {} });
+    const data = { ...(result.data || {}) };
+    // Report where the tab actually is, not whether a navigation *seemed* to start.
+    // A click that matched nothing leaves the page on the search form; the URL is
+    // the site's own statement about that, and it arrives faster and more reliably
+    // than any wording on the page.
+    const after = await chrome.tabs.get(tabId).catch(() => null);
+    if (after && after.url) data.url = after.url;
+    return reply({ ok: Boolean(result.ok), error: result.error, data });
   } catch (error) {
     return reply({ ok: false, error: String((error && error.message) || error) });
   }

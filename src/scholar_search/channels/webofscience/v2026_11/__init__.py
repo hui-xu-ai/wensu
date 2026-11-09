@@ -44,8 +44,28 @@ class WebOfScienceChannel:
     def plan_search(self, query: SearchQuery) -> Plan:
         return plan_search.build(query)
 
+    def plan_search_split(self, query: SearchQuery) -> tuple[Plan, Plan]:
+        """Submit the search, then read it — separate so the caller can check the URL.
+
+        A query that matches nothing never leaves the search form, so running the
+        second half would reload that form and destroy the evidence. The caller
+        decides, using the URL the click reported.
+        """
+        return (
+            plan_search.build_until_click(query),
+            plan_search.build_after_click(query),
+        )
+
     def parse_search(self, html: str, *, query: SearchQuery) -> SearchPage:
         return parse_records.parse(html, query=query)
+
+    def is_results_url(self, url: str) -> bool:
+        """Whether the tab landed on a result list rather than the search form.
+
+        `summary` is the results route. `advanced-search` means the query was
+        submitted but matched nothing, so the site stayed where it was.
+        """
+        return "/wos/woscc/summary/" in url
 
     def is_empty_page(self, text: str) -> bool:
         """Whether the page itself says the query matched nothing."""

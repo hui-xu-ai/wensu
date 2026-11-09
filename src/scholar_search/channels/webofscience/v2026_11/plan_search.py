@@ -151,12 +151,56 @@ def pagination(page: int) -> tuple[Action, ...]:
     return tuple(actions)
 
 
-def build(query: SearchQuery, *, today: dt.date | None = None) -> Plan:
+def build_until_click(query: SearchQuery, *, today: dt.date | None = None) -> Plan:
+    """Everything up to and including the click that submits the search.
+
+    Split from the rest so the caller can look at where the tab ended up before
+    deciding whether a reload makes sense. A query that matches nothing does not
+    navigate: the tab stays on `/wos/woscc/advanced-search`, and reloading there
+    throws away the only evidence the site gives. See `build_after_click`.
+    """
+
     if query.source_types:
         raise ChannelError(
             "source-type filters are not implemented for the webofscience channel yet; "
             "express them in the search expression instead (e.g. SO=(...) )"
         )
+
+    text = expression.build(query, today=today)
+
+    return Plan(
+        channel="webofscience",
+        purpose="search",
+        actions=(
+            Action("goto", {"url": ADVANCED_SEARCH}, timeout_ms=NAV_TIMEOUT_MS),
+            settle(jitter(1_000, 1_600)),
+            Action(
+                "wait_for",
+                {"selector": QUERY_INPUT, "timeout_ms": WAIT_TIMEOUT_MS},
+                timeout_ms=WAIT_TIMEOUT_MS + WAIT_REPLY_MARGIN_MS,
+            ),
+            # `clear` is the default in actions.js, but stating it keeps the intent
+            # explicit: the editor remembers the previous expression across visits.
+            Action(
+                "type",
+                {"selector": QUERY_INPUT, "text": text, "clear": True},
+                timeout_ms=INPUT_TIMEOUT_MS,
+            ),
+            settle(jitter(1_200, 2_200)),
+            Action("click", {"selector": SUBMIT}, timeout_ms=CLICK_TIMEOUT_MS),
+            # Give the in-page route change a moment to land before the URL is read.
+            settle(jitter(1_800, 2_600)),
+        ),
+    )
+
+
+def build_after_click(query: SearchQuery) -> Plan:
+    """Reload for the full result set, then read it.
+
+    Safe only when the click actually navigated to `/summary/...`; on a search form
+    a reload would discard the "no results" state the page is showing.
+    """
+
     if query.page > 1 and query.sort != "relevance":
         raise ChannelError(
             "page turns and an explicit sort cannot share one call: sorting costs two "
@@ -170,29 +214,10 @@ def build(query: SearchQuery, *, today: dt.date | None = None) -> Plan:
             "kernel's 120 s plan budget"
         )
 
-    text = expression.build(query, today=today)
-
     actions: list[Action] = [
-        Action("goto", {"url": ADVANCED_SEARCH}, timeout_ms=NAV_TIMEOUT_MS),
-        settle(jitter(1_000, 1_600)),
-        Action(
-            "wait_for",
-            {"selector": QUERY_INPUT, "timeout_ms": WAIT_TIMEOUT_MS},
-            timeout_ms=WAIT_TIMEOUT_MS + WAIT_REPLY_MARGIN_MS,
-        ),
-        # `clear` is the default in actions.js, but stating it keeps the intent
-        # explicit: the editor remembers the previous expression across visits.
-        Action(
-            "type",
-            {"selector": QUERY_INPUT, "text": text, "clear": True},
-            timeout_ms=INPUT_TIMEOUT_MS,
-        ),
-        settle(jitter(1_200, 2_200)),
-        Action("click", {"selector": SUBMIT}, timeout_ms=CLICK_TIMEOUT_MS),
         # The click navigates in-page. A reload navigates to the *current* URL, so
         # the new route has to be in place first. The kernel caps a single sleep at
         # 3 s, hence two pauses rather than one long one.
-        settle(jitter(1_800, 2_600)),
         *reload_and_wait(),
         *sort_actions(query.sort),
         *pagination(query.page),
@@ -203,3 +228,24 @@ def build(query: SearchQuery, *, today: dt.date | None = None) -> Plan:
         ),
     ]
     return Plan(channel="webofscience", purpose="search", actions=tuple(actions))
+
+
+def build(query: SearchQuery, *, today: dt.date | None = None) -> Plan:
+    """The whole search in one plan. Kept for callers that cannot split it."""
+
+    if query.page > 1 and query.sort != "relevance":
+        raise ChannelError(
+            "page turns and an explicit sort cannot share one call: sorting costs two "
+            "clicks, each page costs two more actions, and together they exceed the "
+            "kernel's 120 s plan budget"
+        )
+    if query.page > 2:
+        raise ChannelError(
+            "the webofscience channel supports at most 2 pages per call: every page "
+            "needs a scroll round to refill 50 records, and a third would exceed the "
+            "kernel's 120 s plan budget"
+        )
+
+    head = build_until_click(query, today=today)
+    tail = build_after_click(query)
+    return Plan(channel="webofscience", purpose="search", actions=head.actions + tail.actions)

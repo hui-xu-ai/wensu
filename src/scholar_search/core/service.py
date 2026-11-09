@@ -85,18 +85,36 @@ class ScholarService:
 
         self._ensure_ready()
 
-        plan = channel.plan_search(query)
-        try:
-            outcomes = self._run(plan, spec)
-        except ActionError:
-            # A query that matches nothing sends no data stream on either site, so
-            # the readiness wait times out. Distinguish that from a real failure by
-            # asking the page; the channel supplies the wording.
-            if self._looks_empty(channel, spec):
-                empty = SearchPage(records=(), total=0, page=None, empty_reason="no_match")
+        splitter = getattr(channel, "plan_search_split", None)
+        if splitter is not None:
+            head, tail = splitter(query)
+            heads = self._run(head, spec)
+            landed = _click_url(heads)
+            is_results = getattr(channel, "is_results_url", None)
+            if landed and is_results is not None and not is_results(landed):
+                # The site did not navigate: the query matched nothing. Reading the
+                # URL is the site's own answer, available a second after the click —
+                # no wording to guess at and no waiting for a stream that never comes.
+                empty = SearchPage(
+                    records=(), total=0, page=None, empty_reason="no_match"
+                )
                 self._cache.set(key, _page_to(empty))
                 return empty
-            raise
+            outcomes = heads + self._run(tail, spec)
+        else:
+            plan = channel.plan_search(query)
+            try:
+                outcomes = self._run(plan, spec)
+            except ActionError:
+                # Channels without a splittable plan can still say "nothing matched"
+                # by their own wording; ask the page before calling it a failure.
+                if self._looks_empty(channel, spec):
+                    empty = SearchPage(
+                        records=(), total=0, page=None, empty_reason="no_match"
+                    )
+                    self._cache.set(key, _page_to(empty))
+                    return empty
+                raise
         html = _html(outcomes)
         fixer = getattr(channel, "sort_fix", None)
         for _ in range(2):
@@ -355,6 +373,20 @@ def _narrow(records: Sequence[Record], query: SearchQuery) -> tuple[Record, ...]
     if query.sort_by == "year":
         return tuple(sorted(narrowed, key=lambda record: record.year or 0, reverse=True))
     return narrowed
+
+
+def _click_url(outcomes: Sequence[ActionOutcome]) -> str | None:
+    """Where the tab was after the click, as reported by the extension."""
+
+    for outcome in outcomes:
+        if outcome.action.verb != "click":
+            continue
+        data = outcome.data
+        if isinstance(data, dict):
+            url = data.get("url")
+            if isinstance(url, str) and url:
+                return url
+    return None
 
 
 def _html(outcomes: Sequence[ActionOutcome]) -> str:
