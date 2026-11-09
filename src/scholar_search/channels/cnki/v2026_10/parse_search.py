@@ -16,19 +16,17 @@ _PAGE = re.compile(r"(\d+)\s*/\s*(\d+)")
 
 # How to tell a search that matched nothing from a capture that failed.
 #
-# The primary signal is "the page never left the search form": with zero results the
-# site does not navigate, the plan reloads the form expecting data, and times out.
+# With zero results the page does not carry a result grid, the plan's readiness wait
+# times out, and only the page itself can say whether the query matched nothing.
+# Matching the presence of a search form would be wrong here too: every CNKI search
+# page has one, successful searches included.
 EMPTY_MARKERS = (
-    # Still on the search form.
-    "高级检索",
-    "专业检索",
-    "检索条件",
-    # A results page that did render, with nothing in it.
     "抱歉，没有找到",
     "没有找到与",
     "检索结果：0",
     "检索结果:0",
     "未找到相关",
+    "没有检索到",
 )
 
 

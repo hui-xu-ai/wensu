@@ -24,21 +24,23 @@ PRIMARY_API = "runQuerySearch"
 
 # How to tell a search that matched nothing from a capture that failed.
 #
-# The important case is not a results page saying "no records": when a query matches
-# nothing the site does not navigate at all, and the browser stays on the search form.
-# The plan then reloads that form expecting a data stream, waits, and times out. So
-# "still on the search form" is the primary signal, and the results-page wording is
-# only a secondary one.
+# With zero results the site does not navigate: the browser stays on the query
+# builder and renders an alert
+#   <div role="alert" class="search-error error-code light-red-bg">
+#     <b>Your search found no results</b><br>Check the spelling and/or broaden ...
+# so the plan reloads a page that will never carry a data stream and times out.
+#
+# The marker below is the literal wording from that alert. Earlier guesses —
+# "no records found", "no results found" — never matched, because the real text is
+# "found no results", a different word order. Matching the search form instead
+# (which an earlier version did) is not a signal at all: the form is present on
+# every search page, including successful ones.
 EMPTY_MARKERS = (
-    # Still on the advanced-search form: the query was never executed.
-    "advanced search page loaded",
-    "query builder",
-    "fielded search",
-    # A results page that did render, with nothing in it.
+    "your search found no results",
+    # Historical/alternate wordings, kept because the site has reworded before.
     "no records found",
-    "found no records",
     "no results found",
-    "0 results",
+    "found no records",
 )
 
 DETAIL_PREFIX = "https://webofscience.clarivate.cn/wos/woscc/full-record/"

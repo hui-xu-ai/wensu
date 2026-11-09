@@ -44,31 +44,40 @@ them had produced, or would have produced, a **wrong conclusion**.
   a missing lock. The skill now advises serial calls and one retry, rather than claiming a fix that
   was not made.
 
-### Fixed — a zero-result search is now an answer, not a timeout
+### Fixed — the zero-result marker now matches the real wording
 
-With no matches the site **does not navigate**: the browser stays on the search form. The plan
-reloaded that form expecting a data stream, waited its full ten seconds, and failed as
-`wait_for failed: timeout` — 26-30 s and 3-4 quota spent, and nothing the caller could act on.
+The alert is:
 
-The signal is therefore "the page never left the search form", not "the results page says no
-records" — the second never happens, because there is no results page. Both channels now expose
-`is_empty_page()`, and when the plan fails the kernel probes the page once with `read_text` (not a
-network verb, so it costs no quota). `SearchPage.empty_reason` arrives as `"no_match"`:
-
-```
-zero result  {"records":[],"total":0,"empty_reason":"no_match"}   exit 0
-normal       {"records":[3 items],"total":39,"empty_reason":null}  unchanged
+```html
+<div role="alert" class="search-error error-code light-red-bg">
+  <b>Your search found no results</b><br>Check the spelling and/or broaden …
+</div>
 ```
 
-The probe only runs after a failure, so a normal search cannot be misjudged as empty. The cost is
-that an empty search still takes ~19-30 s, since the timeout has to expire before the probe fires;
-shortening that would mean teaching the plan to expect a non-navigation, which is a change to the
-extension and was deliberately out of scope.
+and it is rendered **on the query builder, without navigating**. The previous markers
+(`no records found`, `no results found`) never matched, because the real text is "found no results" —
+a different word order. An earlier attempt matched the presence of the search form instead, which is
+not a signal at all: that form is on every search page, successful ones included. Both are corrected.
 
-**Found by asking the user what the page actually did.** Three earlier attempts at this were wrong
-because I assumed a particular failure mode (a results page saying "no records") instead of
-observing the page. Recorded as an incident: one question to the person watching the browser beat
-three rounds of inference.
+The marker is unit-checked against the literal alert text and against a normal results page
+(True / False respectively, on both channels).
+
+**Not verified end to end**: in this environment a cookie-consent overlay covers the query builder,
+so the click never submits and the alert never appears. The query text does reach the page
+(`QUERY TEXT PRESENT: True`) but no alert is rendered (`RED ALERT PRESENT: False`). Detection will
+fire on a browser where consent was already given; it could not be proven here. The overlay is also
+a real obstacle for the tool itself, worth handling in the plan.
+
+### Fixed — the cache no longer fails to open
+
+`PRAGMA journal_mode=WAL` needs a writable directory and a moment of exclusive access. When it could
+not be set, `_connect` raised `sqlite3.OperationalError: unable to open database file` and **the
+whole cache became unusable** — a regression from adding WAL. The pragma is now best-effort: the
+cache keeps working without it, just with less concurrency.
+
+(Also observed: the project's uv-managed Python 3.12 cannot open the cache file while Python 3.14
+can, on the same path. Since the CLI and MCP serve on 3.14 this does not affect users, but it makes
+the 3.12 test environment unable to exercise the cache.)
 
 ## [0.12.10] - 2026-11-09
 

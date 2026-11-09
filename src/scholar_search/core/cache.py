@@ -7,6 +7,7 @@ repository.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 import time
@@ -34,10 +35,13 @@ class Cache:
     def _connect(self) -> sqlite3.Connection:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self._path)
-        # WAL lets a reader and a writer coexist. Without it, two `wensu` processes
-        # running at once can trip "database is locked", and the loser gets no cache
-        # rather than a slightly stale read.
-        connection.execute("PRAGMA journal_mode=WAL")
+        # WAL lets a reader and a writer coexist, which matters because several
+        # `wensu` processes can run at once. It needs a writable directory and a
+        # moment of exclusive access, and it fails when another connection holds the
+        # database — none of which should take the cache down: without the pragma the
+        # cache still works, just with less concurrency.
+        with contextlib.suppress(sqlite3.OperationalError):
+            connection.execute("PRAGMA journal_mode=WAL")
         connection.execute(
             "CREATE TABLE IF NOT EXISTS cache ("
             "key TEXT PRIMARY KEY, value TEXT NOT NULL, created REAL NOT NULL)"
