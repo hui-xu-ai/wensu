@@ -44,6 +44,9 @@ def build_service(
         planner_factory=lambda adapter: Planner(adapter, policy, risk, audit),
         policy=policy,
         cache=Cache(path=tmp_path / "cache.sqlite3"),
+        # These tests exercise the service with a stub adapter, so the real bridge
+        # probe would refuse every call before the stub was ever reached.
+        bridge_probe=lambda: True,
     )
 
 

@@ -14,7 +14,7 @@ import json
 import random
 import time
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
 from urllib.parse import urlparse
@@ -219,6 +219,33 @@ class PolicyEngine:
             raise PolicyError(f"host {host!r} is not allowed", rule="url.domain")
 
     # -- metering ------------------------------------------------------
+
+    def refund(self, count: int = 1) -> bool:
+        """Give back reservations for actions that never reached the site.
+
+        A reservation is taken before the action runs, because that is the only way
+        to refuse an action that would exceed the limit. When the action then fails
+        without sending anything — the bridge died between the probe and the call —
+        the reservation was for a request that never happened, and the caller should
+        not pay for it.
+
+        Deliberately narrow: the caller decides when nothing reached the site. A
+        request that timed out mid-flight is *not* refunded, because the site may
+        well have seen it. Refunding those would make the counter lie in the other
+        direction, which is worse — the limit exists to protect the site, not to
+        flatter the caller's budget.
+        """
+
+        with interprocess_lock(self._lock_path, timeout_s=30.0):
+            if self._degraded:
+                return False
+            state = self._read()
+            if self._state_error is not None:
+                return False
+            new_used = max(0, state.used - max(0, count))
+            if new_used == state.used:
+                return True
+            return self._write(replace(state, used=new_used))
 
     def wait_turn(self) -> float:
         """Reserve one network slot, sleeping for the interval if needed."""

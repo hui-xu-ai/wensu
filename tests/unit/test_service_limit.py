@@ -39,6 +39,7 @@ def build(tmp_path: Path, channel: FakeChannel, scripts: list[list[dict[str, obj
         planner_factory=lambda adapter: Planner(adapter, policy, risk, audit),
         policy=policy,
         cache=Cache(path=tmp_path / "cache.sqlite3"),
+        bridge_probe=lambda: True,
     )
 
 

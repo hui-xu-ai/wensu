@@ -4,6 +4,36 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.26] - 2026-11-09
+
+### Fixed — BUG-01 was not actually fixed in 0.12.21
+
+The probe added in 0.12.21 checks that a host **answers a ping**, and it does. But the host can die
+between that check and the call, and it did: a live test showed quota 239 -> 238 followed by
+
+o live native host found. The reservation had already been taken inside planner.run by the time
+the failure surfaced, so the guard bought nothing on the one path it was written for.
+
+Two changes:
+
+- **PolicyEngine.refund()** gives back a reservation for a request that never left the machine.
+  Narrow on purpose: only ridge.* failures refund. A request that timed out mid-flight is **not**
+  refunded, because the site may well have seen it — refunding those would make the counter lie in
+  the other direction, which is worse for the site this limit exists to protect.
+- **ridge_probe is injectable** on ScholarService and resolved lazily, so a test with a stub
+  adapter is not blocked by a real probe and monkeypatch.setattr(BridgeAdapter, "probe", …) still
+  takes effect. Binding the reference at construction time froze it.
+
+### Verified
+
+`
+bridge_ready = False
+wensu search "x"  → no live native host found: the browser extension is not connected
+quota 238 -> 238                                            ← charged nothing
+`
+
+The earlier claim of a fix came from a test that only asserted the error *code*; it never checked the
+counter. That is the difference between "the guard raises" and "the guard saves you money".
 ## [0.12.25] - 2026-11-09
 
 ### Fixed — detail_many existed but the schema did not list it

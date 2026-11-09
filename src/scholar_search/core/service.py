@@ -47,6 +47,7 @@ class ScholarService:
         cache: Cache,
         status_provider: Callable[[], dict[str, Any]] | None = None,
         risk: RiskGuard | None = None,
+        bridge_probe: Callable[[], bool] | None = None,
     ) -> None:
         self._registry = registry
         self._adapter_factory = adapter_factory
@@ -54,6 +55,10 @@ class ScholarService:
         self._policy = policy
         self._cache = cache
         self._status_provider = status_provider or (lambda: {})
+        # Injectable so tests that use a stub adapter are not blocked by a real
+        # bridge probe. Resolved lazily so a monkeypatched `BridgeAdapter.probe`
+        # still takes effect — binding it at construction time froze the reference.
+        self._bridge_probe = bridge_probe or (lambda: BridgeAdapter.probe())
         self._risk = risk
 
     def _ensure_ready(self) -> None:
@@ -334,7 +339,7 @@ class ScholarService:
         free: `probe` only reads the endpoint file and tries the socket.
         """
 
-        if BridgeAdapter.probe():
+        if self._bridge_probe():
             return
         raise ActionError(
             "no live native host found: the browser extension is not connected",
@@ -343,12 +348,22 @@ class ScholarService:
         )
 
     def _run(self, plan: Any, spec: ChannelSpec) -> tuple[ActionOutcome, ...]:
+        self._ensure_bridge()
         adapter = self._adapter_factory()
         planner = self._planner_factory(adapter)
         if self._risk is None:
             self._risk = getattr(planner, "risk", None)
         try:
             outcomes = planner.run(plan, spec.manifest)
+        except ActionError as error:
+            # A bridge failure means the request never left the machine, so the
+            # reservation taken for it paid for something that did not happen. The
+            # probe above cannot close this window by itself: the host can die
+            # between the probe and the call, and it did — a search charged one
+            # point and then reported `no live native host found`.
+            if (error.code or "").startswith("bridge.") and self._policy is not None:
+                self._policy.refund()
+            raise
         finally:
             adapter.close()
         for outcome in outcomes:
