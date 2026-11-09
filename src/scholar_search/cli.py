@@ -69,7 +69,12 @@ def build_parser() -> argparse.ArgumentParser:
     detail.add_argument("url")
     detail.add_argument("--channel", default=None, help="inferred from the URL when omitted")
 
-    sub.add_parser("status", help="show session, quota and cooldown state")
+    status_cmd = sub.add_parser("status", help="show session, quota and cooldown state")
+    status_cmd.add_argument(
+        "--brief",
+        action="store_true",
+        help="only what a health check needs (about 45 tokens instead of 500)",
+    )
 
     reset = sub.add_parser("reset", help="clear the risk cooldown after manual verification")
     reset.add_argument("--confirm", action="store_true", help="required to actually clear")
@@ -320,7 +325,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         from .bootstrap import build_service
 
         service = build_service()
-        print(json.dumps(service.status(), ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                service.status(brief=getattr(args, "brief", False)),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
         return 0
 
     if args.command == "serve":

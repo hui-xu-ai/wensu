@@ -65,14 +65,31 @@
     },
     {
       "name": "detail",
-      "description": "Fetch full metadata for one record by its detail URL.",
+      "description": "Fetch full metadata for one record, by detail URL or by DOI. `include_abstract` defaults to false, matching search: an abstract is 60-80% of the response. `fields` projects the rest.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
         "required": ["url"],
         "properties": {
-          "url": { "type": "string", "pattern": "^https://[a-z0-9.]*cnki\\.net/" },
-          "channel": { "type": "string", "default": "cnki" }
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Either the URL `search` returned, or a bare DOI such as 10.13841/j.cnki.jxsj.2026.11.001. A DOI costs one extra search to resolve, because the detail page is only reachable by URL."
+          },
+          "channel": {
+            "type": ["string", "null"],
+            "description": "Usually omit: inferred from the URL host, or from the DOI prefix."
+          },
+          "include_abstract": {
+            "type": "boolean",
+            "default": false,
+            "description": "Return the full abstract. Off by default: about 1200 characters on CNKI, 1000 on WoS."
+          },
+          "fields": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Project to these keys. `url`, `quota_charged` and `quota_remaining` are always kept."
+          }
         }
       }
     },
@@ -93,6 +110,16 @@
           "channel": {
             "type": ["string", "null"],
             "description": "Usually omit: inferred per item from the URL host or the DOI prefix."
+          },
+          "include_abstract": {
+            "type": "boolean",
+            "default": false,
+            "description": "Return each abstract. Off by default, and this is where it matters most: twelve abstracts is roughly 14 KB."
+          },
+          "fields": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Project each record to these keys, as in `detail`."
           }
         }
       }

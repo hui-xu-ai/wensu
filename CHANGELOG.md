@@ -4,6 +4,28 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.28] - 2026-11-09
+
+### Fixed — the tool schema did not describe the tools
+
+Three defects in `schemas/tools.json`, all found by diffing it against the code that serves it. Since
+an MCP client builds its tool list from this file, each one made a working feature invisible:
+
+- **`detail`'s `url` was pattern-locked to CNKI.** `"pattern": "^https://[a-z0-9.]*cnki\\.net/"` meant
+  a bare DOI — added in 0.12.20 — or a Web of Science URL was rejected by the schema before the code
+  ever saw it. The pattern is gone; the code validates what it accepts.
+- **`detail` and `detail_many` did not list `include_abstract` or `fields`.** Both were implemented
+  and neither was advertised, so the tool that most needed the projection was the one an agent could
+  not discover it on.
+- **`detail.channel` defaulted to `"cnki"`,** contradicting the code, which infers the channel and
+  only takes an override.
+
+### Fixed — `wensu status --brief` did not exist
+
+The MCP tool gained `brief` and the CLI did not, for the fourth time today. The CLI now has the flag,
+and a cross-check compares every parameter the schema advertises against what the code accepts, so
+the next divergence fails a test instead of a user's command.
+
 ## [0.12.27] - 2026-11-09
 
 Closes 10 of the 11 items from the 2026-11-09 DSH-side test. W-10 is not done — see the end.
