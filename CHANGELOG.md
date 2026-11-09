@@ -4,6 +4,28 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.13] - 2026-11-09
+
+### Fixed — CNKI expert search opened the wrong tab
+
+`EXPERT["page"]` was `.../AdvSearch?type=expert`, without `classid`. The advanced-search page has
+several tabs and the expert form is selected by `classid=WD0FTY92`; without it the site can land on a
+different tab where `textarea.majorSearch` does not exist, and the plan dies waiting for it. The URL
+now carries the full parameter set:
+
+```
+https://kns.cnki.net/kns8s/AdvSearch?type=expert&classid=WD0FTY92&rlang=CHINESE&language=CHS
+```
+
+The expression path itself needed no change: `is_expression()` already recognises every documented
+field code (`SU TKA KY TI FT AU FI RP AF FU AB CO RF CLC LY DOI CF`) followed by `=` or `%`, so
+`SU='柔性驱动器'` routes to the expert form and a plain keyword still uses the one-box search.
+
+**Not verified live.** The CNKI account on this machine (`db0146`) is held behind a phone
+verification prompt — the page reads "手机号认证 … 认证中，请稍后" — so every click on the search
+button times out regardless of this change. Both the smart and expert paths fail identically, which
+is what pointed at the gate rather than at either plan.
+
 ## [0.12.12] - 2026-11-09
 
 ### Fixed — zero results are an answer on Web of Science

@@ -33,7 +33,13 @@ SORT = {
 }
 
 EXPERT = {
-    "page": "https://kns.cnki.net/kns8s/AdvSearch?type=expert",
+    # `classid` selects the expert-search form itself. Without it the site can land
+    # on a different tab of the advanced-search page, where `textarea.majorSearch`
+    # does not exist and the plan dies waiting for it.
+    "page": (
+        "https://kns.cnki.net/kns8s/AdvSearch"
+        "?type=expert&classid=WD0FTY92&rlang=CHINESE&language=CHS"
+    ),
     "input": "textarea.majorSearch",
     "submit": "input.btn-search",
 }
