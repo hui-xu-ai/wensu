@@ -205,6 +205,43 @@ class ScholarService:
                     return spec.name
         return None
 
+    def detail_by_doi(
+        self, doi: str, *, channel: str | None = None
+    ) -> Record:
+        """Look a record up by DOI and return its full detail.
+
+        CNKI detail URLs are hundreds of characters of encrypted signature (the only
+        parameter is `v=`), so handing them back verbatim is easy to truncate. A DOI
+        is short, stable and already present in every record.
+
+        Resolving costs one search, because the detail page is only reachable by its
+        URL — there is no separate DOI-to-page endpoint. That is the honest price of
+        not requiring the signature string back.
+
+        Lives here rather than in the MCP layer so the CLI cannot drift from the
+        tool: that divergence has already cost three fields.
+        """
+
+        target = channel
+        if target is None:
+            lowered = doi.casefold()
+            # CNKI's own DOIs use the j.cnki / d.cnki namespaces; anything else is
+            # assumed to be a Web of Science-indexed DOI.
+            target = "cnki" if ("j.cnki." in lowered or "d.cnki." in lowered) else "webofscience"
+
+        expression = f"DOI='{doi}'" if target == "cnki" else f'DO=("{doi}")'
+        page = self.search(
+            SearchQuery(text=expression, channel=target, limit=1, include_abstract=True)
+        )
+        if not page.records:
+            raise ChannelError(
+                f"no record found for DOI {doi!r} on channel {target!r}"
+            )
+        record = page.records[0]
+        if not record.url:
+            raise ChannelError(f"the record for {doi!r} carries no detail URL")
+        return self.detail(record.url, channel=target)
+
     def detail(self, url: str, *, channel: str) -> Record:
         spec, impl = self._resolve(channel)
         self._validate_detail_url(url, spec)

@@ -257,24 +257,42 @@ def build_server(service: ScholarService) -> FastMCP:
 
     @mcp.tool()
     def detail(url: str, channel: str | None = None) -> dict[str, Any]:
-        """Fetch full metadata for one record by the URL `search` returned.
+        """Fetch full metadata for one record.
 
-        `channel` is optional: it is inferred from the URL's host. Pass it only to
-        override that inference.
+        `url` may be either the URL `search` returned, or a bare DOI such as
+        `10.13841/j.cnki.jxsj.2026.11.001`. CNKI detail URLs are several hundred
+        characters of encrypted signature — this one has no parameters but `v=` —
+        so passing them back verbatim is easy to truncate. A DOI is short, stable and
+        already in every record.
+
+        A DOI costs one extra search to resolve into a URL, because that is the only
+        way to reach the detail page. A URL that is already cached costs nothing.
+
+        `channel` is optional: it is inferred from the URL's host, or from the DOI
+        prefix. Pass it only to override that inference.
         """
+
+        identifier = url.strip()
+        is_doi = identifier.lower().startswith("10.") and "/" in identifier
+
         before = _quota(service)
         try:
-            resolved = channel or service.channel_for_url(url)
+            if is_doi:
+                record: dict[str, Any] = service.detail_by_doi(
+                    identifier, channel=channel
+                ).to_dict()
+                return record
+            resolved = channel or service.channel_for_url(identifier)
             if resolved is None:
                 return {
                     "status": "error",
                     "code": "UNKNOWN_CHANNEL",
-                    "message": f"no channel claims the host of {url!r}",
+                    "message": f"no channel claims the host of {identifier!r}",
                     "channel": None,
                     "retryable": False,
                     "quota_charged": 0,
                 }
-            return service.detail(url, channel=resolved).to_dict()
+            return service.detail(identifier, channel=resolved).to_dict()
         except (RiskBlocked, ScholarSearchError) as error:
             after = _quota(service)
             charged = (before - after) if before is not None and after is not None else 0

@@ -4,6 +4,37 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.20] - 2026-11-09
+
+### Added — `detail` accepts a DOI
+
+```powershell
+wensu detail "10.13841/j.cnki.jxsj.2026.11.001"
+```
+
+CNKI detail URLs are several hundred characters of encrypted signature — the only
+parameter is `v=`, and there is no `filename=` or any other key to extract, so `detail` previously
+required that whole string back verbatim (W-12 in the 2026-11-09 review). A DOI is short, stable and
+already present in every record.
+
+The DOI is resolved through one search, because the detail page is only reachable by its URL. That is
+the honest cost of not demanding the signature string: +3 quota on CNKI, +4 on Web of Science. A URL
+that is already cached still costs nothing. The channel is chosen from the DOI namespace
+(`j.cnki.` / `d.cnki.` → CNKI, otherwise Web of Science) unless `channel` says otherwise.
+
+The resolution lives in `ScholarService.detail_by_doi`, not in the MCP layer, so the CLI cannot drift
+from the tool — that divergence has already cost three fields (`dropped_year`, `filters`, `--field`).
+
+### Verified
+
+```
+wensu detail "10.13841/j.cnki.jxsj.2026.11.001"
+→ 15.2 s, 4 quota
+  title   : 柔性可穿戴腕关节康复手套构型设计与控制策略研究
+  source  : 机械设计   year: 2026
+  abstract: 198 chars, no trailing ellipsis
+```
+
 ## [0.12.19] - 2026-11-09
 
 ### Fixed — the CLI was missing the parameters the tool gained

@@ -155,14 +155,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.command == "detail":
                 # Same inference as the MCP tool: a URL this tool produced must be
                 # accepted back without the caller knowing which channel it came from.
-                resolved = args.channel or service.channel_for_url(args.url)
+                identifier = args.url.strip()
+                if identifier.lower().startswith("10.") and "/" in identifier:
+                    # A DOI is short and stable; a CNKI detail URL is hundreds of
+                    # characters of encrypted signature and easy to truncate.
+                    by_doi = service.detail_by_doi(
+                        identifier, channel=args.channel
+                    )
+                    print(json.dumps(by_doi.to_dict(), ensure_ascii=False, indent=2))
+                    return 0
+                resolved = args.channel or service.channel_for_url(identifier)
                 if resolved is None:
                     print(
-                        f"wensu: no channel claims the host of {args.url!r}",
+                        f"wensu: no channel claims the host of {identifier!r}",
                         file=sys.stderr,
                     )
                     return 2
-                record = service.detail(args.url, channel=resolved)
+                record = service.detail(identifier, channel=resolved)
                 print(json.dumps(record.to_dict(), ensure_ascii=False, indent=2))
                 return 0
             query = SearchQuery(
