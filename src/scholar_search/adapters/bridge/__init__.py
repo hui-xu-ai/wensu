@@ -1,8 +1,16 @@
 """TCP client for the native host.
 
 The host listens on loopback only and requires a per-run token. Several hosts
-may exist at once (one per browser reconnect), so the adapter pings the
-registry and talks to whichever host answers.
+may exist at once — one per browser profile — so the adapter pings the registry
+and talks to one of them.
+
+**Which one matters.** Taking whichever host answers first is fine when only one
+browser is open, and wrong when two are: a search submitted in one profile would
+read whatever page the other profile happens to be showing. Each host records the
+`profile_dir` it belongs to, and this adapter prefers the host matching
+`WENSU_PROFILE` (or, failing that, the profile in `browser.json`) before falling
+back to any live host. That fallback exists so a setup that never recorded a
+profile still works; it is the case the docs tell users not to rely on.
 
 There is no transparent retry: a request that may already have reached the
 browser is never replayed, because the kernel has metered it once and the
@@ -12,6 +20,7 @@ action may have had side effects.
 from __future__ import annotations
 
 import json
+import os
 import socket
 import uuid
 from pathlib import Path
@@ -42,7 +51,30 @@ class BridgeAdapter:
 
     # -- discovery -----------------------------------------------------
 
+    @staticmethod
+    def _wanted_profile() -> str | None:
+        """Which browser profile this process should talk to, if it can tell.
+
+        `WENSU_PROFILE` wins, so two agents can share one machine deliberately. It
+        falls back to the recorded config, which is what a single-agent setup has.
+        """
+
+        explicit = os.environ.get("WENSU_PROFILE")
+        if explicit:
+            return explicit
+        try:
+            from ...core import browser as browser_cfg
+
+            recorded = browser_cfg.load()
+        except Exception:
+            # An unreadable config must not break probing: the fallback is to try
+            # every endpoint, which is what a setup without a record already does.
+            return None
+        return recorded.profile_dir if recorded is not None else None
+
     def _candidates(self) -> list[Path]:
+        """Endpoint files, the matching profile first."""
+
         if self._endpoint is not None:
             return [self._endpoint]
 
@@ -53,7 +85,28 @@ class BridgeAdapter:
             reverse=True,
         )
         legacy = root / "bridge.json"
-        return [*files, *([legacy] if legacy.exists() else [])]
+        ordered = [*files, *([legacy] if legacy.exists() else [])]
+
+        wanted = self._wanted_profile()
+        if wanted is None:
+            return ordered
+
+        matching: list[Path] = []
+        others: list[Path] = []
+        for path in ordered:
+            try:
+                info = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            host_profile = info.get("profile_dir")
+            # An endpoint written before this field existed has no profile. Treat it
+            # as a fallback rather than dropping it, or an upgrade would look like a
+            # dead bridge.
+            if host_profile is None:
+                others.append(path)
+            elif str(host_profile).casefold() == str(wanted).casefold():
+                matching.append(path)
+        return [*matching, *others]
 
     @staticmethod
     def _ping(path: Path) -> tuple[int, str] | None:

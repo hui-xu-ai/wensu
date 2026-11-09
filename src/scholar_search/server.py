@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from mcp.server.fastmcp import FastMCP
+from pydantic import Field
 
 from . import __version__
-from .core.contracts import Record, SearchQuery
+from .core.contracts import MAX_LIMIT, MAX_PAGE, MIN_PAGE, Record, SearchQuery
 from .core.errors import (
     ActionError,
     BridgeError,
@@ -257,6 +258,29 @@ def _quota(service: ScholarService) -> int | None:
     return value if isinstance(value, int) else None
 
 
+# Tool parameter types, at module level on purpose: `from __future__ import
+# annotations` turns every annotation into a string that FastMCP evaluates when it
+# builds `tools/list`, and a name defined inside `build_server` is not in scope for
+# that evaluation. The bounds mirror `SearchQuery.validate`, which still enforces
+# them — a schema-only bound would be a claim the service never checks.
+PageNumber = Annotated[
+    int,
+    Field(
+        ge=MIN_PAGE,
+        le=MAX_PAGE,
+        description=f"1-based. {MAX_PAGE} at most: one page turn per extra page.",
+    ),
+]
+PageSize = Annotated[
+    int,
+    Field(ge=1, le=MAX_LIMIT, description=f"Records per page, 1..{MAX_LIMIT}."),
+]
+FieldName = Annotated[
+    str,
+    Field(description="A record field to keep. `url` and the quota pair are always kept."),
+]
+
+
 def build_server(service: ScholarService) -> FastMCP:
     # FastMCP takes no `version` argument, and the handshake reported the SDK's
     # version (`1.30.0`) while `status.version` reported 0.12.x — two different
@@ -269,19 +293,28 @@ def build_server(service: ScholarService) -> FastMCP:
         query: str,
         channel: str = "cnki",
         sort: Literal["relevance", "date", "citation"] = "relevance",
-        page: int = 1,
+        page: PageNumber = 1,
         year_from: int | None = None,
         year_to: int | None = None,
         source_types: list[str] | None = None,
-        limit: int = 20,
+        limit: PageSize = 20,
         include_abstract: bool = False,
         sort_by: Literal["none", "citations", "year"] = "none",
-        min_citations: int | None = None,
+        min_citations: Annotated[int, Field(ge=0)] | None = None,
         sources_only: list[str] | None = None,
-        min_impact_factor: float | None = None,
+        min_impact_factor: Annotated[float, Field(ge=0)] | None = None,
         site_sort: Literal["relevance", "date", "citation"] | None = None,
         local_sort: Literal["none", "citations", "year"] | None = None,
-        fields: list[str] | None = None,
+        fields: Annotated[
+            list[FieldName] | None,
+            Field(
+                default=None,
+                description=(
+                    "Keep only these keys. `url` and the quota pair are always kept, "
+                    "so a projected record can still be followed."
+                ),
+            ),
+        ] = None,
         count_only: bool = False,
     ) -> dict[str, Any]:
         """Search a channel for bibliographic records. Read-only.
@@ -384,7 +417,16 @@ def build_server(service: ScholarService) -> FastMCP:
         url: str,
         channel: str | None = None,
         include_abstract: bool = False,
-        fields: list[str] | None = None,
+        fields: Annotated[
+            list[FieldName] | None,
+            Field(
+                default=None,
+                description=(
+                    "Keep only these keys. `url` and the quota pair are always kept, "
+                    "so a projected record can still be followed."
+                ),
+            ),
+        ] = None,
     ) -> dict[str, Any]:
         """Fetch full metadata for one record.
 
@@ -447,7 +489,16 @@ def build_server(service: ScholarService) -> FastMCP:
         urls: list[str],
         channel: str | None = None,
         include_abstract: bool = False,
-        fields: list[str] | None = None,
+        fields: Annotated[
+            list[FieldName] | None,
+            Field(
+                default=None,
+                description=(
+                    "Keep only these keys on each record. `url` and the quota pair "
+                    "are always kept."
+                ),
+            ),
+        ] = None,
     ) -> dict[str, Any]:
         """Fetch several records in one call.
 

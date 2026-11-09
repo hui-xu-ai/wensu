@@ -7,11 +7,52 @@ Versioning: [Semantic Versioning](https://semver.org/).
 ## [0.12.31] - 2026-11-09
 
 Closes A01, A03, A04, A05, A06, A07, A09, A11 and A12 from the independent acceptance review
-(`docs/reviews/wensu-acceptance-2026-11-09.md`). A02, A08 and A10 remain — see the end.
+(`docs/reviews/wensu-acceptance-2026-11-09.md`), plus the schema half of A08 and the host-selection
+half of A02.
 
-Every item in that review was found by installing the released wheel cleanly and running the
-commands. Nine of them could not have been found any other way, because the machine they were
-developed on already had the missing file, the stale config, and the accumulated cache.
+### Added — the tool schema now carries its bounds (A08, partial)
+
+`tools/list` advertised `page` and `limit` as plain integers while `SearchQuery.validate` rejected
+`page > 3` and `limit > 50`. A caller could only learn the range by failing a call.
+
+```json
+"page":  {"minimum": 1, "maximum": 3,  "default": 1}
+"limit": {"minimum": 1, "maximum": 50, "default": 20}
+```
+
+The numbers come from `MIN_PAGE` / `MAX_PAGE` / `MAX_LIMIT` in `contracts.py`, which `validate`
+also uses, so the schema and the enforcement cannot drift. `FieldName` documents what `fields` keeps
+on all three tools that accept it.
+
+`tests/unit/test_tool_schema_contract.py` reads the real `tools/list` rather than parsing
+`schemas/tools.json` — that file was the thing that made this defect invisible, since it described
+constraints the server never read.
+
+**Not fixed**: `additionalProperties: false`. FastMCP builds its argument model with
+`ConfigDict(arbitrary_types_allowed=True)` and offers no way to set `extra="forbid"`, so an unknown
+parameter is still ignored. Closing that needs a change upstream or a parameter model per tool.
+
+### Added — the adapter picks the host for its own profile (A02, partial)
+
+With two browsers open there are two hosts. `_candidates` returned them sorted by mtime and took
+whichever answered first — so a search submitted for one profile could read the other profile's page.
+Silently: the request succeeds, the page is real, it belongs to a different search.
+
+Each host now records the `profile_dir` it serves, and the adapter orders candidates by:
+`WENSU_PROFILE` if set, else the profile in `browser.json`, else any live host. An endpoint written
+before this field existed stays a fallback, so an upgrade does not look like a dead bridge.
+
+**Not fixed**: the segment lock. A split search holds the lock across submit and read separately, so
+two requests can still interleave. The supported configuration is one browser serving one agent at a
+time; running two agents against one profile is documented as unsupported. Making it safe needs either
+a transaction-scoped lock (which lengthens the hold to 15–20 seconds and slows every caller) or
+per-request tab isolation.
+
+### Reference — what the review found
+
+Every item below was found by installing the released wheel cleanly and running the commands. Nine of
+them could not have been found any other way, because the machine they were developed on already had
+the missing file, the stale config, and the accumulated cache.
 
 ### Fixed — the wheel was missing a file the extension loads (A01, blocking)
 
@@ -75,13 +116,15 @@ guide now says so. The bundle README no longer hard-codes a version number that 
 
 ### Not done
 
-- **A02** — the browser lock is released between the submit and read segments of a split search, so
-  two concurrent requests can read each other's results. Real, and the fix is a transaction-scoped
-  lock or per-request tab isolation, not a patch. Needs its own design.
-- **A08** — `tools/list` does not expose the constraints `schemas/tools.json` describes (ranges,
-  enums, `additionalProperties: false`). Fixing it means parameter models on the tool signatures and
-  a contract test against the real handshake.
-- **A10** — `ruff format --check` fails on 16 files. The fix is `ruff format src tests scripts`; this
+- **A02 (remainder)** — the browser lock is released between the submit and read segments of a split
+  search, so two concurrent requests against **one** profile can read each other's results. Host
+  selection is fixed (above), so two *different* profiles no longer cross; this is the same-profile
+  case. The supported configuration is one browser serving one agent at a time. Making it safe needs a
+  transaction-scoped lock (holding 15–20 seconds, slowing every caller) or per-request tab isolation.
+- **A08 (remainder)** — `additionalProperties: false`. FastMCP builds its argument model with
+  `ConfigDict(arbitrary_types_allowed=True)` and exposes no way to set `extra="forbid"`, so an unknown
+  parameter is still ignored. Needs an upstream change or a parameter model per tool.
+- **A10** — `ruff format --check` fails on 17 files. The fix is `ruff format src tests scripts`; this
   sandbox refuses ruff's atomic-rename write, so it has to run where the tree is writable.
   `release-check.py` now includes the format gate, so it will not silently pass again.
 

@@ -92,6 +92,14 @@ class Plan:
 # --------------------------------------------------------------------------
 
 
+# The bounds a query must satisfy. Defined once so the MCP tool schema and
+# `SearchQuery.validate` cannot disagree: the schema used to advertise no bounds at
+# all, so a caller only discovered the range by failing a call.
+MIN_PAGE = 1
+MAX_PAGE = 3
+MAX_LIMIT = 50
+
+
 @dataclass(frozen=True, slots=True)
 class SearchQuery:
     text: str
@@ -100,6 +108,7 @@ class SearchQuery:
     page: int = 1
     year_from: int | None = None
     year_to: int | None = None
+
     source_types: tuple[str, ...] = ()
     limit: int = 20
     # The four below run on records that were already parsed. Their purpose is
@@ -118,12 +127,12 @@ class SearchQuery:
     def validate(self) -> None:
         if not self.text.strip():
             raise ValueError("search text must not be empty")
-        if self.page < 1:
-            raise ValueError("page must be >= 1")
-        if self.page > 3:
-            raise ValueError("page must be <= 3 (one page turn per extra page)")
-        if self.limit < 1 or self.limit > 50:
-            raise ValueError("limit must be within 1..50")
+        if self.page < MIN_PAGE:
+            raise ValueError(f"page must be >= {MIN_PAGE}")
+        if self.page > MAX_PAGE:
+            raise ValueError(f"page must be <= {MAX_PAGE} (one page turn per extra page)")
+        if self.limit < 1 or self.limit > MAX_LIMIT:
+            raise ValueError(f"limit must be within 1..{MAX_LIMIT}")
         if self.year_from and self.year_to and self.year_to < self.year_from:
             raise ValueError("year_to must be >= year_from")
         if self.min_citations is not None and self.min_citations < 0:

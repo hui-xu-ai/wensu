@@ -27,9 +27,38 @@ HOST_NAME = "com.scholar.search"
 ENDPOINT_NAME = "bridge.json"
 
 
+def _profile_dir() -> str | None:
+    """The profile this host is expected to serve, from the recorded config.
+
+    Best effort and deliberately not authoritative. The extension cannot report the
+    path of the browser profile it runs in, and the launcher manifest is registered
+    once per user, so `browser.json` is the only place the answer exists. A second
+    profile is recorded only if the user runs `wensu browser adopt` for it — which is
+    the same limitation the client side has, and it is documented rather than hidden.
+    """
+
+    try:
+        from scholar_search.core import browser as browser_cfg
+
+        recorded = browser_cfg.load()
+    except Exception:
+        # A host must start even if the config is unreadable; the field is advisory.
+        return None
+    return recorded.profile_dir if recorded is not None else None
+
+
 def write_endpoint(port: int, token: str) -> Path:
     root = host_runtime_dir()
-    payload = {"port": port, "token": token, "pid": os.getpid(), "started": time.time()}
+    payload = {
+        "port": port,
+        "token": token,
+        "pid": os.getpid(),
+        "started": time.time(),
+        # Which browser profile this host was launched for. Without it a client that
+        # opens two profiles sees two endpoints, takes whichever answers first, and a
+        # search issued for one profile can read the other's page.
+        "profile_dir": _profile_dir(),
+    }
     encoded = json.dumps(payload)
 
     path = root / ENDPOINT_NAME
