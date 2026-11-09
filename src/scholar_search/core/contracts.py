@@ -261,6 +261,11 @@ class ChannelManifest:
     # channel or accept the gap, instead of asking for `include_abstract` and
     # silently receiving nulls.
     field_support: Mapping[str, bool] = field(default_factory=dict)
+    # The same question for the *detail* endpoint, which often knows more than the
+    # list row does. CNKI's search rows carry no abstract, yet its detail page holds
+    # the complete one; declaring only `field_support` told a caller that CNKI
+    # "cannot do abstracts", which is false at the endpoint they would use.
+    detail_field_support: Mapping[str, bool] = field(default_factory=dict)
 
     def validate(self) -> None:
         unknown = set(self.verbs) - VERBS
@@ -278,7 +283,7 @@ class ChannelManifest:
         for cap in self.capabilities:
             if cap not in {"search", "detail", "journal", "export", "journal_metrics"}:
                 raise ValueError(f"unknown capability: {cap!r}")
-        for name in self.field_support:
+        for name in (*self.field_support, *self.detail_field_support):
             if name not in FIELD_SUPPORT_KEYS:
                 raise ValueError(f"unknown field_support entry: {name!r}")
 

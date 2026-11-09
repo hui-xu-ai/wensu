@@ -14,7 +14,15 @@
         "properties": {
           "query": { "type": "string", "minLength": 1 },
           "channel": { "type": "string", "default": "cnki" },
-          "sort": { "enum": ["relevance", "date", "citation"], "default": "relevance" },
+          "sort": {
+            "enum": ["relevance", "date", "citation"],
+            "default": "relevance",
+            "description": "Deprecated alias of `site_sort` — same meaning, same quota cost. Kept so existing callers keep working."
+          },
+          "site_sort": {
+            "enum": ["relevance", "date", "citation"],
+            "description": "Ask the SITE to re-sort the whole result set: two extra clicks, costs quota. For ordering the current page only, use `local_sort`, which is free."
+          },
           "page": { "type": "integer", "minimum": 1, "maximum": 3, "default": 1 },
           "year_from": { "type": ["integer", "null"] },
           "year_to": { "type": ["integer", "null"] },
@@ -36,7 +44,16 @@
           "sort_by": {
             "enum": ["none", "citations", "year"],
             "default": "none",
-            "description": "Re-sort the fetched page locally: free, no browser action, no quota. `sort` asks the site to re-sort, which costs two clicks and quota but orders the whole result set. Use sort_by unless you need the site's own ordering."
+            "description": "Deprecated alias of `local_sort` — same meaning, same zero cost. Kept so existing callers keep working."
+          },
+          "local_sort": {
+            "enum": ["none", "citations", "year"],
+            "description": "Re-order the page already in hand: free, no browser action, no quota. Orders only this page, not the whole result set — use `site_sort` for that."
+          },
+          "fields": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Project each record to these keys, e.g. [\"title\",\"year\",\"doi\"]. `url` is always kept because `detail` needs it. `include_abstract` on 25 rows is tens of kilobytes; most callers want three fields."
           },
           "min_citations": { "type": ["integer", "null"], "minimum": 0 },
           "min_impact_factor": { "type": ["number", "null"], "minimum": 0 }

@@ -57,9 +57,29 @@ def _filters_payload(page: Any, query: SearchQuery) -> dict[str, Any] | None:
     return applied
 
 
-def _page_payload(page: Any, query: SearchQuery | None = None) -> dict[str, Any]:
+def _project(records: list[dict[str, Any]], fields: list[str] | None) -> list[dict[str, Any]]:
+    """Keep only the requested fields, always keeping enough to identify a record.
+
+    `include_abstract` on 25 rows is tens of kilobytes, and most callers want a
+    title, a year and a DOI. Projection is applied after serialisation so the
+    derived `doc_type_unified` can be requested like any other field.
+    """
+
+    if not fields:
+        return records
+    wanted = {name.strip() for name in fields if name.strip()}
+    if not wanted:
+        return records
+    # `url` is what `detail` needs; dropping it silently would make the projection
+    # produce records the caller cannot follow up on.
+    kept = wanted | {"url"}
+    return [{k: v for k, v in record.items() if k in kept} for record in records]
+
+
+def _page_payload(page: Any, query: SearchQuery | None = None,
+                  fields: list[str] | None = None) -> dict[str, Any]:
     payload: dict[str, Any] = {
-        "records": [record.to_dict() for record in page.records],
+        "records": _project([record.to_dict() for record in page.records], fields),
         "total": page.total,
         "page": page.page,
         "page_count": page.page_count,
@@ -157,6 +177,9 @@ def build_server(service: ScholarService) -> FastMCP:
         min_citations: int | None = None,
         sources_only: list[str] | None = None,
         min_impact_factor: float | None = None,
+        site_sort: Literal["relevance", "date", "citation"] | None = None,
+        local_sort: Literal["none", "citations", "year"] | None = None,
+        fields: list[str] | None = None,
     ) -> dict[str, Any]:
         """Search a channel for bibliographic records. Read-only.
 
@@ -180,22 +203,41 @@ def build_server(service: ScholarService) -> FastMCP:
         min_impact_factor is honoured by channels that ship journal metrics
         (currently webofscience); records whose journal has no metric are dropped,
         which lowers recall by design.
+
+        Two parameters sort and they are not interchangeable:
+
+        * `site_sort` (`relevance` / `date` / `citation`) asks the site to re-sort.
+          That is two extra clicks and costs quota.
+        * `local_sort` (`none` / `citations` / `year`) re-orders the page already in
+          hand: free, no browser action, no quota.
+
+        The older names `sort` and `sort_by` still work and mean the same thing; the
+        new names say which one is which.
+
+        `fields` projects each record to the listed keys (plus `url`, which `detail`
+        needs). `include_abstract` on 25 rows is tens of kilobytes; most callers want
+        a title, a year and a DOI.
         """
+
+        # The explicit names win; the older ones remain as aliases.
+        effective_site_sort = site_sort if site_sort is not None else sort
+        effective_local_sort = local_sort if local_sort is not None else sort_by
+
         before = _quota(service)
         request = SearchQuery(
             text=query,
             channel=channel,
-            sort=sort,
+            sort=effective_site_sort,
             page=page,
             year_from=year_from,
             year_to=year_to,
             source_types=tuple(source_types or ()),
             limit=limit,
             include_abstract=include_abstract,
-            sort_by=sort_by,
-                    min_citations=min_citations,
-                    sources_only=tuple(sources_only or ()),
-                    min_impact_factor=min_impact_factor,
+            sort_by=effective_local_sort,
+            min_citations=min_citations,
+            sources_only=tuple(sources_only or ()),
+            min_impact_factor=min_impact_factor,
             )
         try:
             result_page = service.search(request)
@@ -203,7 +245,7 @@ def build_server(service: ScholarService) -> FastMCP:
             after = _quota(service)
             charged = (before - after) if before is not None and after is not None else 0
             return _payload(error, channel=channel, quota_charged=max(0, charged))
-        payload = _page_payload(result_page, request)
+        payload = _page_payload(result_page, request, fields)
         after = _quota(service)
         spent = max(0, before - after) if before is not None and after is not None else 0
         payload["quota_charged"] = spent

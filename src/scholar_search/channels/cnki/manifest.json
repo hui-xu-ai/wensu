@@ -24,5 +24,13 @@
     "volume": false,
     "pages": false,
     "paging": true
+  },
+  "detail_field_support": {
+    "abstract": true,
+    "keywords": true,
+    "doi": true,
+    "volume": true,
+    "pages": true,
+    "paging": false
   }
 }

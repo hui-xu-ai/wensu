@@ -4,6 +4,59 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.18] - 2026-11-09
+
+Addresses W-05, W-06, W-07, W-09, W-11 and W-13 from the 2026-11-09 review.
+
+### Added — capabilities declared per endpoint
+
+`status` used to publish one `channel_capabilities` map. On CNKI it said
+`abstract: false`, which is true of a **search row** and false of the **detail page** — so a caller
+read it as "CNKI cannot do abstracts" and planned around a limitation that does not exist. There are
+now two maps:
+
+```
+channel_capabilities.cnki.abstract  = false   (list rows)
+detail_capabilities.cnki.abstract   = true    (detail page)
+```
+
+### Added — `fields` projection
+
+`search(..., fields=["title","year","doi"])` returns only those keys. `url` is always kept because
+`detail` needs it. `include_abstract` on 25 rows is tens of kilobytes; most callers want three
+fields.
+
+### Changed — `site_sort` and `local_sort`
+
+The two sort parameters did different things at different costs and had near-identical names. They
+now say which is which:
+
+| new name | meaning | cost |
+|---|---|---|
+| `site_sort` | ask the site to re-sort the whole result set | two extra clicks, quota |
+| `local_sort` | re-order the page in hand | free |
+
+`sort` and `sort_by` still work as deprecated aliases with identical meaning, so nothing breaks.
+
+### Docs — the query semantics a caller cannot guess
+
+`skills/scholar-search/SKILL.md` gained the section the review said was missing:
+
+- **CNKI does not do whole-sentence phrases.** `离子柔性驱动器` returns 0; `离子 柔性 驱动器`
+  returns 128. Splitting into space-separated words is the first move when a Chinese phrase finds
+  nothing — that cost 6 quota to discover.
+- **`year_from` / `year_to` filter the current page only.** Wanting this year means `site_sort=date`
+  (+2 quota, one page) or putting the year in the expression — not paging through the database.
+- **An action price table** per channel per action, so a caller can budget instead of discovering
+  the cost by spending it.
+
+### Not done — W-12 (stable record id)
+
+CNKI's detail URL is a several-hundred-character signed query string, so `detail` has to be given the
+URL back verbatim. A stable key would fix that, but neither captured page contains `filename=` (the
+site's own article key) or any equivalent. Inventing an id from the URL would produce something that
+looks stable and is not. Needs a capture that shows where CNKI exposes that key.
+
 ## [0.12.17] - 2026-11-09
 
 ### Fixed — CNKI `detail` was reading the wrong copies of three fields

@@ -41,10 +41,16 @@ def build_service() -> ScholarService:
             "version": __version__,
             "bridge_protocol": PROTOCOL_VERSION,
             "channels": [spec.name for spec in registry.discover()],
-            # What each channel can actually fill. Without this a caller asks for
-            # `include_abstract` on CNKI and gets nulls with no way to know why.
+            # What each channel can actually fill, per endpoint. Without this a
+            # caller asks for `include_abstract` on CNKI, gets nulls from the list
+            # row, and concludes CNKI has no abstracts — while its detail page holds
+            # the complete one. The two endpoints are declared separately.
             "channel_capabilities": {
                 spec.name: dict(spec.manifest.field_support)
+                for spec in registry.discover()
+            },
+            "detail_capabilities": {
+                spec.name: dict(spec.manifest.detail_field_support)
                 for spec in registry.discover()
             },
             "cooldown_until": until.isoformat() if until else None,
