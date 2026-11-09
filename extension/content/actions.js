@@ -187,6 +187,33 @@ function pointerEvent(type, point) {
 // click lands. Synthetic events are never `isTrusted` — the browser reserves that
 // for real input — but the sequence, the coordinates and the pauses match what a
 // handler would see from a real pointer.
+async function waitUntilEnabled(element, selector, timeoutMs) {
+  // A search button goes disabled while the site computes, then comes back. That
+  // transition is the site's own "finished" signal: waiting for it beats guessing a
+  // pause, which breaks on long queries and wastes time on short ones.
+  //
+  // The element may be replaced after a route change, so it is re-resolved each
+  // tick and the original node is the fallback when the selector stops matching.
+  const isBusy = (node) =>
+    !node ||
+    node.disabled === true ||
+    node.getAttribute("aria-disabled") === "true" ||
+    node.classList.contains("disabled");
+
+  const deadline = Date.now() + timeoutMs;
+  let seenBusy = false;
+  while (Date.now() < deadline) {
+    const current = document.querySelector(selector) || element;
+    if (isBusy(current)) {
+      seenBusy = true;
+    } else if (seenBusy) {
+      return true; // went busy and came back: the work finished
+    }
+    await sleep(150);
+  }
+  return false;
+}
+
 async function humanClick(element) {
   try {
     if (typeof element.scrollIntoView === "function") {
@@ -284,6 +311,12 @@ async function run(action, params) {
         break;
       }
       await humanClick(element);
+      if (params.wait_until === "enabled") {
+        const budget = Math.min(params.timeout_ms || 10_000, 15_000);
+        const settled = await waitUntilEnabled(element, params.selector, budget);
+        result = { ok: true, data: { settled } };
+        break;
+      }
       result = { ok: true, data: {} };
       break;
     }

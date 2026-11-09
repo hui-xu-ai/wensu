@@ -240,10 +240,26 @@ async function onHostMessage(message, channel) {
     const data = { ...(result.data || {}) };
     // Report where the tab actually is, not whether a navigation *seemed* to start.
     // A click that matched nothing leaves the page on the search form; the URL is
-    // the site's own statement about that, and it arrives faster and more reliably
-    // than any wording on the page.
-    const after = await chrome.tabs.get(tabId).catch(() => null);
-    if (after && after.url) data.url = after.url;
+    // the site's own statement about that.
+    //
+    // Polled, not read once: the in-page route change can take a couple of seconds,
+    // and a single sample taken too early reports the old URL — which would label a
+    // perfectly good search as empty.
+    if (action === "click") {
+      const before = (await chrome.tabs.get(tabId).catch(() => null))?.url || "";
+      const deadline = Date.now() + 6000;
+      let after = before;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        after = (await chrome.tabs.get(tabId).catch(() => null))?.url || after;
+        if (after !== before) break;
+      }
+      if (after) data.url = after;
+      data.url_changed = Boolean(after) && after !== before;
+    } else {
+      const after = await chrome.tabs.get(tabId).catch(() => null);
+      if (after && after.url) data.url = after.url;
+    }
     return reply({ ok: Boolean(result.ok), error: result.error, data });
   } catch (error) {
     return reply({ ok: false, error: String((error && error.message) || error) });

@@ -16,7 +16,10 @@ ALLOWED_KEYS: dict[str, frozenset[str]] = {
     "goto": frozenset({"url", "reload"}),
     "wait_for": frozenset({"selector", "timeout_ms", "state"}),
     "type": frozenset({"selector", "text", "clear"}),
-    "click": frozenset({"selector"}),
+    # `wait_until` lets a click report when the site finished the work it started.
+    # A search button goes disabled while the query runs; waiting for it to come
+    # back is the site's own "done" signal, which beats guessing a fixed pause.
+    "click": frozenset({"selector", "wait_until", "timeout_ms"}),
     "select": frozenset({"selector", "value"}),
     "read_html": frozenset(),
     "read_text": frozenset({"selector", "mode"}),
@@ -26,6 +29,7 @@ ALLOWED_KEYS: dict[str, frozenset[str]] = {
 
 WAIT_STATES = frozenset({"visible", "hidden"})
 READ_TEXT_MODES = frozenset({"inner", "text"})
+CLICK_WAIT_UNTIL = frozenset({"enabled"})
 
 
 def _selector(value: Any) -> bool:
@@ -67,6 +71,16 @@ def validate_params(verb: str, params: Any) -> str | None:
             return "policy.params"
         if verb == "read_text" and params.get("mode", "inner") not in READ_TEXT_MODES:
             return "policy.params"
+        if verb == "click" and "wait_until" in params:
+            if params["wait_until"] not in CLICK_WAIT_UNTIL:
+                return "policy.params"
+            budget = params.get("timeout_ms", 10_000)
+            if (
+                not isinstance(budget, int)
+                or isinstance(budget, bool)
+                or not 0 <= budget <= MAX_TIMEOUT_MS
+            ):
+                return "policy.params"
         if verb == "wait_for":
             timeout = params.get("timeout_ms", 10_000)
             if (

@@ -187,9 +187,17 @@ def build_until_click(query: SearchQuery, *, today: dt.date | None = None) -> Pl
                 timeout_ms=INPUT_TIMEOUT_MS,
             ),
             settle(jitter(1_200, 2_200)),
-            Action("click", {"selector": SUBMIT}, timeout_ms=CLICK_TIMEOUT_MS),
+            # The button goes disabled while the site runs the query and recovers
+            # when it is done. Waiting for that transition is the site's own "done"
+            # signal: a fixed pause is either too short for a long expression or
+            # wasted time for a short one.
+            Action(
+                "click",
+                {"selector": SUBMIT, "wait_until": "enabled", "timeout_ms": 10_000},
+                timeout_ms=CLICK_TIMEOUT_MS + 10_000,
+            ),
             # Give the in-page route change a moment to land before the URL is read.
-            settle(jitter(1_800, 2_600)),
+            settle(jitter(400, 900)),
         ),
     )
 
