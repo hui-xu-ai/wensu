@@ -282,12 +282,20 @@ def start(config: BrowserConfig, *, settle_s: float = 1.5) -> subprocess.Popen[b
         env={**os.environ},
     )
 
-    # Give it a moment to fail, then check. A browser that is still running a second
-    # and a half later is one that opened its profile successfully; the ones that
-    # cannot write exit almost immediately.
+    # Give it a moment to fail, then check. A browser still running after this long
+    # opened its profile successfully; the ones that cannot write exit immediately.
     try:
         code = process.wait(timeout=settle_s)
     except subprocess.TimeoutExpired:
+        return process
+
+    if code == 0:
+        # Chromium exits 0 when a browser is already using the profile: the new
+        # process hands the request to the running instance and leaves. Reporting
+        # that as "could not use the profile" was wrong twice over — it blamed the
+        # directory, and it fired on the *normal* case of calling `browser start`
+        # when the window is already open. `pin` and `profile_is_running` are what
+        # decide whether the browser is actually reachable.
         return process
 
     raise RuntimeError(

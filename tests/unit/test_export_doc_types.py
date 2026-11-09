@@ -61,12 +61,18 @@ def _endnote_type(doc_type: str | None) -> str:
         ("article", "JOUR", "Journal Article"),
         ("review", "JOUR", "Journal Article"),
         ("proceedings", "CPAPER", "Conference Paper"),
+        ("book_chapter", "CHAP", "Book Section"),
         # CNKI vocabulary, which already worked and must keep working
         ("journal", "JOUR", "Journal Article"),
         ("thesis", "THES", "Thesis"),
         ("conference", "CPAPER", "Conference Paper"),
         ("newspaper", "NEWS", "Newspaper Article"),
         ("patent", "PAT", "Patent"),
+        # Types the unified vocabulary coarsens to `other`. Unification must not shrink
+        # what the export can express: these regressed once already when the lookup
+        # went through it.
+        ("standard", "STAND", "Generic"),
+        ("yearbook", "BOOK", "Book"),
     ],
 )
 def test_type_survives_export(doc_type: str, ris: str, endnote: str) -> None:
@@ -86,3 +92,23 @@ def test_an_unknown_type_is_still_generic() -> None:
 
     assert _ris_type("something_new") == "GEN"
     assert _ris_type(None) == "GEN"
+
+
+def test_the_note_distinguishes_our_gap_from_the_source() -> None:
+    """Two different reasons for `GEN`, and the export used to give one message.
+
+    "not reported by source" is true when the channel produced nothing. When the
+    channel *did* report a type that this mapping does not cover, the gap is ours,
+    and telling the user the data is missing sends them to the wrong place.
+    """
+
+    unmapped = to_ris([_record("something_new")])
+    absent = to_ris([_record(None)])
+
+    assert "something_new; no RIS equivalent mapped" in unmapped
+    assert "not reported by source" in absent
+    assert "not reported by source" not in unmapped
+
+
+def test_a_mapped_type_carries_no_apology() -> None:
+    assert "N1  -" not in to_ris([_record("book_chapter")])

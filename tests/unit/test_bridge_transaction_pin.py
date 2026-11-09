@@ -124,3 +124,40 @@ def test_two_live_hosts_that_agree_on_a_profile_are_ambiguous(
 
     with pytest.raises(BridgeAmbiguous):
         BridgeAdapter().pin()
+
+
+def test_an_unrelated_third_host_does_not_unlock_the_ambiguity(
+    runtime: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The regression the fifth review found.
+
+    Two hosts labelled A were refused — until a third host labelled B appeared. The
+    check compared the set of distinct labels across the whole machine, so `{A, B}`
+    looked like "they can be told apart" and one of the two A's was picked.
+
+    Adding a browser this request never asked for cannot make two indistinguishable
+    candidates distinguishable. Eligibility is filtered by the requested profile first,
+    and it is that smaller set whose size decides.
+    """
+
+    _endpoint(runtime, "a", port=1, profile=r"E:\ProfileA", pid=11)
+    _endpoint(runtime, "b", port=2, profile=r"E:\ProfileB", pid=22)
+    _endpoint(runtime, "c", port=3, profile=r"E:\ProfileA", pid=33)
+    monkeypatch.setenv("WENSU_PROFILE", r"E:\ProfileA")
+    _live(monkeypatch, {1, 2, 3})
+
+    with pytest.raises(BridgeAmbiguous):
+        BridgeAdapter().pin()
+
+
+def test_an_unrelated_live_host_does_not_block_a_unique_match(
+    runtime: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The flip side: one A and one B is not ambiguous when A is what was asked for."""
+
+    _endpoint(runtime, "a", port=1, profile=r"E:\ProfileA", pid=11)
+    _endpoint(runtime, "b", port=2, profile=r"E:\ProfileB", pid=22)
+    monkeypatch.setenv("WENSU_PROFILE", r"E:\ProfileA")
+    _live(monkeypatch, {1, 2})
+
+    assert BridgeAdapter().pin() == (1, "t")

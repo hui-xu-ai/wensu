@@ -338,7 +338,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             # would send the caller looking for a bridge that cannot appear.
             print(f"wensu: {error}", file=sys.stderr)
             return 1
-        print(f"started {recorded.browser} (pid {process.pid}) with profile {recorded.profile_dir}")
+        print(f"{recorded.browser} (pid {process.pid}) with profile {recorded.profile_dir}")
+        if process.poll() == 0:
+            # Exited cleanly right away: another instance already owns the profile and
+            # took the request. That is the normal result of calling `browser start`
+            # on a window that is already open, so saying "started" would be a lie and
+            # saying "it could not use the profile" was worse.
+            print("  already running, so this instance handed over and exited")
+            print("  check with: wensu status --brief")
+        else:
+            print("  started; check with `wensu status --brief`")
         print("if the toolbar icon is missing, load the unpacked extension once:")
         print(f"  chrome://extensions -> Load unpacked -> {recorded.extension_dir}")
         return 0

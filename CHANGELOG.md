@@ -4,6 +4,70 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.35] - 2026-11-09
+
+Fifth review (`docs/reviews/wensu-retest-0.12.34-2026-11-09.md`). Items 1 and 2 are regressions I
+introduced in 0.12.34.
+
+### Fixed — an unrelated third browser unlocked the ambiguity check (item 1, P1)
+
+The check compared the set of distinct profile labels across **every** live host:
+
+```python
+distinct = {value for value in labels.values() if value is not None}
+if len(distinct) <= 1:
+    raise BridgeAmbiguous(...)
+```
+
+Two hosts labelled A were refused. Open an unrelated browser B and the set became `{A, B}` — two
+distinct values — so the check passed and one of the two A's was picked. **Opening a browser the
+request never asked for disabled a protection that was working.**
+
+Now eligibility is filtered by the requested profile first, and it is *that* set's size that
+decides. A third host cannot make two indistinguishable candidates distinguishable.
+
+### Fixed — unification shrank what the export could express (item 2)
+
+0.12.34 routed every lookup through `unify_doc_type`, whose vocabulary is deliberately coarse:
+`standard` and `yearbook` collapse to `other`. They had exported as `STAND` and `BOOK` for
+releases, and 0.12.34 turned them into `GEN`.
+
+The raw type is now tried first, with unification as the fallback. Unification exists so filters can
+compare across channels; it was never meant to bound what an export can say.
+
+### Fixed — Book Chapter still exported as generic (item 3)
+
+`book_chapter` was recognised by the WoS parser and dropped by the export: no mapping existed, so it
+became `GEN` with a note claiming the source had not reported a type. It now maps to `CHAP` /
+`Book Section`.
+
+The note distinguishes the two cases now:
+
+```
+N1  - book_chapter not mapped  →  no longer appears (it is mapped)
+N1  - something_new; no RIS equivalent mapped
+N1  - document type not reported by source        ← only when the channel said nothing
+```
+
+### Fixed — `browser start` blamed the profile for a clean exit (item 4)
+
+Chromium exits **0** when a browser is already using the profile: the new process hands the request
+over and leaves. That is the normal result of running `browser start` on an open window, and it was
+reported as:
+
+> edge exited immediately with code 0; it could not use E:\LiteratureEdgeProfile. Chromium exit code
+> 21 means the profile directory is not writable…
+
+Exit 0 is now reported as a handover. The exit-21 diagnosis is kept for the case it describes.
+
+### Verified
+
+```
+pytest                250 passed
+ruff check / format   clean
+mypy --strict         clean
+```
+
 ## [0.12.34] - 2026-11-09
 
 Fourth review (`docs/reviews/wensu-retest-0.12.33-2026-11-09.md`), run against the **installed**

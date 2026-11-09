@@ -61,9 +61,12 @@ _RIS_TYPES = {
     "conference": "CPAPER",
     "newspaper": "NEWS",
     "book": "BOOK",
+    "book_chapter": "CHAP",
     "patent": "PAT",
     "standard": "STAND",
+    "yearbook": "BOOK",
     "achievement": "GEN",
+    "other": "GEN",
 }
 
 _ENDNOTE_TYPES = {
@@ -73,9 +76,12 @@ _ENDNOTE_TYPES = {
     "conference": "Conference Paper",
     "newspaper": "Newspaper Article",
     "book": "Book",
+    "book_chapter": "Book Section",
     "patent": "Patent",
     "standard": "Generic",
+    "yearbook": "Book",
     "achievement": "Generic",
+    "other": "Generic",
 }
 
 
@@ -176,13 +182,21 @@ def _clean(value: str | None) -> str:
 def _type_token(record: Record) -> tuple[str, str]:
     """Map a record's type to RIS and EndNote vocabularies.
 
-    The type is unified first, so a channel that says `journal` and one that says
-    `article` reach the same entry. Without that step the export silently depended on
-    which channel produced the record.
+    The **raw** type is tried first, then the unified one. That order matters: the
+    unified vocabulary exists so cross-channel filtering can compare types, and it is
+    deliberately coarse — `standard` and `yearbook` collapse to `other` there. Using
+    it as the only lookup made those two export as generic, which is a regression from
+    the version before unification.
+
+    So: a channel's own word wins when the export knows it, and unification is the
+    fallback for the words the RSI/EndNote maps do not carry directly.
     """
 
-    key = unify_doc_type(record.doc_type) or ""
-    return _RIS_TYPES.get(key, "GEN"), _ENDNOTE_TYPES.get(key, "Generic")
+    raw = (record.doc_type or "").casefold()
+    if raw in _RIS_TYPES:
+        return _RIS_TYPES[raw], _ENDNOTE_TYPES[raw]
+    unified = unify_doc_type(record.doc_type) or ""
+    return _RIS_TYPES.get(unified, "GEN"), _ENDNOTE_TYPES.get(unified, "Generic")
 
 
 def to_ris(records: Iterable[Record]) -> str:
@@ -192,7 +206,14 @@ def to_ris(records: Iterable[Record]) -> str:
         ris_type, _ = _type_token(record)
         lines.append(f"TY  - {ris_type}")
         if ris_type == "GEN":
-            lines.append("N1  - document type not reported by source")
+            # Two different situations, and the old text conflated them: the source
+            # reported nothing, or it reported something this mapping does not cover.
+            # The second is our gap, not the record's, and saying otherwise sends the
+            # user looking for a problem in the data.
+            if record.doc_type:
+                lines.append(f"N1  - {record.doc_type}; no RIS equivalent mapped")
+            else:
+                lines.append("N1  - document type not reported by source")
         lines.append(f"TI  - {_text(record.title, 'title')}")
         for author in record.authors:
             lines.append(f"AU  - {_text(author, 'author')}")
