@@ -20,7 +20,7 @@ import time
 
 from ....core.contracts import Action, Plan, SearchQuery
 from ....core.errors import ChannelError
-from .selectors import EXPERT, SEARCH, SEARCH_PAGE, SEARCH_READY, SORT
+from .selectors import EXPERT, SEARCH, SEARCH_READY, SORT
 
 _EXPRESSION = re.compile(
     # Any field code the site documents (SU, TKA, KY, TI, FT, AU, FI, RP, AF,
@@ -40,6 +40,17 @@ NAV_TIMEOUT_MS = 10_000
 WAIT_TIMEOUT_MS = 10_000
 INPUT_TIMEOUT_MS = 3_000
 CLICK_TIMEOUT_MS = 2_200
+# The submit button starts a navigation, which tears down the content script before
+# it can reply. The extension answers after its own 2 s race plus the time the click
+# itself takes (hover, press, release), which measured at over 2.2 s — the old budget
+# sat right on that boundary and any jitter surfaced as
+# `click failed: bridge.timeout` on a click that had in fact worked.
+#
+# 5 s is comfortably above the measured cost and still leaves the worst-case plan
+# (50 rows, explicit sort, 3 pages) inside the kernel's 120 s ceiling: at 12 s it
+# summed to 126.4 s and the budget test caught it. The other clicks keep the short
+# budget because they do not navigate.
+SUBMIT_CLICK_TIMEOUT_MS = 5_000
 READ_TIMEOUT_MS = 4_000
 FILTER_WAIT_MS = 6_000
 WAIT_REPLY_MARGIN_MS = 2_000
@@ -53,6 +64,16 @@ def settle(ms: int) -> Action:
 
 def is_expression(text: str) -> bool:
     return bool(_EXPRESSION.search(text))
+
+
+def _quote(text: str) -> str:
+    """Escape a bare keyword for use inside `SU='...'`.
+
+    The expert form treats a single quote as a delimiter, so a keyword containing one
+    would otherwise end the string early and change the meaning of the expression.
+    """
+
+    return text.replace("'", "''").strip()
 
 
 def _pagination(query: SearchQuery) -> tuple[Action, ...]:
@@ -122,51 +143,30 @@ def build(query: SearchQuery) -> Plan:
     # starts from its default state (20 rows, page 1).
     nonce = int(time.time() * 1000)
 
-    if is_expression(query.text):
-        expert_url = f"{EXPERT['page']}&t={nonce}"
-        head = (
-            Action("goto", {"url": expert_url}, timeout_ms=NAV_TIMEOUT_MS),
-            settle(2_500),
-            Action(
-                "wait_for",
-                {"selector": EXPERT["input"], "timeout_ms": WAIT_TIMEOUT_MS},
-                timeout_ms=WAIT_TIMEOUT_MS + WAIT_REPLY_MARGIN_MS,
-            ),
-            Action(
-                "type",
-                {"selector": EXPERT["input"], "text": query.text},
-                timeout_ms=INPUT_TIMEOUT_MS,
-            ),
-            Action(
-                "click",
-                {"selector": EXPERT["submit"]},
-                timeout_ms=CLICK_TIMEOUT_MS,
-            ),
-        )
-    else:
-        search_url = f"{SEARCH_PAGE}?t={nonce}"
-        head = (
-            Action("goto", {"url": search_url}, timeout_ms=NAV_TIMEOUT_MS),
-            settle(2_500),
-            Action(
-                "wait_for",
-                {"selector": SEARCH["input"], "timeout_ms": WAIT_TIMEOUT_MS},
-                timeout_ms=WAIT_TIMEOUT_MS + WAIT_REPLY_MARGIN_MS,
-            ),
-            Action(
-                "type",
-                {"selector": SEARCH["input"], "text": query.text},
-                timeout_ms=INPUT_TIMEOUT_MS,
-            ),
-            Action(
-                "click",
-                {"selector": SEARCH["submit"]},
-                timeout_ms=CLICK_TIMEOUT_MS,
-            ),
-        )
+    # One path only. The one-box search and the expert form both end up doing a topic
+    # search, so keeping both made the caller pick between two ways to say the same
+    # thing. A bare keyword is wrapped as `SU='...'`; anything already carrying a
+    # field code is passed through untouched.
+    expression = query.text if is_expression(query.text) else f"SU='{_quote(query.text)}'"
 
     actions = (
-        *head,
+        Action("goto", {"url": f"{EXPERT['page']}&t={nonce}"}, timeout_ms=NAV_TIMEOUT_MS),
+        settle(2_500),
+        Action(
+            "wait_for",
+            {"selector": EXPERT["input"], "timeout_ms": WAIT_TIMEOUT_MS},
+            timeout_ms=WAIT_TIMEOUT_MS + WAIT_REPLY_MARGIN_MS,
+        ),
+        Action(
+            "type",
+            {"selector": EXPERT["input"], "text": expression},
+            timeout_ms=INPUT_TIMEOUT_MS,
+        ),
+        Action(
+            "click",
+            {"selector": EXPERT["submit"]},
+            timeout_ms=SUBMIT_CLICK_TIMEOUT_MS,
+        ),
         Action(
             "wait_for",
             {"selector": SEARCH_READY, "timeout_ms": WAIT_TIMEOUT_MS},

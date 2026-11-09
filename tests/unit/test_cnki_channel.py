@@ -62,7 +62,14 @@ def test_manifest_declares_search_and_detail() -> None:
     assert "journal" not in channel.manifest.capabilities
 
 
-def test_search_plan_drives_the_search_box() -> None:
+def test_search_plan_uses_the_expert_form_for_a_bare_keyword() -> None:
+    """A plain keyword is wrapped as SU=..., not sent to the one-box search.
+
+    Two entry points that do the same thing forced the caller to choose between them
+    for no benefit, so the one-box path was removed. `SU=` is the topic search, which
+    is what that box did anyway.
+    """
+
     plan = plan_search.build(SearchQuery(text="人工智能", channel="cnki"))
     assert plan.purpose == "search"
     assert [action.verb for action in plan.actions] == [
@@ -74,8 +81,10 @@ def test_search_plan_drives_the_search_box() -> None:
         "wait_for",
         "read_html",
     ]
-    assert str(plan.actions[0].params["url"]).startswith("https://kns.cnki.net/kns8s/search")
-    assert plan.actions[3].params["text"] == "人工智能"
+    assert str(plan.actions[0].params["url"]).startswith(
+        "https://kns.cnki.net/kns8s/AdvSearch?type=expert"
+    )
+    assert plan.actions[3].params["text"] == "SU='人工智能'"
 
 
 def test_expression_plan_uses_expert_page() -> None:

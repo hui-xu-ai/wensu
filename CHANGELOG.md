@@ -26,6 +26,39 @@ verification prompt — the page reads "手机号认证 … 认证中，请稍�
 button times out regardless of this change. Both the smart and expert paths fail identically, which
 is what pointed at the gate rather than at either plan.
 
+### Changed — CNKI has one search path
+
+The channel used to route a bare keyword to the one-box search and anything with `字段=` to the expert
+form. Both end up doing a topic search, so the caller had to pick between two ways to say the same
+thing — the same kind of choice that made `sort` / `sort_by` confusing. The one-box path is gone:
+
+| input | sent |
+|---|---|
+| `柔性驱动器` | `SU='柔性驱动器'` |
+| `SU='柔性驱动器'` | unchanged |
+| `TI='生态' and KY='生态文明'` | unchanged |
+
+A single quote inside a bare keyword is escaped to `''` so it cannot close the expression early.
+
+### Fixed — CNKI submit deadlines
+
+- **The URL polling added for Web of Science ran on every click**, costing a fixed six seconds and
+  pushing ordinary submits past their deadline. CNKI surfaced it as `click failed: bridge.timeout` on
+  a click that had in fact worked. Polling now happens only when the caller passes `wait_until`.
+- **`CLICK_TIMEOUT_MS = 2_200` sat right on the boundary** of the click's real cost (hover, press,
+  release, plus the extension's 2 s race). The submit buttons get their own 5 s budget; other clicks
+  keep the short one. 5 s rather than more because the worst-case plan — 50 rows, explicit sort,
+  3 pages — must stay inside the kernel's 120 s ceiling; at 12 s it summed to 126.4 s and the budget
+  test caught it.
+
+### Verified live
+
+```
+柔性驱动器                     → 3 records, total 363,    9.9 s
+SU='柔性驱动器'                → cached, identical total,  0.4 s
+TI='生态' and KY='生态文明'    → 3 records, total 30876,  8.7 s
+```
+
 ## [0.12.12] - 2026-11-09
 
 ### Fixed — zero results are an answer on Web of Science

@@ -242,10 +242,10 @@ async function onHostMessage(message, channel) {
     // A click that matched nothing leaves the page on the search form; the URL is
     // the site's own statement about that.
     //
-    // Polled, not read once: the in-page route change can take a couple of seconds,
-    // and a single sample taken too early reports the old URL — which would label a
-    // perfectly good search as empty.
-    if (action === "click") {
+    // Only when the caller asked for it (`wait_until`). Polling on every click added
+    // a fixed six-second wait that pushed ordinary submits past their deadline —
+    // CNKI surfaced it as `click failed: bridge.timeout` on a click that had worked.
+    if (action === "click" && params.wait_until) {
       const before = (await chrome.tabs.get(tabId).catch(() => null))?.url || "";
       const deadline = Date.now() + 6000;
       let after = before;
@@ -256,6 +256,9 @@ async function onHostMessage(message, channel) {
       }
       if (after) data.url = after;
       data.url_changed = Boolean(after) && after !== before;
+    } else if (action === "click") {
+      const after = await chrome.tabs.get(tabId).catch(() => null);
+      if (after && after.url) data.url = after.url;
     } else {
       const after = await chrome.tabs.get(tabId).catch(() => null);
       if (after && after.url) data.url = after.url;
