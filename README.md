@@ -139,9 +139,16 @@ wensu serve --transport http --host 127.0.0.1 --port 8765
 
 ## 并发
 
-**一个浏览器 profile 同一时间只应服务一个 agent。** 分段检索在提交与读取之间会释放锁，两个客户端
-同时向同一 profile 发检索时，可能读到对方的结果。不同 profile 由各自的 host 承载，`WENSU_PROFILE`
-可显式指定本次调用使用哪一个。
+**一个浏览器 profile 同一时间只应服务一个 agent。**
+
+同一 profile 下的检索与详情由同一把跨进程事务锁串行化：一条检索从提交到读取期间持有整把锁，
+`detail` 和 `journal` 也拿同一把，所以它们不会插进检索的中途。后到的请求**排队等待**，不会读到
+别人的页面。
+
+多个 profile 时，每个浏览器有自己的 host。host 无法报告自己属于哪个 profile——它读的是同一份
+`browser.json`——所以当有**多个 host 且它们声称同一个 profile** 时，工具会拒绝连接并说明原因，
+而不是随机挑一个。目前可行的多 profile 用法是：一个 profile 一个 host，用 `WENSU_PROFILE`
+指定本次调用使用哪个；无法消歧时请关掉多余浏览器。
 
 ## 升级到新版本
 

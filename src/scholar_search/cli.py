@@ -340,6 +340,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         service = build_service()
         try:
+            # Both branches validate the projection before touching the browser. This
+            # used to live inside the search branch only, so `detail --field titel`
+            # fetched the record first and then rejected the field — paying for a
+            # request whose result it discarded.
+            from .server import _check_fields
+
+            _check_fields(args.fields)
+
             if args.command == "detail":
                 # Same inference, same projection and same quota reporting as the MCP
                 # tool. This block used to hold its own copy and got the abstract
@@ -381,12 +389,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                     )
                 )
                 return 0
-            # Validate the projection before querying. `_page_payload` raises for an
-            # unknown key, but it runs after the search, outside this try block — so a
-            # typo produced a traceback and, on a cold query, a spent request.
-            from .server import _check_fields
-
-            _check_fields(args.fields)
             query = SearchQuery(
                 text=args.query,
                 channel=args.channel,

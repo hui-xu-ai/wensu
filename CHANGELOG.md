@@ -4,6 +4,61 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.33] - 2026-11-09
+
+Third review (`docs/reviews/wensu-retest-0.12.32-2026-11-09.md`). Item 1 is a regression I introduced
+in 0.12.32, and it was worse than the problem it was meant to fix.
+
+### Fixed — the ambiguity check refused normal single-browser setups
+
+One host writes **two** endpoint files:
+
+```
+host/bridge.json                  the legacy alias
+host/hosts/bridge-<pid>.json      the registry entry
+```
+
+The 0.12.32 check counted files, so a perfectly ordinary setup looked like "2 hosts, both claiming the
+same profile" and refused to connect at all. `status` and `search` were both dead on a healthy
+install.
+
+Discovery now collapses endpoint files by **pid** before judging ambiguity, so one host is one
+candidate no matter how many files describe it. The test uses the host's own `write_endpoint` rather
+than hand-built files, because the layout was the thing that was wrong.
+
+The check still fires for two genuine hosts with the same label — deduplication must not go so far
+that it hides the case it exists for.
+
+### Fixed — `detail` and `journal` now join the browser transaction
+
+The 0.12.32 lock covered `search` only. A detail fetch navigates the shared tab, so it could land
+between a split search's submit and read; the review reproduced the sequence and the search then
+stored the *detail page's* title under its own cache key.
+
+`detail` and `journal` now take the same `browser.lock`. `detail_by_doi` deliberately does not — it
+calls `search` then `detail`, each of which takes the lock, and wrapping them in a second
+non-reentrant acquisition of the same file would deadlock. That interleaving is a real gap and is
+left documented rather than papered over.
+
+### Fixed — the CLI validated `detail`'s fields after fetching
+
+`_check_fields` sat inside the search branch, so `wensu detail <url> --field titel` fetched the
+record, then rejected the field. Both branches now validate before any browser action.
+
+### Docs — the concurrency section described the old behaviour
+
+The README still said the lock is released between submit and read, which stopped being true in
+0.12.32. It now describes what actually happens: search, detail and journal share one lock and later
+requests queue; an ambiguous host set is refused rather than guessed.
+
+### Verified
+
+```
+pytest                223 passed
+ruff check / format   clean
+mypy --strict         clean
+```
+
 ## [0.12.32] - 2026-11-09
 
 Second round of review (`docs/reviews/wensu-retest-0.12.31-2026-11-09.md`). Everything below was

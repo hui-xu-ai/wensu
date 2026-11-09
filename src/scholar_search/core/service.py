@@ -325,7 +325,12 @@ class ScholarService:
             return _record_from(cached)
 
         self._ensure_ready()
-        record = impl.parse_detail(_html(self._run(impl.plan_detail(url), spec)), url=url)
+        # Same transaction as `search`. A detail fetch navigates the shared tab, so it
+        # must not run while a split search is between its submit and its read: the
+        # search would then read the detail page. A review reproduced exactly that,
+        # with the detail page's title stored under the search's cache key.
+        with self._browser_transaction():
+            record = impl.parse_detail(_html(self._run(impl.plan_detail(url), spec)), url=url)
         self._cache.set(key, record.to_dict())
         return record
 
@@ -341,9 +346,13 @@ class ScholarService:
             return _page_from(cached)
 
         plan = impl.plan_journal(issn=issn, year=year, issue=issue)
-        page = impl.parse_journal(_html(self._run(plan, spec)), issn=issn, year=year, issue=issue)
+        with self._browser_transaction():
+            page = impl.parse_journal(
+                _html(self._run(plan, spec)), issn=issn, year=year, issue=issue
+            )
         self._cache.set(key, _page_to(page))
-        return page
+        result: SearchPage = page
+        return result
 
     def export(
         self,

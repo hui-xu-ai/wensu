@@ -98,6 +98,13 @@ class BridgeAdapter:
         legacy = root / "bridge.json"
         ordered = [*files, *([legacy] if legacy.exists() else [])]
 
+        # One host writes two endpoint files — `bridge.json` and
+        # `hosts/bridge-<pid>.json` — so counting files counts hosts twice. The first
+        # version of this check did exactly that and refused a completely normal
+        # single-browser setup: "2 native hosts are running and all of them report
+        # the same profile", with one host alive. Identity is the pid, not the path.
+        ordered = self._unique_by_pid(ordered)
+
         wanted = self._wanted_profile()
         if wanted is None or len(ordered) <= 1:
             # Nothing to disambiguate: zero or one host is unambiguous by definition.
@@ -119,6 +126,30 @@ class BridgeAdapter:
         matching = [path for path in ordered if labelled.get(path) == wanted.casefold()]
         others = [path for path in ordered if labelled.get(path) != wanted.casefold()]
         return [*matching, *others]
+
+    @staticmethod
+    def _unique_by_pid(paths: list[Path]) -> list[Path]:
+        """Collapse endpoint files that describe the same host process.
+
+        Keeps the first file for each pid, preserving the order already computed. A
+        file whose pid cannot be read is kept as-is: dropping it would hide a live
+        host behind a malformed record.
+        """
+
+        seen: set[int] = set()
+        unique: list[Path] = []
+        for path in paths:
+            try:
+                info = json.loads(path.read_text(encoding="utf-8"))
+                pid = int(info["pid"])
+            except (OSError, ValueError, KeyError, TypeError):
+                unique.append(path)
+                continue
+            if pid in seen:
+                continue
+            seen.add(pid)
+            unique.append(path)
+        return unique
 
     @staticmethod
     def _read_profiles(paths: list[Path]) -> dict[Path, str | None]:
