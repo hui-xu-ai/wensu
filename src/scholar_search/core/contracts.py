@@ -132,6 +132,35 @@ class SearchQuery:
             raise ValueError("min_impact_factor must be >= 0")
 
 
+# One vocabulary for document type, shared by every channel.
+#
+# Each site names the same thing differently: CNKI calls a journal paper `journal`,
+# Web of Science calls it `article`, and WoS also has `proceedings` where CNKI says
+# `conference`. Comparing `doc_type` across channels was therefore comparing words,
+# not concepts. The channel's own value is preserved; this mapping adds a second
+# field so a caller can filter uniformly without knowing which site answered.
+DOC_TYPE_UNIFIED = {
+    "journal": "article",
+    "article": "article",
+    "review": "review",
+    "proceedings": "conference",
+    "conference": "conference",
+    "thesis": "thesis",
+    "dissertation": "thesis",
+    "book": "book",
+    "newspaper": "newspaper",
+    "patent": "patent",
+}
+
+
+def unify_doc_type(value: str | None) -> str | None:
+    """Map a channel's document type onto the shared vocabulary."""
+
+    if value is None:
+        return None
+    return DOC_TYPE_UNIFIED.get(value.strip().lower(), "other")
+
+
 @dataclass(slots=True)
 class Record:
     """A bibliographic record. Field names are part of the public schema."""
@@ -177,6 +206,10 @@ class Record:
             "url": self.url,
             "fetched_at": self.fetched_at.isoformat() if self.fetched_at else None,
             "doc_type": self.doc_type,
+            # The channel's own vocabulary is kept above; this is the cross-channel
+            # one. A caller comparing `doc_type` across channels would otherwise be
+            # comparing "journal" with "article" — the same thing under two names.
+            "doc_type_unified": unify_doc_type(self.doc_type),
         }
 
 

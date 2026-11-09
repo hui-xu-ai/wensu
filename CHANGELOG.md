@@ -4,6 +4,40 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.14] - 2026-11-09
+
+### Added — a shared document-type vocabulary, and a report of what was filtered
+
+- **`doc_type_unified`** on every record. Each site names the same thing differently:
+  CNKI says `journal`, Web of Science says `article` and `proceedings`. Comparing `doc_type`
+  across channels was comparing words, not concepts. The channel's own value is kept, and this
+  second field maps it onto `article` / `review` / `conference` / `thesis` / `book` /
+  `newspaper` / `patent` / `other`.
+- **`filters`** on any response where a local filter was requested:
+
+  ```json
+  {"year_from": 2026, "year_scope": "page", "min_impact_factor": 5.0,
+   "impact_factor_drops_unrated": true, "dropped": {"year": 49}}
+  ```
+
+  A caller seeing fewer records than `total` had no way to tell whether the site had fewer,
+  the year filter removed them, or an impact-factor threshold did — all three look like a
+  shorter list. Only filters that were actually requested appear, so an absent key means
+  "not applied" rather than "applied and removed nothing".
+
+### Fixed — the CLI and the MCP tool build the same payload
+
+`cli.py` built its own response dict while `server.py` built another. That has now cost two
+fields in a row — `dropped_year`, then `filters` — because each fix went to whichever surface
+the test happened to hit. The CLI calls the same function.
+
+### Note
+
+- **Left alone deliberately**: `page_count` (F2) already appears on every response, with `null`
+  when the channel has no reliable page number — verified on both channels, so there was nothing
+  to change. `export` accepting a result handle (D5) and Web of Science `detail` parsing are new
+  features rather than defects, and the second needs a real detail-page capture to build against.
+
 ## [0.12.13] - 2026-11-09
 
 ### Fixed — CNKI expert search opened the wrong tab

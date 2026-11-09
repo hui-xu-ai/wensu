@@ -350,6 +350,9 @@ def _page_from(payload: dict[str, Any]) -> SearchPage:
 
 def _record_from(payload: dict[str, Any]) -> Record:
     data = dict(payload)
+    # Derived from `doc_type` when the record was serialised; not a constructor
+    # field, so it must be dropped before rebuilding.
+    data.pop("doc_type_unified", None)
     fetched = data.get("fetched_at")
     if isinstance(fetched, str):
         data["fetched_at"] = datetime.fromisoformat(fetched)

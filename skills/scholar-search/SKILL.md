@@ -143,7 +143,41 @@ WoS 记录自带 `impact_factor`（JCR 当年值，可能为 `null`——该刊�
 
 - `page` 为 `null` 表示该渠道这一页没有可靠的页码（WoS 记录流里不带页码），**不要当成第 0 页**。
 - 默认不含摘要。需要时把 `url` 交给 `detail`，它**自动从域名判断渠道**。
-- 两个渠道的 `doc_type` 词表不同：CNKI 是 `journal`/`thesis`/`conference`，WoS 是 `article`/`review`/`proceedings`。
+
+### 跨渠道比较用 `doc_type_unified`
+
+`doc_type` 是各站点自己的词表：CNKI 说 `journal`，WoS 说 `article`、`proceedings`。直接比较等于比较
+措辞而不是概念。**要跨渠道筛选用 `doc_type_unified`**：
+
+| 值 | 含义 |
+|---|---|
+| `article` | 期刊论文（CNKI 的 `journal` 归到这里）|
+| `review` | 综述 |
+| `conference` | 会议论文（WoS 的 `proceedings` 归到这里）|
+| `thesis` | 学位论文 |
+| `book` / `newspaper` / `patent` | 图书 / 报纸 / 专利 |
+| `other` | 渠道给了类型但不在词表里 |
+
+### `filters`：这次到底筛掉了什么
+
+请求里带了任何本地过滤器时，响应会多一个 `filters`：
+
+```json
+{
+  "filters": {
+    "year_from": 2026, "year_to": null, "year_scope": "page",
+    "min_impact_factor": 5.0, "impact_factor_drops_unrated": true,
+    "sort_by": "citations",
+    "dropped": { "year": 49 }
+  }
+}
+```
+
+- **没出现的键 = 该过滤器没生效**，而不是「生效了但没筛掉东西」；
+- `dropped.year` 是被年份筛掉的条数，和 `dropped_year` 同义；
+- `impact_factor_drops_unrated: true` 提醒：没有 JCR 指标的期刊会被**丢弃**，召回因此降低。
+
+`total` 永远是**站点侧**命中数，`records` 是过滤后的结果。两者不一致是正常的。
 
 ## 详情与导出
 

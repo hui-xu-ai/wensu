@@ -14,13 +14,20 @@ from .selectors import SEARCH
 _TOTAL = re.compile(r"([\d,]+)")
 _PAGE = re.compile(r"(\d+)\s*/\s*(\d+)")
 
-# How to tell a search that matched nothing from a capture that failed.
+# How CNKI says a query matched nothing.
 #
-# With zero results the page does not carry a result grid, the plan's readiness wait
-# times out, and only the page itself can say whether the query matched nothing.
-# Matching the presence of a search form would be wrong here too: every CNKI search
-# page has one, successful searches included.
+# Unlike Web of Science, CNKI never changes the URL: the click runs in place and the
+# results module re-renders. So there is no route to compare and the page itself is
+# the only evidence. A zero-result search renders
+#   <div id="briefBox"><p class="no-content">抱歉，暂无数据，请稍后重试。</p></div>
+# in place of the result grid.
+#
+# This channel's empty detection is deliberately independent of the Web of Science
+# one — that channel compares URLs, this one reads text. Sharing either mechanism
+# would mean a change for one site silently altering the other; the two were kept
+# separate after exactly that kind of coupling broke both.
 EMPTY_MARKERS = (
+    "抱歉，暂无数据",
     "抱歉，没有找到",
     "没有找到与",
     "检索结果：0",

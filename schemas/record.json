@@ -22,7 +22,15 @@
     "downloads": { "type": ["integer", "null"], "minimum": 0 },
     "impact_factor": { "type": ["number", "null"] },
     "url": { "type": ["string", "null"] },
-    "doc_type": { "type": ["string", "null"] },
+    "doc_type": {
+      "type": ["string", "null"],
+      "description": "The channel's own document type, unchanged: CNKI says journal/thesis, Web of Science says article/review/proceedings."
+    },
+    "doc_type_unified": {
+      "type": ["string", "null"],
+      "enum": ["article", "review", "conference", "thesis", "book", "newspaper", "patent", "other", null],
+      "description": "The same value mapped onto a shared vocabulary, safe to filter on across channels. Prefer this over doc_type when combining results from both."
+    },
     "fetched_at": { "type": ["string", "null"], "format": "date-time" }
   }
 }

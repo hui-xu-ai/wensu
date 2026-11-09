@@ -145,22 +145,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                 record = service.detail(args.url, channel=resolved)
                 print(json.dumps(record.to_dict(), ensure_ascii=False, indent=2))
                 return 0
-            page = service.search(
-                SearchQuery(
-                    text=args.query,
-                    channel=args.channel,
-                    sort=args.sort,
-                    page=args.page,
-                    year_from=args.year_from,
-                    year_to=args.year_to,
-                    limit=args.limit,
-                    include_abstract=args.abstract,
-                    sort_by=args.sort_by,
-                    min_citations=args.min_citations,
-                    sources_only=tuple(args.sources_only or ()),
-                    min_impact_factor=args.min_impact_factor,
-                )
+            query = SearchQuery(
+                text=args.query,
+                channel=args.channel,
+                sort=args.sort,
+                page=args.page,
+                year_from=args.year_from,
+                year_to=args.year_to,
+                limit=args.limit,
+                include_abstract=args.abstract,
+                sort_by=args.sort_by,
+                min_citations=args.min_citations,
+                sources_only=tuple(args.sources_only or ()),
+                min_impact_factor=args.min_impact_factor,
             )
+            page = service.search(query)
         except RiskBlocked as error:
             print(json.dumps(error.to_payload(), ensure_ascii=False), file=sys.stderr)
             return 3
@@ -175,18 +174,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
 
         if args.format == "json":
-            payload = {
-                "records": [record.to_dict() for record in page.records],
-                "total": page.total,
-                "page": page.page,
-                "page_count": page.page_count,
-                # Same field the MCP tool returns. The CLI used to build its own
-                # payload and silently omitted it, so the one signal that separates
-                # "nothing on this page" from "nothing exists" was missing here.
-                "dropped_year": page.dropped_year,
-                "empty_reason": page.empty_reason,
-            }
-            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            # Built by the same function the MCP tool uses. Writing this payload twice
+            # has now cost two missed fields — `dropped_year`, then `filters` — because
+            # each fix went to whichever surface the test happened to exercise.
+            from .server import _page_payload
+
+            print(
+                json.dumps(
+                    _page_payload(page, query), ensure_ascii=False, indent=2
+                )
+            )
         else:
             print(service.export(page.records, fmt=args.format))
         return 0

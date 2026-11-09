@@ -22,8 +22,43 @@ from .core.export import record_from_payload
 from .core.service import ScholarService
 
 
-def _page_payload(page: Any) -> dict[str, Any]:
-    return {
+def _filters_payload(page: Any, query: SearchQuery) -> dict[str, Any] | None:
+    """What was filtered, and how much it removed.
+
+    A caller seeing fewer records than `total` had no way to tell whether the site
+    had fewer, the year filter removed them, or an impact-factor threshold did —
+    all three look like a smaller list. Only filters that were actually requested
+    appear, so an absent key means "not applied" rather than "applied and empty".
+    """
+
+    applied: dict[str, Any] = {}
+    dropped: dict[str, int] = {}
+    if query.year_from is not None or query.year_to is not None:
+        applied["year_from"] = query.year_from
+        applied["year_to"] = query.year_to
+        # Local, not site-side: it removed records from this page only.
+        applied["year_scope"] = "page"
+        if page.dropped_year:
+            dropped["year"] = page.dropped_year
+    if query.min_citations is not None:
+        applied["min_citations"] = query.min_citations
+    if query.min_impact_factor is not None:
+        applied["min_impact_factor"] = query.min_impact_factor
+        # Channels drop journals with no metric, which lowers recall by design.
+        applied["impact_factor_drops_unrated"] = True
+    if query.sort_by != "none":
+        applied["sort_by"] = query.sort_by
+    if query.sources_only:
+        applied["sources_only"] = list(query.sources_only)
+    if not applied:
+        return None
+    if dropped:
+        applied["dropped"] = dropped
+    return applied
+
+
+def _page_payload(page: Any, query: SearchQuery | None = None) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "records": [record.to_dict() for record in page.records],
         "total": page.total,
         "page": page.page,
@@ -35,6 +70,11 @@ def _page_payload(page: Any) -> dict[str, Any]:
         # an empty page is indistinguishable from a failed capture.
         "empty_reason": page.empty_reason,
     }
+    if query is not None:
+        applied = _filters_payload(page, query)
+        if applied is not None:
+            payload["filters"] = applied
+    return payload
 
 
 def _error_code(error: Exception) -> str:
@@ -140,29 +180,28 @@ def build_server(service: ScholarService) -> FastMCP:
         which lowers recall by design.
         """
         before = _quota(service)
-        try:
-            result_page = service.search(
-                SearchQuery(
-                    text=query,
-                    channel=channel,
-                    sort=sort,
-                    page=page,
-                    year_from=year_from,
-                    year_to=year_to,
-                    source_types=tuple(source_types or ()),
-                    limit=limit,
-                    include_abstract=include_abstract,
-                    sort_by=sort_by,
+        request = SearchQuery(
+            text=query,
+            channel=channel,
+            sort=sort,
+            page=page,
+            year_from=year_from,
+            year_to=year_to,
+            source_types=tuple(source_types or ()),
+            limit=limit,
+            include_abstract=include_abstract,
+            sort_by=sort_by,
                     min_citations=min_citations,
                     sources_only=tuple(sources_only or ()),
                     min_impact_factor=min_impact_factor,
-                )
             )
+        try:
+            result_page = service.search(request)
         except (RiskBlocked, ScholarSearchError) as error:
             after = _quota(service)
             charged = (before - after) if before is not None and after is not None else 0
             return _payload(error, channel=channel, quota_charged=max(0, charged))
-        payload = _page_payload(result_page)
+        payload = _page_payload(result_page, request)
         after = _quota(service)
         payload["quota_charged"] = (
             max(0, before - after) if before is not None and after is not None else 0

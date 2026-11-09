@@ -31,12 +31,16 @@ _STRING_FIELDS = (
 _LIST_FIELDS = ("authors", "keywords")
 _INT_FIELDS = ("citations", "downloads")
 _FLOAT_FIELDS = ("impact_factor",)
+# Derived at serialisation time from `doc_type`, never stored. Accepted here so a
+# payload that came out of `Record.to_dict()` can go back in.
+_DERIVED_FIELDS = frozenset({"doc_type_unified"})
 _KNOWN = frozenset(
     {
         *_STRING_FIELDS,
         *_LIST_FIELDS,
         *_INT_FIELDS,
         *_FLOAT_FIELDS,
+        *_DERIVED_FIELDS,
         "year",
         "fetched_at",
         "doc_type",
