@@ -4,6 +4,46 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.17] - 2026-11-09
+
+### Fixed — CNKI `detail` was reading the wrong copies of three fields
+
+Found by running the parser against two captured detail pages, then against a replaced capture that
+held the real structure. All three are CNKI detail-page issues (W-08 in the review):
+
+- **The abstract was the preview, not the text.** CNKI ships both in one document:
+
+  ```html
+  <input id="abstract_text" value="…完整摘要，多段落，无省略号…">
+  <span id="ChDivSummary">…可见预览，几百字，以 ... 结尾…</span>
+  ```
+
+  The parser read the span, so every caller received a truncated abstract while the complete one sat
+  a few nodes away. The `value` attribute of a hidden input is invisible to `get_text()` — which is
+  why it was missed. The input is tried first now; the span remains as a fallback. On the captured
+  thesis this changes the abstract from 504 characters ending in `...` to the full multi-paragraph
+  text.
+
+- **`source` reported the whole header for a thesis.** Journal pages read
+  `机械设计 . 2026 ,43 (11) : 21-26`, and the name was taken as everything before ` . `. A thesis
+  header is `东北林业大学 黑龙江省 211工程院校 教育部直属院校` — no separator at all — so the whole
+  string came back as the "journal name", and it looked plausible enough to pass.
+
+- **`year` was null on every thesis.** Those pages carry neither a publication-time row nor a
+  citation line, but their DOI is shaped `d.cnki.<school>.<year>.<seq>`. The year is taken from there
+  as a fallback, and only for the dissertation namespace so a journal DOI cannot override a real
+  date.
+
+- **PDF line-break hyphens are joined.** A word split across a line arrives as `驱-动`. Only CJK-CJK
+  is joined: `F-P-θ` and `Mo-S-O` keep their hyphens.
+
+### Added — a fixture for dissertations
+
+`tests/fixtures/cnki/detail-thesis.html`, desensitised from a real capture. The repository already
+had a journal fixture and no thesis one, which is exactly why the three defects above survived: no
+test ever parsed a dissertation page. Three tests now cover them, and the `source` one was
+mutation-checked — reverting the fix makes it fail with the symptom a user reported.
+
 ## [0.12.16] - 2026-11-09
 
 ### Fixed — a BOM in `quota.json` no longer takes the quota down, and `status` stops lying about it

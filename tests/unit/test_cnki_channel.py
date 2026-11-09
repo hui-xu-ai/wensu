@@ -248,6 +248,81 @@ def test_parse_detail_from_recorded_page() -> None:
     assert record.abstract and "IPMC" in record.abstract
 
 
+THESIS_DETAIL = (
+    Path(__file__).resolve().parents[1] / "fixtures" / "cnki" / "detail-thesis.html"
+)
+
+
+def test_thesis_detail_reports_the_school_alone() -> None:
+    """A dissertation header is not a citation line.
+
+    Journal pages read `机械设计 . 2026 ,43 (11) : 21-26`, and the parser split on
+    ` . ` to get the name. Thesis pages put `东北林业大学 黑龙江省 211工程院校
+    教育部直属院校` in the same node with no separator at all, so the whole string came
+    back as the "journal" — a value that looks plausible and is wrong.
+    """
+
+    html = THESIS_DETAIL.read_text(encoding="utf-8")
+    record = get_channel().parse_detail(html, url="https://kns.cnki.net/x")
+
+    assert record.doc_type == "thesis"
+    assert record.source == "第三合成大学"
+    assert " " not in (record.source or ""), "the header must not leak into the name"
+
+
+def test_thesis_detail_falls_back_to_the_doi_for_the_year() -> None:
+    """Thesis pages carry no publication-time row and no citation line.
+
+    Their DOI is shaped `d.cnki.<school>.<year>.<seq>`, which is where the year has
+    to come from — otherwise the same record reports a year in a search row and null
+    in its detail page, and a caller cannot trust either.
+    """
+
+    html = THESIS_DETAIL.read_text(encoding="utf-8")
+    record = get_channel().parse_detail(html, url="https://kns.cnki.net/x")
+
+    assert record.year == 2024, "the DOI carries the degree year: d.cnki.synth.2024.000029"
+    assert record.doi is not None and "/d.cnki." in record.doi
+    assert record.volume is None and record.issue is None
+
+
+def test_detail_abstract_joins_pdf_line_break_hyphens() -> None:
+    """`驱-动` is a word split by a PDF line break, not a compound.
+
+    Only CJK-CJK is joined: in `F-P-θ` the hyphen is part of the formula.
+    """
+
+    from scholar_search.channels.cnki.v2026_10.parse_detail import _CJK_HYPHEN
+
+    join = lambda text: _CJK_HYPHEN.sub(r"\1\2", text)  # noqa: E731
+    assert join("驱-动的机制") == "驱动的机制"
+    assert join("传-统方法") == "传统方法"
+    assert join("F-P-θ 关系") == "F-P-θ 关系"
+    assert join("Mo-S-O 材料") == "Mo-S-O 材料"
+
+
+def test_detail_prefers_the_full_abstract_over_the_visible_preview() -> None:
+    """CNKI ships two copies of the abstract in the same document.
+
+    `input#abstract_text` holds the complete text in its `value` attribute;
+    `span#ChDivSummary` holds the visible preview, cut short and ending in `...` with
+    a「更多」control beside it. Reading the span gave every caller a truncated
+    abstract while the complete one sat a few nodes away — the value attribute was
+    never inspected because `get_text()` does not look at attributes.
+    """
+
+    html = THESIS_DETAIL.read_text(encoding="utf-8")
+    record = get_channel().parse_detail(html, url="https://kns.cnki.net/x")
+
+    abstract = record.abstract or ""
+    assert abstract, "the abstract must not be empty"
+    assert not abstract.rstrip().endswith("..."), (
+        "the preview copy ends in an ellipsis; the full copy does not"
+    )
+    # The full text is multi-paragraph; the preview is a single cut block.
+    assert "\n" in abstract, "the complete abstract carries paragraph breaks"
+
+
 def test_parse_detail_extracts_print_issue() -> None:
     html = PRINT_FIXTURE.read_text(encoding="utf-8")
     record = get_channel().parse_detail(html, url="https://kns.cnki.net/x")
