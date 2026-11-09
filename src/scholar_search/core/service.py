@@ -262,7 +262,19 @@ class ScholarService:
 
         expression = f"DOI='{doi}'" if target == "cnki" else f'DO=("{doi}")'
         page = self.search(
-            SearchQuery(text=expression, channel=target, limit=1, include_abstract=True)
+            SearchQuery(
+                text=expression,
+                channel=target,
+                limit=1,
+                include_abstract=True,
+                # A DOI identifies one record; appending an unrequested time window
+                # would exclude older papers for no reason. The WoS query builder
+                # adds `PY=(last five years)` whenever no year is given, and the
+                # `detail` contract says a bare DOI works — so the window is widened
+                # here rather than left implicit. 1900 is a floor no real DOI falls
+                # below; it only exists to suppress the default.
+                year_from=1900 if target == "webofscience" else None,
+            )
         )
         if not page.records:
             raise ChannelError(

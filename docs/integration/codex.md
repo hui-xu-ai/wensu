@@ -82,8 +82,11 @@ token 在 `%LOCALAPPDATA%\scholar-search\http-token`。
 - `bridge_ready` 为 `true`（表示至少一个宿主回应 ping，而不只是端点文件存在）；
 - `cooldown_until` 为 `null`。
 
-可用工具只有四个：`search`、`detail`、`export`、`status`。客户端发现的集合必须与
-`schemas/tools.json` 一致；多出或缺失都按安装错误处理。
+可用工具有五个：`search`、`detail`、`detail_many`、`export`、`status`。数量不对按安装错误处理。
+
+**注意**：`schemas/tools.json` 是这个仓库对工具契约的**描述**，实际 `tools/list` 由 FastMCP
+从函数签名自动生成，两者并不完全一致（见 `docs/reviews/wensu-acceptance-2026-11-09.md` 的 A08）。
+以 `tools/list` 的实际返回为准。
 
 运行依赖：`mcp>=1.20`、`beautifulsoup4`、`lxml`、`uvicorn`。没有浏览器侧宿主与扩展时，
 MCP 服务可以启动，但 `search`/`detail` 会返回桥接错误。

@@ -85,6 +85,45 @@ def check_lint() -> tuple[bool, str]:
     return ok, output.splitlines()[-1] if output else ""
 
 
+def check_format() -> tuple[bool, str]:
+    """`ruff format --check`, not only `ruff check`.
+
+    AGENTS.md requires formatting and the gate only ran the linter, so the tree could
+    be lint-clean and still fail `ruff format --check` — which an independent review
+    found it was, on fifteen files.
+    """
+
+    ruff = ROOT / ".venv" / "Scripts" / "ruff.exe"
+    ok, output = _run(
+        [str(ruff), "format", "--check", "--no-cache", "src", "tests", "scripts"]
+    )
+    return ok, output.splitlines()[-1] if output else ""
+
+
+def check_assets() -> tuple[bool, str]:
+    """Every file the extension manifest references is inside the wheel.
+
+    A hand-kept force-include list dropped `content/capture.js` and nothing noticed
+    until a clean install produced an extension the browser could not load. The
+    script walks the manifest instead of trusting that list.
+
+    Builds into a temporary directory rather than looking in `dist/`: the repo's own
+    `dist/` is not always writable here, and a stale wheel left over from an earlier
+    version would be the one checked.
+    """
+
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ok, output = _run([str(Path("uv")), "build", "--out-dir", tmp])
+        if not ok:
+            return False, output.splitlines()[-1] if output else "build failed"
+        ok, output = _run(
+            [_python(), str(ROOT / "scripts" / "check-assets.py"), tmp]
+        )
+    return ok, output.splitlines()[-1] if output else ""
+
+
 def check_types() -> tuple[bool, str]:
     import tempfile
 
@@ -124,9 +163,11 @@ CHECKS = [
     ("versions", "four artefacts share one number", check_versions),
     ("changelog", "the version being released is documented", check_changelog),
     ("tests", "offline suite", check_tests),
-    ("lint", "ruff", check_lint),
+    ("lint", "ruff check", check_lint),
+    ("format", "ruff format --check", check_format),
     ("types", "mypy", check_types),
     ("plans", "every channel plan passes kernel and host validation", check_plans),
+    ("assets", "the wheel holds every file the extension loads", check_assets),
     ("artifacts", "wheel carries both channels", check_artifacts),
 ]
 

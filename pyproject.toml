@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "wensu"
-version = "0.12.30"
+version = "0.12.31"
 description = "文溯 · 文献题录检索 MCP（只读，知网 + Web of Science，含期刊影响因子）"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -65,6 +65,12 @@ packages = ["src/scholar_search"]
 "extension/manifest.json" = "scholar_search/assets/extension/manifest.json"
 "extension/background.js" = "scholar_search/assets/extension/background.js"
 "extension/content/actions.js" = "scholar_search/assets/extension/content/actions.js"
+# `capture.js` was missing here until an independent acceptance run found that a
+# clean install produced an extension whose manifest referenced a file the wheel did
+# not contain. Every machine that had ever run from source already had it, so the
+# omission could not surface locally. `scripts/check-assets.py` now walks the
+# manifest's references instead of trusting this list.
+"extension/content/capture.js" = "scholar_search/assets/extension/content/capture.js"
 "schemas/record.json" = "scholar_search/assets/schemas/record.json"
 "schemas/tools.json" = "scholar_search/assets/schemas/tools.json"
 # The skills travel with the wheel for the same reason: a caller that installs from

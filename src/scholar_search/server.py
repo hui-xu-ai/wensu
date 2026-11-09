@@ -8,7 +8,8 @@ from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 
-from .core.contracts import SearchQuery
+from . import __version__
+from .core.contracts import Record, SearchQuery
 from .core.errors import (
     ActionError,
     BridgeError,
@@ -65,6 +66,33 @@ def _filters_payload(page: Any, query: SearchQuery) -> dict[str, Any] | None:
 # the price of the one just taken.
 _PROJECTION_ALWAYS = frozenset({"url", "quota_charged", "quota_remaining"})
 
+# Valid projection keys, taken from the Record definition rather than from whatever
+# a particular response happened to contain. Deriving them from the result meant a
+# zero-result search reported every field as unknown — the one case where a caller
+# is most likely to be running a small probe.
+_PROJECTION_KEYS = frozenset(Record.__dataclass_fields__) | _PROJECTION_ALWAYS | {
+    "doc_type_unified"
+}
+
+
+def _check_fields(fields: list[str] | None) -> None:
+    """Reject an impossible projection before anything is spent.
+
+    Called before the search, not after: a typo used to be discovered once the page
+    had been fetched, parsed and cached, so a cold request paid for a query whose
+    result it then discarded.
+    """
+
+    if not fields:
+        return
+    wanted = {name.strip() for name in fields if name.strip()}
+    unknown = wanted - _PROJECTION_KEYS
+    if unknown:
+        raise ValueError(
+            f"unknown field(s): {', '.join(sorted(unknown))}. "
+            f"available: {', '.join(sorted(_PROJECTION_KEYS))}"
+        )
+
 
 def _project(records: list[dict[str, Any]], fields: list[str] | None) -> list[dict[str, Any]]:
     """Keep only the requested fields, always keeping enough to identify a record.
@@ -72,10 +100,6 @@ def _project(records: list[dict[str, Any]], fields: list[str] | None) -> list[di
     `include_abstract` on 25 rows is tens of kilobytes, and most callers want a
     title, a year and a DOI. Projection is applied after serialisation so the
     derived `doc_type_unified` can be requested like any other field.
-
-    An unknown key raises instead of being ignored: a caller that asked for
-    `["titel", "year"]` and received an empty record would have no way to notice the
-    typo, and the empty result looks exactly like a channel with no metadata.
     """
 
     if not fields:
@@ -83,13 +107,7 @@ def _project(records: list[dict[str, Any]], fields: list[str] | None) -> list[di
     wanted = {name.strip() for name in fields if name.strip()}
     if not wanted:
         return records
-    available = set(records[0]) if records else set()
-    unknown = wanted - available
-    if unknown:
-        raise ValueError(
-            f"unknown field(s): {', '.join(sorted(unknown))}. "
-            f"available: {', '.join(sorted(available))}"
-        )
+    _check_fields(fields)
     kept = wanted | _PROJECTION_ALWAYS
     return [{k: v for k, v in record.items() if k in kept} for record in records]
 
@@ -240,7 +258,11 @@ def _quota(service: ScholarService) -> int | None:
 
 
 def build_server(service: ScholarService) -> FastMCP:
+    # FastMCP takes no `version` argument, and the handshake reported the SDK's
+    # version (`1.30.0`) while `status.version` reported 0.12.x — two different
+    # components answering the same question. The field lives on the inner Server.
     mcp = FastMCP("wensu")
+    mcp._mcp_server.version = __version__
 
     @mcp.tool()
     def search(
@@ -317,6 +339,12 @@ def build_server(service: ScholarService) -> FastMCP:
         effective_local_sort = local_sort if local_sort is not None else sort_by
 
         before = _quota(service)
+        # Both entry points validate before anything is spent: a typo in `fields` is
+        # a local mistake and used to cost a full cold query before being noticed.
+        try:
+            _check_fields(fields)
+        except ValueError as error:
+            return _payload(error)
         request = SearchQuery(
             text=query,
             channel=channel,
@@ -434,25 +462,52 @@ def build_server(service: ScholarService) -> FastMCP:
         A failure on one record does not abandon the rest — the response is
         `{"results": [{"url", "ok", "record"|"error"}], "ok_count", "failed_count"}`,
         so a caller can retry just the ones that failed.
+
+        **A risk block is the exception**: it stops the batch. `detail` returns a
+        `status: "blocked"` payload rather than raising, so this loop used to file it
+        under `ok: true` and carry on — reporting a batch as successful while the
+        site was asking the caller to stop. AGENTS.md requires stopping on a block,
+        and a batch that keeps visiting after one is exactly the behaviour that rule
+        exists to prevent.
         """
 
         results: list[dict[str, Any]] = []
+        blocked: dict[str, Any] | None = None
+        attempted = 0
         for url in urls:
+            attempted += 1
             try:
                 record = detail(url, channel, include_abstract, fields)
-            except (RiskBlocked, ScholarSearchError) as error:
+            except RiskBlocked as error:
+                blocked = _payload(error)
+                results.append({"url": url, "ok": False, "error": blocked})
+                break
+            except ScholarSearchError as error:
                 results.append({"url": url, "ok": False, "error": _payload(error)})
                 continue
+            if record.get("status") == "blocked":
+                blocked = record
+                results.append({"url": url, "ok": False, "error": record})
+                break
             if record.get("status") == "error":
                 results.append({"url": url, "ok": False, "error": record})
             else:
                 results.append({"url": url, "ok": True, "record": record})
 
-        return {
+        response: dict[str, Any] = {
             "results": results,
             "ok_count": sum(1 for item in results if item["ok"]),
             "failed_count": sum(1 for item in results if not item["ok"]),
+            "attempted": attempted,
+            "requested": len(urls),
         }
+        if blocked is not None:
+            # Surfaced at the top level, not only inside the per-item error: a caller
+            # that reads `ok_count` alone must still see that the run was stopped.
+            response["status"] = "blocked"
+            response["blocked"] = blocked
+            response["stopped_early"] = attempted < len(urls)
+        return response
 
     @mcp.tool()
     def export(
@@ -480,7 +535,11 @@ def build_server(service: ScholarService) -> FastMCP:
             if out_path:
                 target = Path(out_path).expanduser()
                 target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(text, encoding="utf-8")
+                # `newline=""` keeps the text byte-identical to what `text` holds.
+                # Without it Python translates every "\n" to "\r\n" on Windows, and
+                # the `bytes` field then reported 2004 for a 2054-byte file.
+                with target.open("w", encoding="utf-8", newline="") as handle:
+                    handle.write(text)
                 # The body is deliberately omitted: it is on disk, and returning it
                 # anyway would defeat the point of writing it there.
                 return {
@@ -488,7 +547,7 @@ def build_server(service: ScholarService) -> FastMCP:
                     "path": str(target.resolve()),
                     "format": format,
                     "records": len(typed),
-                    "bytes": len(text.encode("utf-8")),
+                    "bytes": target.stat().st_size,
                     "include_abstract": include_abstract,
                 }
             return {"format": format, "text": text, "records": len(typed)}

@@ -12,8 +12,11 @@
 
 | 装什么 | 版本在哪看 | 当前 |
 |---|---|---|
-| DSH bundle（本目录） | npm / 插件市场 | **0.12.14** |
-| `wensu` 命令本体（Python 包） | PyPI | **0.12.14**（`pip install -U wensu`）|
+| DSH bundle（本目录） | npm / 插件市场 | **见当前版本** |
+| `wensu` 命令本体（Python 包） | PyPI | **同上**（`pip install -U wensu`）|
+
+两个发行物同号（ADR 0013），`scripts/check-versions.py` 会校验。这里不写死数字——上一版
+写死在 README 里，发布几次之后就与包版本脱节了。
 
 两个发行物同号，看到不一致就是装错了批次。bundle 只负责把 MCP 客户端接进 DSH，不含服务端
 代码，所以它内容很少变——版本号跟着 Python 包走，只是为了让人一眼能对上。

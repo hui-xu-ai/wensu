@@ -128,6 +128,15 @@ def _year(record: dict[str, Any]) -> int | None:
 
 
 def _pages(record: dict[str, Any]) -> str | None:
+    """The page range, or None.
+
+    `page_count` is a *total number of pages* — a different quantity that happens to
+    look like a single page number. Falling back to it produced `pages: "9"` for a
+    nine-page article, which a citation formatter then renders as "page 9". A record
+    with no range evidence gets None: an absent value is recoverable, a wrong one is
+    not.
+    """
+
     pub = _pub(record)
     begin = _as_text(pub.get("begin"))
     end = _as_text(pub.get("end"))
@@ -135,7 +144,7 @@ def _pages(record: dict[str, Any]) -> str | None:
         return begin if begin == end else f"{begin}-{end}"
     if begin:
         return begin
-    return _as_text(pub.get("page_count"))
+    return None
 
 
 def _abstract(record: dict[str, Any]) -> str | None:

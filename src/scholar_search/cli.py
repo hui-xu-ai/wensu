@@ -265,7 +265,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.out:
             target = Path(args.out).expanduser()
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(text, encoding="utf-8")
+            # newline="": no CRLF translation, so the size matches the text.
+            with target.open("w", encoding="utf-8", newline="") as handle:
+                handle.write(text)
             print(
                 json.dumps(
                     {
@@ -273,7 +275,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "path": str(target.resolve()),
                         "format": args.format,
                         "records": len(typed),
-                        "bytes": len(text.encode("utf-8")),
+                        "bytes": target.stat().st_size,
                         "include_abstract": args.abstract,
                     },
                     ensure_ascii=False,
@@ -377,6 +379,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                     )
                 )
                 return 0
+            # Validate the projection before querying. `_page_payload` raises for an
+            # unknown key, but it runs after the search, outside this try block — so a
+            # typo produced a traceback and, on a cold query, a spent request.
+            from .server import _check_fields
+
+            _check_fields(args.fields)
             query = SearchQuery(
                 text=args.query,
                 channel=args.channel,
