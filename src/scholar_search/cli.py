@@ -102,6 +102,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--target", default=None, help="where to copy the assets (default: <home>/browser)"
     )
     setup.add_argument("--force", action="store_true", help="replace existing asset directories")
+    setup.add_argument(
+        "--reset-browser",
+        action="store_true",
+        help="also replace the recorded browser profile (this drops an adopted one)",
+    )
     setup.add_argument("--python", default=None, help="interpreter the native host should run")
     setup.add_argument("--no-host", action="store_true", help="only copy the assets")
     setup.add_argument(
@@ -224,11 +229,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             # Never overwrite a recorded profile. A user who ran `browser adopt`
             # chose that directory on purpose; replacing it with a fresh
             # `profiles/<name>` silently moves the tool away from the window they
-            # were using. Only create one when nothing is recorded yet.
+            # were using.
+            #
+            # `--force` used to bypass this, which made the documented upgrade
+            # command (`setup --force`) quietly swap a research profile for a blank
+            # one. Refreshing copied assets and replacing the browser configuration
+            # are different intentions and now have different flags.
             existing = browser_cfg.load()
-            if existing is not None and not args.force:
+            if existing is not None and not args.reset_browser:
                 print(f"browser profile: {existing.profile_dir} (already recorded, kept)")
-                print("  use --force to replace it, or `wensu browser adopt <path>`")
+                print("  use --reset-browser to replace it, or `wensu browser adopt <path>`")
                 return code
             try:
                 made = browser_cfg.create(

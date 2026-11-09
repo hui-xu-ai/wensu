@@ -164,6 +164,10 @@ wensu setup --force
 - 扩展**通常不用重装**：Python 侧改动不影响扩展；只有 `extension/` 里的 JS 或
   `manifest.json` 变了才需要重新加载扩展。
 - 原生宿主在升级后要重跑 `wensu setup --force`（它负责写清单、注册表项和低完整性标签）。
+- **`--force` 只覆盖复制出去的资源，不动已记录的浏览器配置**。如果你用
+  `wensu browser adopt` 指定过专用 profile，升级后它仍然有效。要连浏览器配置一起重置，
+  用 `wensu setup --force --reset-browser`——这会把 `browser.json` 换成默认的
+  `profiles/edge`，原来的窗口和已经装好的扩展不会跟着迁移。
 
 完整流程、目录布局与回滚见 [docs/operations.md](docs/operations.md)。
 

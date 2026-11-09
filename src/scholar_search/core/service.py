@@ -37,6 +37,40 @@ from .registry import ChannelRegistry, ChannelSpec
 from .risk import RiskGuard
 
 
+class _BrowserTransaction:
+    """The browser lock plus the adapter that lock protects.
+
+    A context manager rather than a bare `interprocess_lock` call so the two things
+    that must move together — the lock, and the host the transaction is pinned to —
+    are acquired and released in one place.
+    """
+
+    __slots__ = ("_lock", "_service")
+
+    def __init__(self, service: ScholarService) -> None:
+        self._service = service
+        self._lock = interprocess_lock(service._policy.state_dir / "browser.lock", timeout_s=180.0)
+
+    def __enter__(self) -> None:
+        self._lock.__enter__()
+        self._service._transaction_depth += 1
+        try:
+            # Fail here, not halfway through: a profile that is explicitly requested
+            # but not running must not silently fall back to another browser.
+            self._service._pin_transaction_host()
+        except BaseException:
+            self._service._transaction_depth -= 1
+            self._lock.__exit__(None, None, None)
+            raise
+        return None
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        self._service._transaction_depth -= 1
+        if self._service._transaction_depth == 0:
+            self._service._close_pinned()
+        self._lock.__exit__(exc_type, exc, tb)  # type: ignore[arg-type]
+
+
 class ScholarService:
     def __init__(
         self,
@@ -61,6 +95,10 @@ class ScholarService:
         # still takes effect — binding it at construction time froze the reference.
         self._bridge_probe = bridge_probe or (lambda: BridgeAdapter.probe())
         self._risk = risk
+        # Pinned for the duration of a browser transaction so a search cannot submit
+        # to one host and read from another. Depth guards re-entry.
+        self._pinned_adapter: Any = None
+        self._transaction_depth = 0
 
     def _ensure_ready(self) -> None:
         if self._risk is not None:
@@ -76,12 +114,17 @@ class ScholarService:
         planner's: that one is taken inside every `_run`, and re-entering it would
         deadlock. This is a separate file for that reason.
 
+        The transaction also pins one adapter. Without that, each `_run` re-discovers
+        a host, and a browser that dies mid-search is simply replaced by whichever
+        other host answers — the search then returns another profile's page. Pinning
+        means the failure surfaces as a bridge error instead.
+
         The cost is contention, not latency: a lone request holds this lock for
         exactly as long as it already held the browser. A second request waits, which
         is what "the policy layer serialises network actions" already promised.
         """
 
-        return interprocess_lock(self._policy.state_dir / "browser.lock", timeout_s=180.0)
+        return _BrowserTransaction(self)
 
     # -- public surface -------------------------------------------------
 
@@ -423,15 +466,6 @@ class ScholarService:
         return None
 
     def _ensure_bridge(self) -> None:
-        """Fail before spending quota if no extension is listening."""
-
-        if self._bridge_probe():
-            return
-        raise ActionError(
-            "no live native host found: the browser extension is not connected",
-            verb="goto",
-            code="bridge.not_ready",
-        )
         """Fail before spending quota if no extension is listening.
 
         The reservation happens inside `planner.run`, so a dead bridge used to cost
@@ -449,7 +483,12 @@ class ScholarService:
 
     def _run(self, plan: Any, spec: ChannelSpec) -> tuple[ActionOutcome, ...]:
         self._ensure_bridge()
-        adapter = self._adapter_factory()
+        # An adapter created here would re-discover a host for every plan. Inside one
+        # search that is two discoveries, and if the browser picked at submit time
+        # disappears before the read, the second discovery happily selects a
+        # *different* profile — so the search completes with another browser's page.
+        # A review reproduced exactly that. The transaction pins one adapter instead.
+        adapter = self._transaction_adapter()
         planner = self._planner_factory(adapter)
         if self._risk is None:
             self._risk = getattr(planner, "risk", None)
@@ -465,7 +504,9 @@ class ScholarService:
                 self._policy.refund()
             raise
         finally:
-            adapter.close()
+            # Closing is the transaction's job when it owns the adapter: the next
+            # plan in the same search has to reach the same host.
+            self._release_transaction_adapter()
         for outcome in outcomes:
             if not outcome.ok:
                 raise ActionError(
@@ -474,6 +515,47 @@ class ScholarService:
                     code=outcome.error or "action.failed",
                 )
         return outcomes
+
+    def _pin_transaction_host(self) -> None:
+        """Choose the host for this transaction, once, and refuse if it is ambiguous.
+
+        Runs at the start of the transaction instead of at each `_run`. A host that
+        disappears later is an error, not an invitation to pick another one: the
+        caller asked for a specific browser, and answering with a different one is
+        worse than answering with nothing.
+        """
+
+        adapter = self._adapter_factory()
+        self._pinned_adapter = adapter
+        # `BridgeAdapter` raises at this point when candidates cannot be told apart.
+        probe = getattr(adapter, "pin", None)
+        if callable(probe):
+            probe()
+
+    def _transaction_adapter(self) -> Any:
+        """The adapter for this browser transaction, created once.
+
+        Outside a transaction (`_transaction_depth == 0`) this behaves as before:
+        one adapter per plan, closed by that plan.
+        """
+
+        if self._transaction_depth > 0:
+            if self._pinned_adapter is None:
+                self._pinned_adapter = self._adapter_factory()
+            return self._pinned_adapter
+        self._pinned_adapter = self._adapter_factory()
+        return self._pinned_adapter
+
+    def _release_transaction_adapter(self) -> None:
+        if self._transaction_depth > 0:
+            return
+        self._close_pinned()
+
+    def _close_pinned(self) -> None:
+        if self._pinned_adapter is not None:
+            with suppress(Exception):
+                self._pinned_adapter.close()
+            self._pinned_adapter = None
 
     def _looks_empty(self, impl: Channel, spec: ChannelSpec) -> bool:
         """Ask the page whether the query matched nothing.

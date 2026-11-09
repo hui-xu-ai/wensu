@@ -16,7 +16,7 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime
 from typing import Any
 
-from .contracts import Record
+from .contracts import Record, unify_doc_type
 
 _STRING_FIELDS = (
     "channel",
@@ -49,27 +49,32 @@ _KNOWN = frozenset(
     }
 )
 
+# Keyed by the **unified** vocabulary, not by any one channel's words. These maps
+# used to hold only CNKI's values (`journal`, `conference`, …), so every Web of
+# Science record — whose parser emits `article`, `review`, `proceedings` — exported as
+# `TY  - GEN`. A journal article, a review and a conference paper all arrived in
+# Zotero as "Generic".
 _RIS_TYPES = {
-    "journal": "JOUR",
+    "article": "JOUR",
+    "review": "JOUR",
     "thesis": "THES",
     "conference": "CPAPER",
     "newspaper": "NEWS",
     "book": "BOOK",
     "patent": "PAT",
     "standard": "STAND",
-    "yearbook": "BOOK",
     "achievement": "GEN",
 }
 
 _ENDNOTE_TYPES = {
-    "journal": "Journal Article",
+    "article": "Journal Article",
+    "review": "Journal Article",
     "thesis": "Thesis",
     "conference": "Conference Paper",
     "newspaper": "Newspaper Article",
     "book": "Book",
     "patent": "Patent",
     "standard": "Generic",
-    "yearbook": "Book",
     "achievement": "Generic",
 }
 
@@ -169,7 +174,14 @@ def _clean(value: str | None) -> str:
 
 
 def _type_token(record: Record) -> tuple[str, str]:
-    key = (record.doc_type or "").casefold()
+    """Map a record's type to RIS and EndNote vocabularies.
+
+    The type is unified first, so a channel that says `journal` and one that says
+    `article` reach the same entry. Without that step the export silently depended on
+    which channel produced the record.
+    """
+
+    key = unify_doc_type(record.doc_type) or ""
     return _RIS_TYPES.get(key, "GEN"), _ENDNOTE_TYPES.get(key, "Generic")
 
 

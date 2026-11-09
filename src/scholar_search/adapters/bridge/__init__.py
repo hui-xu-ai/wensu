@@ -28,7 +28,7 @@ from typing import Any
 
 from ...core.config import host_runtime_dir
 from ...core.contracts import Action, ActionOutcome
-from ...core.errors import BridgeAmbiguous
+from ...core.errors import BridgeAmbiguous, BridgeError
 
 PING_TIMEOUT_S = 0.6
 
@@ -105,24 +105,13 @@ class BridgeAdapter:
         # the same profile", with one host alive. Identity is the pid, not the path.
         ordered = self._unique_by_pid(ordered)
 
+        # Ordering only. Ambiguity is decided in `pin`, after liveness is known: a
+        # registry entry left behind by a crashed host is a file, not a browser, and
+        # judging from files refused setups that had exactly one reachable host.
         wanted = self._wanted_profile()
-        if wanted is None or len(ordered) <= 1:
-            # Nothing to disambiguate: zero or one host is unambiguous by definition.
+        if wanted is None:
             return ordered
-
         labelled = self._read_profiles(ordered)
-        if len(labelled) == len(ordered) and len(set(labelled.values())) == 1:
-            # Every host claims the same profile. That is the shared-config case, and
-            # it means the label carries no information — with more than one host,
-            # taking any of them is a coin flip.
-            raise BridgeAmbiguous(
-                f"{len(ordered)} native hosts are running and all of them report the "
-                f"same profile ({next(iter(labelled.values()))}). The host cannot tell "
-                "which browser it belongs to, so this request could read a different "
-                "profile's page. Close all but one browser, or set WENSU_PROFILE and "
-                "run one host per profile."
-            )
-
         matching = [path for path in ordered if labelled.get(path) == wanted.casefold()]
         others = [path for path in ordered if labelled.get(path) != wanted.casefold()]
         return [*matching, *others]
@@ -182,6 +171,59 @@ class BridgeAdapter:
         except (OSError, ValueError):
             return None
         return None
+
+    def pin(self) -> tuple[int, str]:
+        """Choose and keep the endpoint this adapter will use.
+
+        Called at the start of a browser transaction so the choice is made once.
+
+        Liveness is checked **before** ambiguity. Judging from endpoint files alone
+        counted a host that had already crashed: one live browser plus one stale
+        registry entry raised "2 native hosts are running" while only one could be
+        reached, and the caller was told to close a browser that was not open. A stale
+        file is not a running host.
+        """
+
+        wanted = self._wanted_profile()
+        live: list[tuple[Path, tuple[int, str]]] = []
+        for path in self._candidates():
+            found = self._ping(path)
+            if found is not None:
+                live.append((path, found))
+
+        if not live:
+            if wanted is not None:
+                raise BridgeError(
+                    f"no native host is serving the profile {wanted!r}. Start it with "
+                    "`wensu browser start`, or unset WENSU_PROFILE to use any live host."
+                )
+            raise BridgeError("no live native host found")
+
+        if len(live) > 1:
+            labels = self._read_profiles([path for path, _ in live])
+            distinct = {value for value in labels.values() if value is not None}
+            if len(distinct) <= 1:
+                raise BridgeAmbiguous(
+                    f"{len(live)} native hosts are live and they cannot be told apart "
+                    f"({next(iter(distinct)) if distinct else 'no profile reported'}). "
+                    "A host cannot say which browser launched it, so this request "
+                    "could read a different profile's page. Close all but one "
+                    "browser, or run one host per profile and set WENSU_PROFILE."
+                )
+
+        for path, found in live:
+            if wanted is not None:
+                labelled = self._read_profiles([path]).get(path)
+                if labelled is not None and labelled != wanted.casefold():
+                    continue
+            self._endpoint = path
+            self._port, self._token = found
+            return found
+
+        raise BridgeError(
+            f"no live native host is serving the profile {wanted!r}. Start it with "
+            "`wensu browser start`, or unset WENSU_PROFILE to use any live host."
+        )
 
     @classmethod
     def probe(cls) -> bool:

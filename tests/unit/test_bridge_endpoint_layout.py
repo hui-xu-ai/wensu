@@ -69,7 +69,11 @@ def test_one_host_writing_two_files_is_one_candidate(
 def test_two_real_hosts_with_the_same_label_are_still_ambiguous(
     runtime: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Deduplication must not go so far that it hides a genuine second host."""
+    """Deduplication must not go so far that it hides a genuine second host.
+
+    Both must be *live* for this to be an ambiguity: the check runs after liveness
+    now, so a crashed host is simply not a candidate.
+    """
 
     from scholar_search.core.errors import BridgeAmbiguous
 
@@ -77,9 +81,12 @@ def test_two_real_hosts_with_the_same_label_are_still_ambiguous(
         payload = {"port": port, "token": "t", "pid": pid, "profile_dir": r"E:\ProfileA"}
         (runtime / "hosts" / f"bridge-{pid}.json").write_text(json.dumps(payload), encoding="utf-8")
     monkeypatch.setenv("WENSU_PROFILE", r"E:\ProfileA")
+    monkeypatch.setattr(
+        BridgeAdapter, "_ping", lambda self, path: (json.loads(path.read_text())["port"], "t")
+    )
 
     with pytest.raises(BridgeAmbiguous):
-        BridgeAdapter()._candidates()
+        BridgeAdapter().pin()
 
 
 def test_a_host_without_a_readable_pid_is_still_a_candidate(runtime: Path) -> None:

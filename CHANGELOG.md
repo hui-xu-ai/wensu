@@ -4,6 +4,67 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.34] - 2026-11-09
+
+Fourth review (`docs/reviews/wensu-retest-0.12.33-2026-11-09.md`), run against the **installed**
+0.12.33 wheel rather than the source tree. Item 1 is the P1.
+
+### Fixed — a transaction no longer switches browsers halfway through (item 1)
+
+The 0.12.33 lock stopped two requests from interleaving, but each `_run` built a fresh
+adapter and re-discovered a host. So a search could submit to browser A, A could go away,
+and the read would find B and return **B's page** — cached under A's query key. Setting
+`WENSU_PROFILE` did not help: it only ordered candidates, and an unmatched profile fell
+back to any live host.
+
+The transaction now pins one adapter, and picking a host happens once, at the start. If
+the requested profile is not running, the call fails with `BridgeError` naming the
+profile and the command to start it — substituting another browser is exactly the bug.
+
+### Fixed — liveness is checked before ambiguity (item 2)
+
+Ambiguity was decided from endpoint files, so a registry entry left by a crashed host
+made a healthy single-browser setup report "2 native hosts are running" — and the caller
+was told to close a browser that had already exited. One host was never even pinged.
+
+`pin()` now pings first and judges only live hosts. A stale file is not a browser.
+
+### Fixed — WoS document types survive RIS and EndNote export (item 3)
+
+The type maps were keyed by CNKI's vocabulary (`journal`, `conference`), so every Web of
+Science record exported as `TY  - GEN` / `%0 Generic`:
+
+| page type | before | after |
+|---|---|---|
+| Article | `GEN` | `JOUR` |
+| Review | `GEN` | `JOUR` |
+| Proceedings Paper | `GEN` | `CPAPER` |
+
+The type is unified before mapping, so `journal` and `article` — the same thing in two
+channels' words — reach the same entry. An unknown type still exports as generic; it just
+no longer claims to be one.
+
+### Fixed — `setup --force` no longer replaces an adopted profile (item 4)
+
+`--force` refreshed copied assets **and** bypassed the "keep the recorded profile" branch,
+so the documented upgrade command silently swapped an adopted research profile for a blank
+`profiles/edge`. Refreshing assets and resetting browser configuration are different
+intentions and now have different flags: `--force` for assets, `--reset-browser` for the
+profile. The README says so.
+
+### Also
+
+Removed a duplicated `_ensure_bridge` body left behind by an editing mistake — the second
+copy shadowed the first and dropped its docstring.
+
+### Verified
+
+```
+pytest                236 passed
+ruff check / format   clean
+mypy --strict         clean
+```
+
 ## [0.12.33] - 2026-11-09
 
 Third review (`docs/reviews/wensu-retest-0.12.32-2026-11-09.md`). Item 1 is a regression I introduced

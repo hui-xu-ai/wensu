@@ -41,6 +41,20 @@ def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return root
 
 
+def _all_live(monkeypatch: pytest.MonkeyPatch, *, dead: set[int] = frozenset()) -> None:
+    """Make every endpoint answer, except the ports listed in `dead`.
+
+    Ambiguity is decided after liveness now, so a test that only writes files is
+    testing a code path that no longer exists.
+    """
+
+    def fake_ping(self: BridgeAdapter, path: Path) -> tuple[int, str] | None:
+        port = json.loads(path.read_text(encoding="utf-8"))["port"]
+        return None if port in dead else (port, "t")
+
+    monkeypatch.setattr(BridgeAdapter, "_ping", fake_ping)
+
+
 def test_distinct_labels_put_the_configured_profile_first(
     registry: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -56,7 +70,7 @@ def test_distinct_labels_put_the_configured_profile_first(
 def test_identical_labels_are_refused_not_guessed(
     registry: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The case the review demonstrated: two hosts, one label.
+    """The case the review demonstrated: two live hosts, one label.
 
     This is what a two-browser setup looks like today, because the label comes from a
     shared file. Picking either endpoint would return a real page that may belong to
@@ -66,12 +80,32 @@ def test_identical_labels_are_refused_not_guessed(
     _write(registry / "hosts" / "bridge-1.json", port=1, profile=r"E:\ProfileA")
     _write(registry / "hosts" / "bridge-2.json", port=2, profile=r"E:\ProfileA")
     monkeypatch.setenv("WENSU_PROFILE", r"E:\ProfileA")
+    _all_live(monkeypatch)
 
     with pytest.raises(BridgeAmbiguous) as caught:
-        BridgeAdapter()._candidates()
+        BridgeAdapter().pin()
     message = str(caught.value)
     assert "WENSU_PROFILE" in message, "the message must name the way out"
-    assert "same profile" in message
+    assert "told apart" in message
+
+
+def test_a_stale_registry_entry_does_not_make_a_single_host_ambiguous(
+    registry: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One live host plus one crashed host is not two hosts.
+
+    Judging from files counted the corpse: the caller was told "2 native hosts are
+    running" and to close a browser that had already exited, while the one reachable
+    host was never pinged.
+    """
+
+    _write(registry / "hosts" / "bridge-1.json", port=1, profile=r"E:\ProfileA")
+    _write(registry / "hosts" / "bridge-2.json", port=2, profile=r"E:\ProfileA")
+    monkeypatch.setenv("WENSU_PROFILE", r"E:\ProfileA")
+    _all_live(monkeypatch, dead={2})
+
+    port, _token = BridgeAdapter().pin()
+    assert port == 1
 
 
 def test_one_host_is_never_ambiguous(registry: Path, monkeypatch: pytest.MonkeyPatch) -> None:
