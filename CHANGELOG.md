@@ -4,6 +4,30 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.25] - 2026-11-09
+
+### Fixed — detail_many existed but the schema did not list it
+
+The tool was added in 0.12.24 and works, but schemas/tools.json still described four tools. An MCP
+client builds its tool list from that file, so a tool missing from it is a tool the agent cannot see —
+the code may as well not have been written.
+
+### Docs — a scenario table, so the right tool is not a guess
+
+Five tools with clear names still require knowing which name answers the question in front of you.
+The skill now opens with a table from scenario to tool, with the cost of each:
+
+| 你要做的事 | 用 | 花费 |
+|---|---|---|
+| 找文献 | search | 3 / 4 |
+| 只要命中数 | search + limit:1, fields:["title"] | 3 / 4, tiny response |
+| 看某篇完整信息 | detail（URL 或 DOI） | 0 cached / 1 live |
+| 看多篇 | detail_many | same per record |
+| 存成文件 | xport + out_path | 0 |
+| 查额度 / 桥接 | status | 0 |
+
+It also names the three savings that are easiest to miss: ields projection, local_sort being
+free where site_sort is not, and xport(out_path) costing neither quota nor context.
 ## [0.12.24] - 2026-11-09
 
 Closes the remaining items from the 2026-11-09 incident report: BUG-04 through BUG-12, and DOC-01

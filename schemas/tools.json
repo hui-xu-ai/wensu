@@ -72,6 +72,27 @@
       }
     },
     {
+      "name": "detail_many",
+      "description": "Fetch several records in one call. Sequential on purpose: the policy layer serialises network actions anyway. A failure on one record does not abandon the rest, so a caller can retry only the ones that failed.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["urls"],
+        "properties": {
+          "urls": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1,
+            "description": "Detail URLs from `search`, or bare DOIs such as 10.13841/j.cnki.jxsj.2026.11.001. A DOI costs one extra search to resolve."
+          },
+          "channel": {
+            "type": ["string", "null"],
+            "description": "Usually omit: inferred per item from the URL host or the DOI prefix."
+          }
+        }
+      }
+    },
+    {
       "name": "export",
       "description": "Render records as RIS or EndNote text. With `out_path` the text is written to that file and omitted from the response, which is how a large export should be done; without it the text comes back inline.",
       "inputSchema": {
