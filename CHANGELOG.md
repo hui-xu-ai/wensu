@@ -4,6 +4,35 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.19] - 2026-11-09
+
+### Fixed — the CLI was missing the parameters the tool gained
+
+`search` gained `fields` and the `site_sort` / `local_sort` names, but only in `server.py`. The CLI
+rejected `--field` with exit code 2, which is how this was found — by running the command the
+release notes suggested.
+
+The CLI and the MCP tool have now diverged on the same day twice: `dropped_year`, then `filters`,
+and now this. Both read the same payload builder; they still declare their own argument lists.
+
+New flags, mirroring the tool:
+
+```
+--field NAME        repeatable; keep only that record field (`url` is always kept)
+--site-sort ...     same as --sort, named for what it does
+--local-sort ...    same as --sort-by, named for what it does
+```
+
+### Verified
+
+```
+wensu search "离子 柔性 驱动器" --channel cnki --limit 5 --field title --field year --field doi
+→ total=128, 5 records, keys: title, year, doi, url, 12.9 s, 3 quota
+```
+
+The 128 matches the number the review measured by hand, which is the point: the space-separated
+form is what finds them, and the whole-sentence form returns nothing.
+
 ## [0.12.18] - 2026-11-09
 
 Addresses W-05, W-06, W-07, W-09, W-11 and W-13 from the 2026-11-09 review.

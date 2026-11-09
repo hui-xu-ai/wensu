@@ -36,10 +36,30 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--limit", type=int, default=20)
     search.add_argument("--page", type=int, default=1)
     search.add_argument("--sort", choices=["relevance", "date", "citation"], default="relevance")
+    search.add_argument(
+        "--site-sort",
+        choices=["relevance", "date", "citation"],
+        default=None,
+        help="ask the site to re-sort (costs quota); same as --sort",
+    )
     search.add_argument("--year-from", type=int, default=None)
     search.add_argument("--year-to", type=int, default=None)
     search.add_argument("--abstract", action="store_true", help="include abstracts")
     search.add_argument("--sort-by", choices=["none", "citations", "year"], default="none")
+    search.add_argument(
+        "--local-sort",
+        choices=["none", "citations", "year"],
+        default=None,
+        help="re-order the fetched page (free); same as --sort-by",
+    )
+    search.add_argument(
+        "--field",
+        action="append",
+        dest="fields",
+        metavar="NAME",
+        default=None,
+        help="keep only this record field; repeatable. `url` is always kept",
+    )
     search.add_argument("--min-citations", type=int, default=None)
     search.add_argument("--sources-only", action="append", metavar="JOURNAL", default=None)
     search.add_argument("--min-impact-factor", type=float, default=None)
@@ -148,13 +168,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             query = SearchQuery(
                 text=args.query,
                 channel=args.channel,
-                sort=args.sort,
+                sort=args.site_sort or args.sort,
                 page=args.page,
                 year_from=args.year_from,
                 year_to=args.year_to,
                 limit=args.limit,
                 include_abstract=args.abstract,
-                sort_by=args.sort_by,
+                sort_by=args.local_sort or args.sort_by,
                 min_citations=args.min_citations,
                 sources_only=tuple(args.sources_only or ()),
                 min_impact_factor=args.min_impact_factor,
@@ -181,7 +201,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
             print(
                 json.dumps(
-                    _page_payload(page, query), ensure_ascii=False, indent=2
+                    _page_payload(page, query, args.fields), ensure_ascii=False, indent=2
                 )
             )
         else:
