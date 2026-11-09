@@ -159,12 +159,10 @@ def build_service() -> ScholarService:
             # row, and concludes CNKI has no abstracts — while its detail page holds
             # the complete one. The two endpoints are declared separately.
             "channel_capabilities": {
-                spec.name: dict(spec.manifest.field_support)
-                for spec in registry.discover()
+                spec.name: dict(spec.manifest.field_support) for spec in registry.discover()
             },
             "detail_capabilities": {
-                spec.name: dict(spec.manifest.detail_field_support)
-                for spec in registry.discover()
+                spec.name: dict(spec.manifest.detail_field_support) for spec in registry.discover()
             },
             "cooldown_until": until.isoformat() if until else None,
             # None when the quota file cannot be read. Reporting the full limit there

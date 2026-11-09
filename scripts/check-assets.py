@@ -83,9 +83,7 @@ def main() -> int:
     with zipfile.ZipFile(wheel) as archive:
         present = set(archive.namelist())
 
-    missing = [
-        path for path in wanted if f"{ASSET_PREFIX}{path}" not in present
-    ]
+    missing = [path for path in wanted if f"{ASSET_PREFIX}{path}" not in present]
 
     print(f"wheel: {wheel.name}")
     print(f"manifest references {len(wanted)} file(s):")

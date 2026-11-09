@@ -71,9 +71,9 @@ _PROJECTION_ALWAYS = frozenset({"url", "quota_charged", "quota_remaining"})
 # a particular response happened to contain. Deriving them from the result meant a
 # zero-result search reported every field as unknown — the one case where a caller
 # is most likely to be running a small probe.
-_PROJECTION_KEYS = frozenset(Record.__dataclass_fields__) | _PROJECTION_ALWAYS | {
-    "doc_type_unified"
-}
+_PROJECTION_KEYS = (
+    frozenset(Record.__dataclass_fields__) | _PROJECTION_ALWAYS | {"doc_type_unified"}
+)
 
 
 def _check_fields(fields: list[str] | None) -> None:
@@ -281,11 +281,49 @@ FieldName = Annotated[
 ]
 
 
+class StrictFastMCP(FastMCP):
+    """FastMCP, but an unknown parameter is an error instead of being dropped.
+
+    The SDK builds its argument model with `ConfigDict(arbitrary_types_allowed=True)`
+    and calls tools with `validate_input=False`, so `search(channle="cnki")` used the
+    default channel and reported success. An agent has no way to notice that — the
+    filter it thought it set simply never applied.
+
+    Both halves are needed, and only both: rejecting in `call_tool` without declaring
+    it leaves the schema lying, and declaring it in `list_tools` without enforcing it
+    leaves the claim untested. The accepted keys come from the tool's own schema, so
+    nothing here has to be kept in sync by hand.
+    """
+
+    async def list_tools(self) -> list[Any]:
+        tools = await super().list_tools()
+        for tool in tools:
+            schema = tool.inputSchema
+            if schema.get("type") == "object":
+                schema["additionalProperties"] = False
+        return tools
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        tools = {tool.name: tool for tool in await self.list_tools()}
+        tool = tools.get(name)
+        if tool is not None:
+            allowed = set(tool.inputSchema.get("properties", {}))
+            unknown = sorted(set(arguments) - allowed)
+            if unknown:
+                # Raised, not returned: the client should treat a malformed call as a
+                # malformed call, and nothing reaches the service.
+                raise ValueError(
+                    f"unknown parameter(s): {', '.join(unknown)}. "
+                    f"{name} accepts: {', '.join(sorted(allowed))}"
+                )
+        return await super().call_tool(name, arguments)
+
+
 def build_server(service: ScholarService) -> FastMCP:
     # FastMCP takes no `version` argument, and the handshake reported the SDK's
     # version (`1.30.0`) while `status.version` reported 0.12.x — two different
     # components answering the same question. The field lives on the inner Server.
-    mcp = FastMCP("wensu")
+    mcp = StrictFastMCP("wensu")
     mcp._mcp_server.version = __version__
 
     @mcp.tool()
@@ -326,9 +364,14 @@ def build_server(service: ScholarService) -> FastMCP:
 
         Returns a shortlist by default: abstracts are omitted unless
         include_abstract is true, and sort_by / min_citations / sources_only filter
-        locally without any browser action. For the full record call detail(url) —
-        after a search it is served from the cache, not the site, and detail infers
-        the channel from the URL.
+        locally without any browser action. For the full record call detail(url), which
+        infers the channel from the URL.
+
+        **Whether `detail` is free depends on the channel.** A Web of Science search
+        captures full records, so a following `detail` is served from the cache at no
+        cost; a CNKI search captures only the list, so the first `detail` for a record
+        still needs one network action. Asking twice for the same record is always
+        free.
 
         An empty records list is a normal answer, not a failure: read `total` and
         `dropped_year` before concluding that a topic has no papers.
@@ -392,7 +435,7 @@ def build_server(service: ScholarService) -> FastMCP:
             min_citations=min_citations,
             sources_only=tuple(sources_only or ()),
             min_impact_factor=min_impact_factor,
-            )
+        )
         try:
             result_page = service.search(request)
         except (RiskBlocked, ScholarSearchError) as error:
@@ -452,6 +495,15 @@ def build_server(service: ScholarService) -> FastMCP:
         identifier = url.strip()
         is_doi = identifier.lower().startswith("10.") and "/" in identifier
 
+        # Before anything is fetched. `_detail_payload` raises for an unknown key, but
+        # it runs after the network action — so a typo in `fields` paid for a detail
+        # fetch whose result was then discarded, and in `detail_many` it aborted the
+        # whole batch on the first record.
+        try:
+            _check_fields(fields)
+        except ValueError as error:
+            return _payload(error)
+
         before = _quota(service)
         try:
             result: dict[str, Any]
@@ -494,8 +546,7 @@ def build_server(service: ScholarService) -> FastMCP:
             Field(
                 default=None,
                 description=(
-                    "Keep only these keys on each record. `url` and the quota pair "
-                    "are always kept."
+                    "Keep only these keys on each record. `url` and the quota pair are always kept."
                 ),
             ),
         ] = None,

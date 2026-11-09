@@ -123,13 +123,25 @@ wensu serve --transport http --host 127.0.0.1 --port 8765
 
 | 工具 | 参数 | 返回 |
 |---|---|---|
-| `search` | `query`（关键词或专业检索式）、`channel`、`page` 1–3、`limit` 1–50、`sort`、`year_from`/`year_to` | `total`、`page`、`page_count`、`records[]` |
-| `detail` | `url`（`search` 返回的链接）、`channel` | 单条完整题录（含摘要、DOI、卷期页） |
-| `export` | `records`、`format`：`ris` 或 `endnote` | 纯文本，不落盘 |
-| `status` | 无 | 渠道、剩余配额、冷却状态、桥接是否就绪 |
+| `search` | `query`（关键词或专业检索式）、`channel`、`page` 1–3、`limit` 1–50、`sort`、`year_from`/`year_to`、`fields`、`count_only` | `total`、`page`、`page_count`、`records[]`、`quota_charged` |
+| `detail` | `url`（`search` 返回的链接或裸 DOI）、`channel`、`include_abstract`、`fields` | 单条完整题录（含摘要、DOI、卷期页） |
+| `detail_many` | `urls[]`、`include_abstract`、`fields` | `results[]`、`ok_count`、`failed_count`；遇风控整批停止 |
+| `export` | `records`、`format`：`ris`/`endnote`/`markdown`/`csv`、`out_path` | 纯文本；给了 `out_path` 则写盘且不回传正文 |
+| `status` | `brief` | 渠道、剩余配额、冷却状态、桥接是否就绪 |
+
+`include_abstract` 默认 **false**，`fields` 可把响应压到只留需要的键（`url` 与额度字段总是保留）。
+
+**检索后的详情不一定免费**：WoS 的列表抓取会播种完整详情，`detail` 命中缓存扣 0；**知网的列表
+不播种详情**，第一次 `detail` 需要一次网络动作，扣 1。同一篇再取则扣 0。
 
 `search` 的年份筛选是**客户端筛选**：只对本次抓到的那一页生效，`total` 仍是站点总数。
 筛选后为空说明目标年份不在这一页，换页或换检索式，不要连续翻页扫库。
+
+## 并发
+
+**一个浏览器 profile 同一时间只应服务一个 agent。** 分段检索在提交与读取之间会释放锁，两个客户端
+同时向同一 profile 发检索时，可能读到对方的结果。不同 profile 由各自的 host 承载，`WENSU_PROFILE`
+可显式指定本次调用使用哪一个。
 
 ## 升级到新版本
 
@@ -150,7 +162,7 @@ wensu setup --force
 
 ## 状态
 
-当前版本 **v0.12.9**（`pip install wensu` 即可，PyPI 与 GitHub Release 同步）。真机验证过的能力：
+当前版本见 `wensu --version`（`pip install wensu` 即可，PyPI 与 GitHub Release 同步）。真机验证过的能力：
 
 | 能力 | 状态 |
 |---|---|

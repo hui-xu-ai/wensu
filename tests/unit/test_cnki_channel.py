@@ -248,9 +248,7 @@ def test_parse_detail_from_recorded_page() -> None:
     assert record.abstract and "IPMC" in record.abstract
 
 
-THESIS_DETAIL = (
-    Path(__file__).resolve().parents[1] / "fixtures" / "cnki" / "detail-thesis.html"
-)
+THESIS_DETAIL = Path(__file__).resolve().parents[1] / "fixtures" / "cnki" / "detail-thesis.html"
 
 
 def test_thesis_detail_reports_the_school_alone() -> None:

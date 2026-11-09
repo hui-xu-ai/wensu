@@ -210,8 +210,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             # Already-installed assets are not a failure to re-run setup: the point
             # of running it again is usually the browser profile, not the files.
             print(f"wensu: {error}", file=sys.stderr)
-            print("wensu: continuing with the browser profile (use --force to replace assets)",
-                  file=sys.stderr)
+            print(
+                "wensu: continuing with the browser profile (use --force to replace assets)",
+                file=sys.stderr,
+            )
             code = 0
         # The browser profile is what every later session depends on: without it the
         # tool has no idea which window the extension lives in, and a caller is left

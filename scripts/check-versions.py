@@ -34,9 +34,7 @@ def read_versions() -> dict[str, str]:
 
     return {
         "pyproject.toml": _search(r'^version = "([^"]+)"', pyproject, "pyproject.toml"),
-        "src/scholar_search/__init__.py": _search(
-            r'__version__ = "([^"]+)"', init, "__init__.py"
-        ),
+        "src/scholar_search/__init__.py": _search(r'__version__ = "([^"]+)"', init, "__init__.py"),
         "extension/manifest.json": manifest["version"],
         "packages/dsh-wensu/package.json": bundle["version"],
         "NOTICE": _search(r"^Version: ([0-9][^\s(]*)", notice, "NOTICE"),

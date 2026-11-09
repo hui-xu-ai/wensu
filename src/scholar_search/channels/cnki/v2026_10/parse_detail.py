@@ -120,6 +120,7 @@ def _source(soup: BeautifulSoup) -> tuple[str | None, str]:
         source = words[0] if words else ""
     return source or None, value
 
+
 def _abstract(soup: BeautifulSoup) -> str | None:
     """The complete abstract, preferring the hidden input CNKI keeps for it.
 

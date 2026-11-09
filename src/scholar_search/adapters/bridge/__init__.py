@@ -28,6 +28,7 @@ from typing import Any
 
 from ...core.config import host_runtime_dir
 from ...core.contracts import Action, ActionOutcome
+from ...core.errors import BridgeAmbiguous
 
 PING_TIMEOUT_S = 0.6
 
@@ -73,7 +74,17 @@ class BridgeAdapter:
         return recorded.profile_dir if recorded is not None else None
 
     def _candidates(self) -> list[Path]:
-        """Endpoint files, the matching profile first."""
+        """Endpoint files to try, the recorded profile first.
+
+        A host's `profile_dir` is a hint, not an identity: every host on the machine
+        reads the same `browser.json`, so with two browsers open **both endpoints
+        claim the same profile**. Ordering by that label would look like isolation
+        while providing none — a review caught exactly this, two hosts labelled
+        `E:\\ProfileA` with only one of them actually being A.
+
+        So a label is only used to *order* when it cannot mislead, and ambiguity is
+        refused instead of guessed:
+        """
 
         if self._endpoint is not None:
             return [self._endpoint]
@@ -88,25 +99,38 @@ class BridgeAdapter:
         ordered = [*files, *([legacy] if legacy.exists() else [])]
 
         wanted = self._wanted_profile()
-        if wanted is None:
+        if wanted is None or len(ordered) <= 1:
+            # Nothing to disambiguate: zero or one host is unambiguous by definition.
             return ordered
 
-        matching: list[Path] = []
-        others: list[Path] = []
-        for path in ordered:
+        labelled = self._read_profiles(ordered)
+        if len(labelled) == len(ordered) and len(set(labelled.values())) == 1:
+            # Every host claims the same profile. That is the shared-config case, and
+            # it means the label carries no information — with more than one host,
+            # taking any of them is a coin flip.
+            raise BridgeAmbiguous(
+                f"{len(ordered)} native hosts are running and all of them report the "
+                f"same profile ({next(iter(labelled.values()))}). The host cannot tell "
+                "which browser it belongs to, so this request could read a different "
+                "profile's page. Close all but one browser, or set WENSU_PROFILE and "
+                "run one host per profile."
+            )
+
+        matching = [path for path in ordered if labelled.get(path) == wanted.casefold()]
+        others = [path for path in ordered if labelled.get(path) != wanted.casefold()]
+        return [*matching, *others]
+
+    @staticmethod
+    def _read_profiles(paths: list[Path]) -> dict[Path, str | None]:
+        found: dict[Path, str | None] = {}
+        for path in paths:
             try:
                 info = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
-            host_profile = info.get("profile_dir")
-            # An endpoint written before this field existed has no profile. Treat it
-            # as a fallback rather than dropping it, or an upgrade would look like a
-            # dead bridge.
-            if host_profile is None:
-                others.append(path)
-            elif str(host_profile).casefold() == str(wanted).casefold():
-                matching.append(path)
-        return [*matching, *others]
+            value = info.get("profile_dir")
+            found[path] = str(value).casefold() if value else None
+        return found
 
     @staticmethod
     def _ping(path: Path) -> tuple[int, str] | None:

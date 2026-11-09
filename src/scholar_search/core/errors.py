@@ -75,3 +75,14 @@ class BridgeError(ScholarSearchError):
 
 class BridgeTimeout(BridgeError):
     """The browser did not answer within the deadline."""
+
+
+class BridgeAmbiguous(BridgeError):
+    """More than one host is running and they cannot be told apart.
+
+    Each host reports the profile from the same `browser.json`, so with two browsers
+    open every endpoint claims the same profile and the label identifies nothing.
+    Picking one would succeed, return a real page, and possibly answer with another
+    search's results — so the call is refused instead. Starting one browser, or one
+    host per profile with `WENSU_PROFILE`, removes the ambiguity.
+    """

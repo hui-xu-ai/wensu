@@ -6,10 +6,10 @@ never exposes browser details to callers.
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import json
 from collections.abc import Callable, Sequence
+from contextlib import AbstractContextManager, suppress
 from dataclasses import replace
 from datetime import datetime
 from typing import Any, ClassVar, Literal
@@ -30,6 +30,7 @@ from .contracts import (
 )
 from .errors import ActionError, ChannelError, ParseError, PolicyError, ScholarSearchError
 from .export import to_csv, to_endnote, to_markdown, to_ris
+from .locking import interprocess_lock
 from .planner import Planner
 from .policy import PolicyEngine
 from .registry import ChannelRegistry, ChannelSpec
@@ -65,6 +66,23 @@ class ScholarService:
         if self._risk is not None:
             self._risk.ensure_ready()
 
+    def _browser_transaction(self) -> AbstractContextManager[None]:
+        """Hold the shared browser for a whole request, not one plan at a time.
+
+        A split search submits, then reads. Between those two calls the planner's
+        `plan.lock` is released, so a second request can submit in the gap and the
+        first one then reads *its* results — silently, and cached under the first
+        request's key. The lock has to span the request, which means it cannot be the
+        planner's: that one is taken inside every `_run`, and re-entering it would
+        deadlock. This is a separate file for that reason.
+
+        The cost is contention, not latency: a lone request holds this lock for
+        exactly as long as it already held the browser. A second request waits, which
+        is what "the policy layer serialises network actions" already promised.
+        """
+
+        return interprocess_lock(self._policy.state_dir / "browser.lock", timeout_s=180.0)
+
     # -- public surface -------------------------------------------------
 
     def search(self, query: SearchQuery) -> SearchPage:
@@ -92,6 +110,15 @@ class ScholarService:
 
         self._ensure_ready()
 
+        # Everything from here to the parsed page depends on the browser showing the
+        # page this request navigated to. Held across the split, so the submit and the
+        # read belong to the same owner.
+        with self._browser_transaction():
+            return self._search_locked(query, spec, channel, key)
+
+    def _search_locked(
+        self, query: SearchQuery, spec: ChannelSpec, channel: Any, key: str
+    ) -> SearchPage:
         splitter = getattr(channel, "plan_search_split", None)
         if splitter is not None:
             head, tail = splitter(query)
@@ -212,10 +239,13 @@ class ScholarService:
         if effective is not None and page.query_effective is None:
             # A channel that cannot describe its query is not an error: the field
             # stays None and the response is still complete without it.
-            with contextlib.suppress(ChannelError, ValueError):
+            with suppress(ChannelError, ValueError):
                 page = replace(page, query_effective=effective(query))
         self._cache.set(key, _page_to(page))
-        return page
+        # `channel` is untyped here (it is whatever the plugin module exposes), so
+        # `parse_search` returns Any. Narrow it once, at the exit.
+        result: SearchPage = page
+        return result
 
     def channel_for_url(self, url: str) -> str | None:
         """Which channel owns this URL, judged by the manifests' domain lists.
@@ -236,9 +266,7 @@ class ScholarService:
                     return spec.name
         return None
 
-    def detail_by_doi(
-        self, doi: str, *, channel: str | None = None
-    ) -> Record:
+    def detail_by_doi(self, doi: str, *, channel: str | None = None) -> Record:
         """Look a record up by DOI and return its full detail.
 
         CNKI detail URLs are hundreds of characters of encrypted signature (the only
@@ -277,9 +305,7 @@ class ScholarService:
             )
         )
         if not page.records:
-            raise ChannelError(
-                f"no record found for DOI {doi!r} on channel {target!r}"
-            )
+            raise ChannelError(f"no record found for DOI {doi!r} on channel {target!r}")
         record = page.records[0]
         if not record.url:
             raise ChannelError(f"the record for {doi!r} carries no detail URL")
@@ -382,7 +408,7 @@ class ScholarService:
         hook = getattr(channel, "effective_query", None)
         if hook is None:
             return None
-        with contextlib.suppress(ChannelError, ValueError):
+        with suppress(ChannelError, ValueError):
             produced = hook(query)
             return produced if isinstance(produced, str) else None
         return None

@@ -102,8 +102,6 @@ def test_every_channel_plan_passes_both_validation_layers() -> None:
                     {"action": action.verb, "params": dict(action.params)},
                     spec.manifest.domains,
                 )
-                assert code is None, (
-                    f"{spec.name} {extra}: host rejected {action.verb}: {code}"
-                )
+                assert code is None, f"{spec.name} {extra}: host rejected {action.verb}: {code}"
             checked += 1
     assert checked >= 2, "expected at least one plan per channel"

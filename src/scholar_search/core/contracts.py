@@ -255,9 +255,7 @@ class SearchPage:
 
 # Which record fields a channel may declare support for. Deliberately a closed set:
 # an unknown key is a typo that would silently never be reported to callers.
-FIELD_SUPPORT_KEYS = frozenset(
-    {"abstract", "keywords", "doi", "volume", "pages", "paging"}
-)
+FIELD_SUPPORT_KEYS = frozenset({"abstract", "keywords", "doi", "volume", "pages", "paging"})
 
 
 @dataclass(frozen=True, slots=True)

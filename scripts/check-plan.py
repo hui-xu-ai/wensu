@@ -63,9 +63,7 @@ def check_channel(registry: ChannelRegistry, name: str, manifest: object) -> lis
             message = {"action": action.verb, "params": dict(action.params)}
             error_code = validate_request(message, manifest.domains)  # type: ignore[attr-defined]
             if error_code:
-                problems.append(
-                    f"{name} / {label}: host refused {action.verb}: {error_code}"
-                )
+                problems.append(f"{name} / {label}: host refused {action.verb}: {error_code}")
                 break
         else:
             print(f"  {name:<14} {label:<16} ok ({len(plan.actions)} actions)")

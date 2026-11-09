@@ -1,13 +1,13 @@
 """Which host the adapter talks to when more than one browser is open.
 
-The acceptance review (A02) found that a lock released between the submit and read
-segments of a split search lets two requests read each other's results. That is one
-half of the concurrency problem. The other half is at the other end: with two
-browsers open there are two hosts, and the adapter used to take whichever answered
-first, so a search typed for one profile could read the other profile's page.
+A review of the first attempt at this (R02) found the mechanism could not do what the
+name suggested: every host reads the same `browser.json`, so with two browsers open
+**both endpoints report the same profile**. Ordering candidates by that label looks
+like isolation while providing none.
 
-These tests cover the selection rule. The segment-lock problem is documented as
-unsupported rather than fixed: one browser is meant to serve one agent at a time.
+These tests encode the rule that replaced it: a label is used to order only when the
+labels actually differ, and identical labels with more than one host are refused
+rather than guessed at.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from scholar_search.adapters.bridge import BridgeAdapter
+from scholar_search.core.errors import BridgeAmbiguous
 
 
 def _write(path: Path, *, port: int, profile: str | None) -> None:
@@ -28,35 +29,61 @@ def _write(path: Path, *, port: int, profile: str | None) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def _ports(paths: list[Path]) -> list[int]:
+    return [json.loads(path.read_text(encoding="utf-8"))["port"] for path in paths]
+
+
 @pytest.fixture()
 def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     root = tmp_path / "host"
     (root / "hosts").mkdir(parents=True)
-    monkeypatch.setattr(
-        "scholar_search.adapters.bridge.host_runtime_dir", lambda: root
-    )
+    monkeypatch.setattr("scholar_search.adapters.bridge.host_runtime_dir", lambda: root)
     return root
 
 
-def test_the_matching_profile_is_tried_first(
+def test_distinct_labels_put_the_configured_profile_first(
     registry: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Two browsers open: the one this process is configured for must win.
-
-    Getting this wrong is silent. The request succeeds, the page is real, and it
-    belongs to a different search.
-    """
+    """When the hosts really do differ, honour the choice."""
 
     _write(registry / "hosts" / "bridge-1.json", port=1, profile=r"E:\ProfileA")
     _write(registry / "hosts" / "bridge-2.json", port=2, profile=r"E:\ProfileB")
     monkeypatch.setenv("WENSU_PROFILE", r"E:\ProfileB")
 
-    paths = BridgeAdapter()._candidates()
-    ports = [json.loads(path.read_text(encoding="utf-8"))["port"] for path in paths]
-    assert ports[0] == 2, "the configured profile should be tried first"
+    assert _ports(BridgeAdapter()._candidates())[0] == 2
 
 
-def test_an_endpoint_without_a_profile_stays_a_fallback(
+def test_identical_labels_are_refused_not_guessed(
+    registry: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The case the review demonstrated: two hosts, one label.
+
+    This is what a two-browser setup looks like today, because the label comes from a
+    shared file. Picking either endpoint would return a real page that may belong to
+    another search, so the call must fail loudly instead.
+    """
+
+    _write(registry / "hosts" / "bridge-1.json", port=1, profile=r"E:\ProfileA")
+    _write(registry / "hosts" / "bridge-2.json", port=2, profile=r"E:\ProfileA")
+    monkeypatch.setenv("WENSU_PROFILE", r"E:\ProfileA")
+
+    with pytest.raises(BridgeAmbiguous) as caught:
+        BridgeAdapter()._candidates()
+    message = str(caught.value)
+    assert "WENSU_PROFILE" in message, "the message must name the way out"
+    assert "same profile" in message
+
+
+def test_one_host_is_never_ambiguous(registry: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A single host needs no disambiguation, whatever it labels itself."""
+
+    _write(registry / "hosts" / "bridge-1.json", port=1, profile=r"E:\ProfileA")
+    monkeypatch.setenv("WENSU_PROFILE", r"E:\ProfileB")
+
+    assert _ports(BridgeAdapter()._candidates()) == [1]
+
+
+def test_an_endpoint_without_a_label_stays_a_candidate(
     registry: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An endpoint written before `profile_dir` existed must not vanish.
@@ -67,11 +94,9 @@ def test_an_endpoint_without_a_profile_stays_a_fallback(
 
     _write(registry / "hosts" / "bridge-1.json", port=1, profile=None)
     _write(registry / "hosts" / "bridge-2.json", port=2, profile=r"E:\ProfileB")
-    monkeypatch.setenv("WENSU_PROFILE", r"E:\ProfileA")
+    monkeypatch.setenv("WENSU_PROFILE", r"E:\ProfileB")
 
-    paths = BridgeAdapter()._candidates()
-    ports = [json.loads(path.read_text(encoding="utf-8"))["port"] for path in paths]
-    assert ports == [1], "no match, but the unlabelled endpoint is still a candidate"
+    assert _ports(BridgeAdapter()._candidates()) == [2, 1]
 
 
 def test_no_configured_profile_keeps_every_candidate(
@@ -82,9 +107,6 @@ def test_no_configured_profile_keeps_every_candidate(
     _write(registry / "hosts" / "bridge-1.json", port=1, profile=r"E:\ProfileA")
     _write(registry / "hosts" / "bridge-2.json", port=2, profile=r"E:\ProfileB")
     monkeypatch.delenv("WENSU_PROFILE", raising=False)
-    monkeypatch.setattr(
-        "scholar_search.core.browser.load", lambda: None
-    )
+    monkeypatch.setattr("scholar_search.core.browser.load", lambda: None)
 
-    paths = BridgeAdapter()._candidates()
-    assert len(paths) == 2
+    assert len(BridgeAdapter()._candidates()) == 2

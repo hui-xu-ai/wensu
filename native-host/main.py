@@ -28,13 +28,17 @@ ENDPOINT_NAME = "bridge.json"
 
 
 def _profile_dir() -> str | None:
-    """The profile this host is expected to serve, from the recorded config.
+    """The profile recorded in `browser.json`, as a hint and nothing more.
 
-    Best effort and deliberately not authoritative. The extension cannot report the
-    path of the browser profile it runs in, and the launcher manifest is registered
-    once per user, so `browser.json` is the only place the answer exists. A second
-    profile is recorded only if the user runs `wensu browser adopt` for it — which is
-    the same limitation the client side has, and it is documented rather than hidden.
+    This is deliberately **not** proof of which browser launched this host. The
+    extension cannot report the path of the profile it runs in, and the launcher
+    manifest is registered once per user, so every host on the machine reads the same
+    file and would claim the same profile. An independent review showed exactly that:
+    two simulated hosts both labelled `E:\\ProfileA` while only one of them was.
+
+    A hint that can be wrong is worse than no hint if a client trusts it, so the
+    client does not treat a match as identification — see `_candidates`. What this
+    field is good for is telling a single-profile setup apart from a two-browser one.
     """
 
     try:

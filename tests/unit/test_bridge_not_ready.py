@@ -47,6 +47,7 @@ def test_ensure_bridge_passes_when_an_extension_is_listening(
     monkeypatch.setattr(BridgeAdapter, "probe", classmethod(lambda cls: True))
     service._ensure_bridge()  # must not raise
 
+
 def test_bridge_remediation_names_a_command_not_a_gesture() -> None:
     """The remediation must be actionable, and it must forbid touching the browser.
 

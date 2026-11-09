@@ -94,9 +94,7 @@ def check_format() -> tuple[bool, str]:
     """
 
     ruff = ROOT / ".venv" / "Scripts" / "ruff.exe"
-    ok, output = _run(
-        [str(ruff), "format", "--check", "--no-cache", "src", "tests", "scripts"]
-    )
+    ok, output = _run([str(ruff), "format", "--check", "--no-cache", "src", "tests", "scripts"])
     return ok, output.splitlines()[-1] if output else ""
 
 
@@ -118,9 +116,7 @@ def check_assets() -> tuple[bool, str]:
         ok, output = _run([str(Path("uv")), "build", "--out-dir", tmp])
         if not ok:
             return False, output.splitlines()[-1] if output else "build failed"
-        ok, output = _run(
-            [_python(), str(ROOT / "scripts" / "check-assets.py"), tmp]
-        )
+        ok, output = _run([_python(), str(ROOT / "scripts" / "check-assets.py"), tmp])
     return ok, output.splitlines()[-1] if output else ""
 
 
@@ -151,8 +147,10 @@ def check_artifacts() -> tuple[bool, str]:
         if not wheels:
             return False, "no wheel produced"
         names = zipfile.ZipFile(wheels[0]).namelist()
-    required = ("scholar_search/channels/cnki/manifest.json",
-                "scholar_search/channels/webofscience/manifest.json")
+    required = (
+        "scholar_search/channels/cnki/manifest.json",
+        "scholar_search/channels/webofscience/manifest.json",
+    )
     missing = [name for name in required if name not in names]
     if missing:
         return False, f"wheel is missing {', '.join(missing)}"

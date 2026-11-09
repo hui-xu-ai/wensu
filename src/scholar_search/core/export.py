@@ -263,7 +263,8 @@ def to_markdown(records: Iterable[Record]) -> str:
             meta.append(str(record.year))
         if record.volume or record.issue or record.pages:
             bits = "".join(
-                part for part in (
+                part
+                for part in (
                     f"{record.volume}" if record.volume else "",
                     f"({record.issue})" if record.issue else "",
                     f": {record.pages}" if record.pages else "",
@@ -300,25 +301,41 @@ def to_csv(records: Iterable[Record]) -> str:
 
     buffer = io.StringIO()
     writer = csv.writer(buffer, lineterminator="\n")
-    writer.writerow([
-        "title", "authors", "source", "year", "volume", "issue", "pages",
-        "doi", "citations", "impact_factor", "doc_type", "keywords", "abstract", "url",
-    ])
+    writer.writerow(
+        [
+            "title",
+            "authors",
+            "source",
+            "year",
+            "volume",
+            "issue",
+            "pages",
+            "doi",
+            "citations",
+            "impact_factor",
+            "doc_type",
+            "keywords",
+            "abstract",
+            "url",
+        ]
+    )
     for record in records:
-        writer.writerow([
-            _clean(record.title),
-            "; ".join(record.authors),
-            _clean(record.source),
-            record.year if record.year is not None else "",
-            record.volume or "",
-            record.issue or "",
-            record.pages or "",
-            record.doi or "",
-            record.citations if record.citations is not None else "",
-            record.impact_factor if record.impact_factor is not None else "",
-            record.doc_type or "",
-            "; ".join(record.keywords),
-            _clean(record.abstract),
-            record.url or "",
-        ])
+        writer.writerow(
+            [
+                _clean(record.title),
+                "; ".join(record.authors),
+                _clean(record.source),
+                record.year if record.year is not None else "",
+                record.volume or "",
+                record.issue or "",
+                record.pages or "",
+                record.doi or "",
+                record.citations if record.citations is not None else "",
+                record.impact_factor if record.impact_factor is not None else "",
+                record.doc_type or "",
+                "; ".join(record.keywords),
+                _clean(record.abstract),
+                record.url or "",
+            ]
+        )
     return buffer.getvalue()

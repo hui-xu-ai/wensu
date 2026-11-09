@@ -30,11 +30,47 @@ from ....core.errors import ChannelError
 # silently yields zero records — so it is rejected instead.
 FIELDS: frozenset[str] = frozenset(
     {
-        "TS", "TI", "AB", "AU", "AI", "AK", "GP", "ED", "KP", "SO",
-        "DO", "PY", "CF", "AD", "OG", "OO", "SG", "SA", "CI", "PS",
-        "CU", "ZP", "FO", "FG", "FD", "FT", "SU", "WC", "IS", "UT",
-        "PMID", "DOP", "LD", "PUBL", "ALL", "FPY", "EAY", "SDG",
-        "TMAC", "TMSO", "TMIC",
+        "TS",
+        "TI",
+        "AB",
+        "AU",
+        "AI",
+        "AK",
+        "GP",
+        "ED",
+        "KP",
+        "SO",
+        "DO",
+        "PY",
+        "CF",
+        "AD",
+        "OG",
+        "OO",
+        "SG",
+        "SA",
+        "CI",
+        "PS",
+        "CU",
+        "ZP",
+        "FO",
+        "FG",
+        "FD",
+        "FT",
+        "SU",
+        "WC",
+        "IS",
+        "UT",
+        "PMID",
+        "DOP",
+        "LD",
+        "PUBL",
+        "ALL",
+        "FPY",
+        "EAY",
+        "SDG",
+        "TMAC",
+        "TMSO",
+        "TMIC",
     }
 )
 
@@ -114,9 +150,7 @@ def build(query: SearchQuery, *, today: dt.date | None = None) -> str:
 
     unknown = unknown_fields(text)
     if unknown:
-        raise ChannelError(
-            "unknown Web of Science field code(s): " + ", ".join(unknown)
-        )
+        raise ChannelError("unknown Web of Science field code(s): " + ", ".join(unknown))
 
     body = text if is_expression(text) else f"ALL=({text})"
 

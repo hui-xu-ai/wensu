@@ -4,6 +4,75 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.32] - 2026-11-09
+
+Second round of review (`docs/reviews/wensu-retest-0.12.31-2026-11-09.md`). Everything below was
+reported against 0.12.31; R01/R02 are corrections to work I had reported as finished.
+
+### Fixed — the split search now holds one browser transaction (R01)
+
+The submit and read halves of a WoS search each took the planner's lock and released it, so a second
+request could submit in the gap and the first would read *its* results — silently, and cached under
+the first request's key. Reproduced deterministically offline:
+
+```json
+{"expected":{"A":["QUERY_A"],"B":["QUERY_B"]}, "actual":{"B":["QUERY_B"],"A":["QUERY_B"]}}
+```
+
+`service.search` now wraps the whole path in `browser.lock`, a separate file from the planner's
+`plan.lock` — re-entering that one would deadlock, which the review warned about explicitly.
+
+**My earlier reasoning for not fixing this was wrong and the review said so.** I claimed the fix
+would add 15–20 seconds to every search. It does not: a lone request holds the browser for exactly as
+long as it already did. What changes is that a *concurrent* request waits — which is what serialising
+network actions already promised.
+
+### Fixed — an ambiguous host is now refused, not guessed (R02)
+
+My first attempt had each host record its `profile_dir`, but every host reads the same `browser.json`,
+so with two browsers open **both endpoints claimed the same profile**. The review demonstrated it:
+two simulated hosts both labelled `E:\ProfileA`. Ordering by that label looked like isolation while
+providing none.
+
+Now: labels that genuinely differ are used to order; more than one host reporting the *same* label
+raises `BridgeAmbiguous` with the way out in the message. One host is never ambiguous.
+
+### Fixed — an unknown parameter is rejected before dispatch (R03)
+
+`additionalProperties: false` is now in all five tool schemas, and `StrictFastMCP.call_tool` rejects
+unknown keys using the tool's own schema before anything reaches the service:
+
+```
+status({brief: true, breif: true}) → ValueError: unknown parameter(s): breif
+                                       status accepts: brief
+```
+
+Both halves are needed: declaring it without enforcing it leaves the claim untested, and enforcing it
+without declaring it leaves the schema lying. The accepted keys are read from the schema, so nothing
+is kept in sync by hand.
+
+### Fixed — `detail` validates `fields` before fetching (R04)
+
+`_check_fields` ran inside `_detail_payload`, after the network action. A typo in `fields` paid for a
+detail fetch whose result was discarded, and in `detail_many` it aborted the whole batch on the first
+record. Both now reject before the fetch.
+
+### Fixed — the README and the `search` description were stale (R05)
+
+`README.md` said v0.12.9, its tool table had no `detail_many`, and `search`'s description claimed a
+following `detail` is always served from cache. Only WoS seeds detail records; CNKI captures the list
+only, so the first `detail` for a CNKI record costs one network action. All three corrected, and the
+one-browser-per-agent limit is now stated in the README.
+
+### Verified
+
+```
+pytest                212 passed
+ruff check            All checks passed
+ruff format --check   44 files already formatted
+mypy --strict         Success: no issues found in 44 source files
+```
+
 ## [0.12.31] - 2026-11-09
 
 Closes A01, A03, A04, A05, A06, A07, A09, A11 and A12 from the independent acceptance review
