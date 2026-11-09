@@ -89,12 +89,13 @@ class ScholarService:
         if splitter is not None:
             head, tail = splitter(query)
             heads = self._run(head, spec)
-            landed, moved = _click_landing(heads)
+            landed = _click_landing(heads)
             is_results = getattr(channel, "is_results_url", None)
-            # Only a click that reported a URL change can be judged. If the tab never
-            # moved, the query matched nothing; if we have no URL at all (older
-            # extension), fall through to the normal path rather than guessing.
-            if moved and landed and is_results is not None and not is_results(landed):
+            # The click waits for the site to finish, so this URL is the final state,
+            # not a sample taken mid-flight. A tab on anything other than a results
+            # route means the query matched nothing: that is where the "no results"
+            # answer lives, and reloading it would erase the evidence.
+            if landed and is_results is not None and not is_results(landed):
                 empty = SearchPage(
                     records=(), total=0, page=None, empty_reason="no_match"
                 )
@@ -375,13 +376,8 @@ def _narrow(records: Sequence[Record], query: SearchQuery) -> tuple[Record, ...]
     return narrowed
 
 
-def _click_landing(outcomes: Sequence[ActionOutcome]) -> tuple[str | None, bool]:
-    """Where the tab was after the click, and whether it actually moved.
-
-    Both matter: a URL with no movement means the site stayed put (nothing matched),
-    while no URL at all means the extension did not report one and nothing can be
-    concluded.
-    """
+def _click_landing(outcomes: Sequence[ActionOutcome]) -> str | None:
+    """Where the tab was after the click, as reported by the extension."""
 
     for outcome in outcomes:
         if outcome.action.verb != "click":
@@ -390,9 +386,9 @@ def _click_landing(outcomes: Sequence[ActionOutcome]) -> tuple[str | None, bool]
         if not isinstance(data, dict):
             continue
         url = data.get("url")
-        moved = bool(data.get("url_changed"))
-        return (url if isinstance(url, str) and url else None), moved
-    return None, False
+        if isinstance(url, str) and url:
+            return url
+    return None
 
 
 def _html(outcomes: Sequence[ActionOutcome]) -> str:
