@@ -34,6 +34,8 @@ def build_service() -> ScholarService:
 
     def status() -> dict[str, object]:
         until = risk.cooldown_until()
+        # Probed once: the answer is used for both fields, and a probe opens a socket.
+        bridge_up = BridgeAdapter.probe()
         return {
             # Which build is answering, and which bridge protocol it speaks. Without
             # these, a caller cannot tell "the tool is missing" from "an old build is
@@ -70,7 +72,17 @@ def build_service() -> ScholarService:
                 "detail_live": {"cnki": 1},
             },
             "bridge_endpoint": str(endpoint),
-            "bridge_ready": BridgeAdapter.probe(),
+            "bridge_ready": bridge_up,
+            # `bridge_ready: false` on its own told a caller nothing about *why*,
+            # so an agent had to go read host.log and guess — and one guessed by
+            # killing the user's browser. State the diagnosis and the only allowed
+            # reaction here, where the caller is already looking.
+            "bridge": {
+                "ready": bridge_up,
+                "endpoint": str(endpoint),
+                "log_path": str(host_runtime_dir() / "logs" / "host.log"),
+                "remediation": None if bridge_up else ScholarService.BRIDGE_REMEDIATION,
+            },
         }
 
     return ScholarService(

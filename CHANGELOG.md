@@ -4,6 +4,53 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.21] - 2026-11-09
+
+Addresses BUG-01, BUG-02 and BUG-03 from the 2026-11-09 incident report.
+
+### Fixed — a dead bridge no longer costs quota
+
+The quota reservation happens inside `planner.run`, so a missing extension cost **one point per
+attempt while being physically unable to succeed**. The report hit this on the very first `search` of
+a session, then again on every retry.
+
+`_run` now probes the bridge before anything can reserve a slot and raises
+`ActionError(code="bridge.not_ready")` when nothing is listening. Probing is free: it reads the
+endpoint file and tries the socket. A test asserts the guard fires before `wait_turn` is reached.
+
+### Added — `status` explains a missing bridge instead of just reporting it
+
+`bridge_ready: false` told a caller nothing about *why*, so an agent had to go read `host.log` and
+guess. `status` now carries:
+
+```json
+"bridge": {
+  "ready": false,
+  "endpoint": "…\\host\\bridge.json",
+  "log_path": "…\\host\\logs\\host.log",
+  "remediation": "Open the browser profile that has the wensu extension installed and click the
+                  extension icon to reconnect. Do NOT start, stop, reload or kill the user's
+                  browser processes: the extension lives in one profile only, and restarting the
+                  browser brings up a different one with no bridge."
+}
+```
+
+The same `remediation` is attached to any `bridge.*` error payload, and those are now marked
+`retryable: true` — the previous `retryable: false` alongside `quota_charged: 1` invited a retry
+that could only fail again.
+
+### Docs — the red line that was missing
+
+`skills/scholar-search/SKILL.md` now states, as a hard constraint, that when the bridge is not ready
+the **only** permitted action is to ask the user to click the extension icon: no starting, stopping,
+reloading or killing browser processes, no touching profiles or the extension directory, no deleting
+files under `%LOCALAPPDATA%\scholar-search\` to "reset state".
+
+**This is the incident's root cause.** A caller saw `bridge_ready: false`, read `host.log`, concluded
+Edge was "stuck in the background", ran `Stop-Process -Name msedge -Force` and restarted the browser.
+The extension lived in one profile; the restart brought up a different one; the bridge came up and
+died five seconds later — and the user's browsing session was destroyed for nothing.
+
 ## [0.12.20] - 2026-11-09
 
 ### Added — `detail` accepts a DOI

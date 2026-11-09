@@ -143,7 +143,7 @@ def _payload(
         payload["retryable"] = False
         payload["quota_charged"] = quota_charged
         return payload
-    return {
+    payload = {
         "status": "error",
         "code": _error_code(error),
         "message": str(error),
@@ -152,6 +152,14 @@ def _payload(
         "retryable": _retryable(error),
         "quota_charged": quota_charged,
     }
+    # A caller that cannot act on an error will improvise. When the bridge is the
+    # problem, say what the one permitted reaction is — an agent that was left to
+    # guess once killed the user's browser.
+    action_error = error if isinstance(error, ActionError) else None
+    if action_error is not None and (action_error.code or "").startswith("bridge."):
+        payload["remediation"] = ScholarService.BRIDGE_REMEDIATION
+        payload["retryable"] = True
+    return payload
 
 
 def _quota(service: ScholarService) -> int | None:

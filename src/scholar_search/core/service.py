@@ -15,6 +15,7 @@ from typing import Any, Literal
 from urllib.parse import urlparse
 
 from .. import __version__
+from ..adapters.bridge import BridgeAdapter
 from .cache import Cache
 from .contracts import (
     Action,
@@ -298,6 +299,31 @@ class ScholarService:
         prefixes = spec.manifest.detail_url_prefixes
         if prefixes and not any(path.startswith(prefix) for prefix in prefixes):
             raise PolicyError(f"detail URL path is not allowed: {path}", rule="url.detail_path")
+
+    # The only permitted reaction to a missing bridge. Stated in one place so the
+    # error payload and `status` cannot drift apart.
+    BRIDGE_REMEDIATION = (
+        "Open the browser profile that has the wensu extension installed and click "
+        "the extension icon to reconnect. Do NOT start, stop, reload or kill the "
+        "user's browser processes: the extension lives in one profile only, and "
+        "restarting the browser brings up a different one with no bridge."
+    )
+
+    def _ensure_bridge(self) -> None:
+        """Fail before spending quota if no extension is listening.
+
+        The reservation happens inside `planner.run`, so a dead bridge used to cost
+        one quota point per attempt while being unable to succeed. Checking first is
+        free: `probe` only reads the endpoint file and tries the socket.
+        """
+
+        if BridgeAdapter.probe():
+            return
+        raise ActionError(
+            "no live native host found: the browser extension is not connected",
+            verb="goto",
+            code="bridge.not_ready",
+        )
 
     def _run(self, plan: Any, spec: ChannelSpec) -> tuple[ActionOutcome, ...]:
         adapter = self._adapter_factory()
