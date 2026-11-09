@@ -4,6 +4,34 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.16] - 2026-11-09
+
+### Fixed — a BOM in `quota.json` no longer takes the quota down, and `status` stops lying about it
+
+A leading BOM made `json.loads` fail on a file that looked perfectly fine, so the state read as
+corrupt. `search` refused with `POLICY_QUOTA_STATE` while `status` reported the full **300** from its
+fallback — the same fault producing two opposite answers, with neither response naming the file.
+
+- Reading now uses `utf-8-sig`, which strips the BOM. **A BOM is no longer fatal.**
+- A genuinely broken file reports `quota_remaining: null` instead of the full limit.
+- `status` gained `quota_state_error` and `quota_state_path`; the quota error itself now states the
+  path and the shape it expects, so the fix is obvious without reading source.
+
+### Added — the balance, the price, and whether it was spent
+
+- **`quota_remaining`** on every response, next to `quota_charged`. Having the price without the
+  balance forced a `status` call between every planning step.
+- **`cache_hit`** on every response, so a free repeat is distinguishable from a charged search.
+- **`action_cost`** in `status` — a rough table (search 3/4, page turn 4, site sort 5, local sort 0,
+  detail 1 live / 0 cached) so a caller can budget instead of discovering the price by spending it.
+
+### Fixed — `PY=(2026-2026)` is normalised instead of being sent and charged for
+
+Web of Science accepts `PY=(2021-2026)`, `PY=(2026)` and `PY=(2026, 2024)`, but not a range whose
+ends are equal. A caller saying "only this year" naturally writes `2026-2026`, spends a search
+finding out it is invalid, and loses the quota for a purely local mistake. It is collapsed to
+`PY=(2026)` before the expression is typed. Ranges, single years and comma lists are untouched.
+
 ## [0.12.15] - 2026-11-09
 
 ### Removed — what was left of the CNKI one-box search

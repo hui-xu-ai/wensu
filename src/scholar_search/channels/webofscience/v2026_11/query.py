@@ -81,10 +81,29 @@ def resolve_span(query: SearchQuery, today: dt.date | None = None) -> tuple[int,
     return default_start, default_end
 
 
+def _normalise_py(text: str) -> str:
+    """Rewrite `PY=(2026-2026)` as `PY=(2026)`.
+
+    Web of Science accepts `PY=(2021-2026)`, `PY=(2026)` and `PY=(2026, 2024)`, but
+    not a range whose ends are equal — it treats the dash form as a range and then
+    rejects the single-year range. A caller expressing "only this year" naturally
+    writes `2026-2026`, spends a search finding out it is invalid, and loses the
+    quota for a purely local mistake. Collapsing it here costs nothing.
+    """
+
+    def repl(match: re.Match[str]) -> str:
+        start, end = match.group(1), match.group(2)
+        if start == end:
+            return f"PY=({start})"
+        return match.group(0)
+
+    return re.sub(r"PY=\(\s*(\d{4})\s*-\s*(\d{4})\s*\)", repl, text, flags=re.IGNORECASE)
+
+
 def build(query: SearchQuery, *, today: dt.date | None = None) -> str:
     """Compose the expression that will be typed into the editor."""
 
-    text = query.text.strip()
+    text = _normalise_py(query.text.strip())
     if not text:
         raise ChannelError("search text must not be empty")
     if _HISTORY_REF.search(text):
