@@ -85,6 +85,23 @@ def build_parser() -> argparse.ArgumentParser:
     setup.add_argument("--force", action="store_true", help="replace existing asset directories")
     setup.add_argument("--python", default=None, help="interpreter the native host should run")
     setup.add_argument("--no-host", action="store_true", help="only copy the assets")
+    setup.add_argument(
+        "--browser",
+        choices=["edge", "chrome", "none"],
+        default="edge",
+        help="also create the dedicated profile wensu will start (default: edge; 'none' skips)",
+    )
+    setup.add_argument(
+        "--executable", default=None, help="browser executable, if not auto-detected"
+    )
+    setup.add_argument("--extension-id", default=None, help="extension id, recorded for status")
+
+    browser_cmd = sub.add_parser(
+        "browser", help="start the dedicated browser profile that has the extension"
+    )
+    browser_sub = browser_cmd.add_subparsers(dest="browser_command", required=True)
+    browser_sub.add_parser("start", help="launch the recorded profile")
+    browser_sub.add_parser("show", help="print the recorded profile and whether it exists")
 
     return parser
 
@@ -138,12 +155,65 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "setup":
         from .browser_setup import setup_browser
 
-        return setup_browser(
-            Path(args.target) if args.target else None,
-            force=args.force,
-            python=args.python,
-            register_host=not args.no_host,
-        )
+        try:
+            code = setup_browser(
+                Path(args.target) if args.target else None,
+                force=args.force,
+                python=args.python,
+                register_host=not args.no_host,
+            )
+        except FileExistsError as error:
+            # Already-installed assets are not a failure to re-run setup: the point
+            # of running it again is usually the browser profile, not the files.
+            print(f"wensu: {error}", file=sys.stderr)
+            print("wensu: continuing with the browser profile (use --force to replace assets)",
+                  file=sys.stderr)
+            code = 0
+        # The browser profile is what every later session depends on: without it the
+        # tool has no idea which window the extension lives in, and a caller is left
+        # guessing — which is how one ended up killing the user's browser.
+        if code == 0 and args.browser != "none":
+            from .core import browser as browser_cfg
+
+            try:
+                made = browser_cfg.create(
+                    args.browser,
+                    executable=args.executable,
+                    extension_id=args.extension_id,
+                )
+            except FileNotFoundError as error:
+                print(f"wensu: {error}", file=sys.stderr)
+                return 1
+            print(f"browser profile: {made.profile_dir}")
+            print(f"recorded in    : {browser_cfg.config_path()}")
+            print(
+                "next           : wensu browser start  "
+                "(then load the unpacked extension once if the toolbar icon is missing)"
+            )
+        return code
+
+    if args.command == "browser":
+        from .core import browser as browser_cfg
+
+        recorded = browser_cfg.load()
+        if recorded is None:
+            print(
+                "wensu: no browser profile recorded yet; run `wensu setup --browser edge`",
+                file=sys.stderr,
+            )
+            return 2
+
+        if args.browser_command == "show":
+            print(json.dumps(recorded.to_dict(), ensure_ascii=False, indent=2))
+            print(f"profile exists : {Path(recorded.profile_dir).is_dir()}")
+            print(f"extension found: {Path(recorded.extension_dir).is_dir()}")
+            return 0
+
+        process = browser_cfg.start(recorded)
+        print(f"started {recorded.browser} (pid {process.pid}) with profile {recorded.profile_dir}")
+        print("if the toolbar icon is missing, load the unpacked extension once:")
+        print(f"  chrome://extensions -> Load unpacked -> {recorded.extension_dir}")
+        return 0
 
     if args.command in {"search", "detail"}:
         from .bootstrap import build_service

@@ -4,6 +4,52 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.22] - 2026-11-09
+
+### Added — wensu now owns and remembers a browser profile
+
+Until this release wensu only knew how to *connect* to a native host. It had no idea which browser
+profile that host belonged to, so a user who kept the extension in a dedicated window got
+`bridge_ready: false` whenever that window was closed — with nothing in the response explaining why.
+The gap was not a bug; the capability had never existed.
+
+**Setup creates the profile and records it:**
+
+```powershell
+wensu setup --browser edge
+```
+
+```
+browser profile: C:\Users\…\scholar-search\profiles\edge
+recorded in    : C:\Users\…\scholar-search\browser.json
+```
+
+**Starting it always targets that one directory:**
+
+```powershell
+wensu browser start    # → msedge.exe --user-data-dir=<recorded profile>
+wensu browser show     # → print the record, whether the profile and extension exist
+```
+
+`status` gained `browser_profile` (browser, profile dir, whether it exists, extension dir,
+`start_with`), so "the extension is not connected" has an answer better than "find the right window
+yourself".
+
+The profile lives under `profiles_dir()`, which already existed and was unused — and it is a profile
+wensu creates, **never the user's default one**. Touching that would put a research tool's extension
+into whatever the user was already browsing with, and a reset would take their sessions with it.
+
+`wensu setup` is now idempotent: if the assets are already in place it says so and continues with the
+browser profile, rather than aborting. The point of running setup again is usually the profile.
+
+### Docs — the skill says how to wake the right window
+
+The red line now reads as an instruction rather than only a prohibition: read
+`status.browser_profile`, then run `wensu browser start`. That command is the **only** sanctioned way
+to start a browser, and it always passes the recorded `--user-data-dir`. Starting `msedge` by name,
+touching profiles, or killing processes by image name remain forbidden — that is what destroyed a
+user's session and produced nothing.
+
 ## [0.12.21] - 2026-11-09
 
 Addresses BUG-01, BUG-02 and BUG-03 from the 2026-11-09 incident report.

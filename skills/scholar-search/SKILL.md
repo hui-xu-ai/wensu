@@ -41,16 +41,19 @@ description: 通过 wensu MCP 检索文献题录。双渠道：cnki（中文文�
 后台」，执行 `Stop-Process -Name msedge -Force` 再重启。结果关掉了用户正在用的浏览器，重启的又是
 没有扩展的那个 profile，桥接只活了 5 秒。
 
-**正确做法**：
+**正确做法**：先把 `status.browser_profile` 读出来，那里记录了 wensu 自己管的那个 profile。
 
 ```
-status → bridge.ready = false
-       → bridge.remediation   ← 照这段做，它写明唯一允许的动作
-       → 告诉用户：「请打开装有 wensu 扩展的那个浏览器窗口，点一下扩展图标」
+status → browser_profile = null
+       → 还没初始化，让用户跑一次 `wensu setup --browser edge`
+status → browser_profile.start_with = "wensu browser start"
+       → 让用户跑这条命令（或用你自己的终端跑），它会用 --user-data-dir 启动那个特定 profile
+status → bridge.ready = false，但 browser_profile 有值
+       → 让用户跑 `wensu browser start`，然后点一下扩展图标
 ```
 
-`status` 会给出 `bridge.log_path`（日志在哪）和 `bridge.remediation`（怎么处理），
-**不需要自己去翻日志猜**。桥接没就绪时 `search` / `detail` 直接失败且**不扣额度**。
+**这是唯一允许的启动方式**：`wensu browser start` 只对**它自己记录的那个 `--user-data-dir`** 生效。
+**不要**用 `Start-Process msedge`、**不要**按进程名批量操作、**不要**改 profile 或注册表。
 
 ## 最重要的陷阱：年份过滤是「当前页过滤」
 

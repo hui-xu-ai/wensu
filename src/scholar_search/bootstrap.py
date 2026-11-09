@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from . import __version__
 from .adapters.bridge import BridgeAdapter
 from .adapters.bridge.host import PROTOCOL_VERSION
@@ -14,6 +16,29 @@ from .core.policy import PolicyEngine
 from .core.registry import ChannelRegistry
 from .core.risk import RiskGuard
 from .core.service import ScholarService
+
+
+def _browser_summary() -> dict[str, object] | None:
+    """The recorded browser profile, if setup has run.
+
+    Reported so "the extension is not connected" has an answer better than "find the
+    right window yourself" — and so nothing is tempted to guess by inspecting
+    processes.
+    """
+
+    from .core import browser as browser_cfg
+
+    recorded = browser_cfg.load()
+    if recorded is None:
+        return None
+    return {
+        "browser": recorded.browser,
+        "profile_dir": recorded.profile_dir,
+        "profile_exists": Path(recorded.profile_dir).is_dir(),
+        "extension_dir": recorded.extension_dir,
+        "extension_id": recorded.extension_id,
+        "start_with": "wensu browser start",
+    }
 
 
 def build_service() -> ScholarService:
@@ -83,6 +108,10 @@ def build_service() -> ScholarService:
                 "log_path": str(host_runtime_dir() / "logs" / "host.log"),
                 "remediation": None if bridge_up else ScholarService.BRIDGE_REMEDIATION,
             },
+            # Which browser profile wensu owns, so "the extension is not connected"
+            # has an actionable answer other than "figure out which window it is in".
+            # None until `wensu setup --browser` has run.
+            "browser_profile": _browser_summary(),
         }
 
     return ScholarService(
