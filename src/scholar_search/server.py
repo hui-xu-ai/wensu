@@ -7,7 +7,17 @@ from typing import Any, Literal
 from mcp.server.fastmcp import FastMCP
 
 from .core.contracts import SearchQuery
-from .core.errors import RiskBlocked, ScholarSearchError
+from .core.errors import (
+    ActionError,
+    BridgeError,
+    BridgeTimeout,
+    ChannelError,
+    ChannelNotFound,
+    ParseError,
+    PolicyError,
+    RiskBlocked,
+    ScholarSearchError,
+)
 from .core.export import record_from_payload
 from .core.service import ScholarService
 
@@ -27,10 +37,64 @@ def _page_payload(page: Any) -> dict[str, Any]:
     }
 
 
-def _payload(error: Exception) -> dict[str, Any]:
+def _error_code(error: Exception) -> str:
+    """A stable code a caller can branch on, independent of the message wording."""
+
     if isinstance(error, RiskBlocked):
-        return error.to_payload()
-    return {"status": "error", "error": str(error), "kind": type(error).__name__}
+        return "RISK_BLOCKED"
+    if isinstance(error, PolicyError):
+        return f"POLICY_{(error.rule or 'rule').upper().replace('.', '_')}"
+    if isinstance(error, BridgeTimeout):
+        return "BRIDGE_TIMEOUT"
+    if isinstance(error, BridgeError):
+        return "BRIDGE_ERROR"
+    if isinstance(error, ParseError):
+        return "PARSE_ERROR"
+    if isinstance(error, ActionError):
+        return f"ACTION_{(error.code or 'failed').upper().replace('.', '_')}"
+    if isinstance(error, ChannelNotFound):
+        return "CHANNEL_NOT_FOUND"
+    if isinstance(error, ChannelError):
+        return "CHANNEL_ERROR"
+    return "ERROR"
+
+
+def _retryable(error: Exception) -> bool:
+    """Whether repeating the same call could plausibly succeed.
+
+    Transport timeouts can: the page was slow, not wrong. Policy refusals and parse
+    failures cannot: the same request produces the same refusal. A risk block is the
+    one case where retrying is actively harmful.
+    """
+
+    if isinstance(error, RiskBlocked):
+        return False
+    return isinstance(error, (BridgeTimeout, BridgeError))
+
+
+def _payload(
+    error: Exception, *, channel: str | None = None, quota_charged: int = 0
+) -> dict[str, Any]:
+    if isinstance(error, RiskBlocked):
+        payload: dict[str, Any] = dict(error.to_payload())
+        payload["code"] = "RISK_BLOCKED"
+        payload["retryable"] = False
+        payload["quota_charged"] = quota_charged
+        return payload
+    return {
+        "status": "error",
+        "code": _error_code(error),
+        "message": str(error),
+        "kind": type(error).__name__,
+        "channel": channel,
+        "retryable": _retryable(error),
+        "quota_charged": quota_charged,
+    }
+
+
+def _quota(service: ScholarService) -> int | None:
+    value = service.status().get("quota_remaining")
+    return value if isinstance(value, int) else None
 
 
 def build_server(service: ScholarService) -> FastMCP:
@@ -75,28 +139,35 @@ def build_server(service: ScholarService) -> FastMCP:
         (currently webofscience); records whose journal has no metric are dropped,
         which lowers recall by design.
         """
+        before = _quota(service)
         try:
-            return _page_payload(
-                service.search(
-                    SearchQuery(
-                        text=query,
-                        channel=channel,
-                        sort=sort,
-                        page=page,
-                        year_from=year_from,
-                        year_to=year_to,
-                        source_types=tuple(source_types or ()),
-                        limit=limit,
-                        include_abstract=include_abstract,
-                        sort_by=sort_by,
-                        min_citations=min_citations,
-                        sources_only=tuple(sources_only or ()),
-                        min_impact_factor=min_impact_factor,
-                    )
+            result_page = service.search(
+                SearchQuery(
+                    text=query,
+                    channel=channel,
+                    sort=sort,
+                    page=page,
+                    year_from=year_from,
+                    year_to=year_to,
+                    source_types=tuple(source_types or ()),
+                    limit=limit,
+                    include_abstract=include_abstract,
+                    sort_by=sort_by,
+                    min_citations=min_citations,
+                    sources_only=tuple(sources_only or ()),
+                    min_impact_factor=min_impact_factor,
                 )
             )
         except (RiskBlocked, ScholarSearchError) as error:
-            return _payload(error)
+            after = _quota(service)
+            charged = (before - after) if before is not None and after is not None else 0
+            return _payload(error, channel=channel, quota_charged=max(0, charged))
+        payload = _page_payload(result_page)
+        after = _quota(service)
+        payload["quota_charged"] = (
+            max(0, before - after) if before is not None and after is not None else 0
+        )
+        return payload
 
     @mcp.tool()
     def detail(url: str, channel: str | None = None) -> dict[str, Any]:
@@ -105,6 +176,7 @@ def build_server(service: ScholarService) -> FastMCP:
         `channel` is optional: it is inferred from the URL's host. Pass it only to
         override that inference.
         """
+        before = _quota(service)
         try:
             resolved = channel or service.channel_for_url(url)
             if resolved is None:
@@ -114,10 +186,13 @@ def build_server(service: ScholarService) -> FastMCP:
                     "message": f"no channel claims the host of {url!r}",
                     "channel": None,
                     "retryable": False,
+                    "quota_charged": 0,
                 }
             return service.detail(url, channel=resolved).to_dict()
         except (RiskBlocked, ScholarSearchError) as error:
-            return _payload(error)
+            after = _quota(service)
+            charged = (before - after) if before is not None and after is not None else 0
+            return _payload(error, channel=channel, quota_charged=max(0, charged))
 
     @mcp.tool()
     def export(

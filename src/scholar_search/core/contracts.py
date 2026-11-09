@@ -202,6 +202,13 @@ class SearchPage:
 # --------------------------------------------------------------------------
 
 
+# Which record fields a channel may declare support for. Deliberately a closed set:
+# an unknown key is a typo that would silently never be reported to callers.
+FIELD_SUPPORT_KEYS = frozenset(
+    {"abstract", "keywords", "doi", "volume", "pages", "paging"}
+)
+
+
 @dataclass(frozen=True, slots=True)
 class ChannelManifest:
     channel: str
@@ -212,6 +219,12 @@ class ChannelManifest:
     verbs: tuple[str, ...]
     capabilities: tuple[str, ...]
     detail_url_prefixes: tuple[str, ...] = ()
+    # Which record fields this channel can actually fill. A list row on CNKI has a
+    # title, authors and a year but no abstract, keywords or DOI — that is a
+    # property of the site, not a bug. Declaring it lets a caller choose a different
+    # channel or accept the gap, instead of asking for `include_abstract` and
+    # silently receiving nulls.
+    field_support: Mapping[str, bool] = field(default_factory=dict)
 
     def validate(self) -> None:
         unknown = set(self.verbs) - VERBS
@@ -229,6 +242,9 @@ class ChannelManifest:
         for cap in self.capabilities:
             if cap not in {"search", "detail", "journal", "export", "journal_metrics"}:
                 raise ValueError(f"unknown capability: {cap!r}")
+        for name in self.field_support:
+            if name not in FIELD_SUPPORT_KEYS:
+                raise ValueError(f"unknown field_support entry: {name!r}")
 
 
 @runtime_checkable

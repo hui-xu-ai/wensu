@@ -16,5 +16,13 @@
     "sleep"
   ],
   "detail_url_prefixes": ["/kcms2/article/abstract"],
-  "capabilities": ["search", "detail"]
+  "capabilities": ["search", "detail"],
+  "field_support": {
+    "abstract": false,
+    "keywords": false,
+    "doi": false,
+    "volume": false,
+    "pages": false,
+    "paging": true
+  }
 }

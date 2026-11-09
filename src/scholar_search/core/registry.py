@@ -56,6 +56,7 @@ def _load_manifest(path: Path) -> ChannelManifest:
         verbs=tuple(raw["verbs"]),
         capabilities=tuple(raw["capabilities"]),
         detail_url_prefixes=tuple(raw.get("detail_url_prefixes", ())),
+        field_support=dict(raw.get("field_support", {})),
     )
     manifest.validate()
     return manifest
