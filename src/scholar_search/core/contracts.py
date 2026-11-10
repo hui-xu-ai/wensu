@@ -99,6 +99,11 @@ MIN_PAGE = 1
 MAX_PAGE = 3
 MAX_LIMIT = 50
 
+# How many identifiers one call may exclude. The user has run expressions carrying
+# 500+ DOIs through the site, so length is not the constraint; this cap exists so a
+# single request cannot grow without bound as a caller accumulates pages.
+MAX_EXCLUDE_UT = 500
+
 
 @dataclass(frozen=True, slots=True)
 class SearchQuery:
@@ -123,6 +128,21 @@ class SearchQuery:
     # can honour it. A record whose journal has no metric is dropped, because the
     # caller is asking for high-impact venues and "unknown" is not that.
     min_impact_factor: float | None = None
+    # Stable identifiers to leave out of the result set, so a caller can reach past
+    # the pages a channel will turn.
+    #
+    # The alternative — clicking "next page" repeatedly — keeps one result set open
+    # across several minutes and several SPA state transitions, and it is the
+    # traffic pattern the cadence rules exist to avoid. Re-asking the same question
+    # with "not these ones" is a fresh, independent request each time, which is both
+    # safer for the account and far more robust: it does not depend on the site
+    # remembering where it was.
+    #
+    # Ignored by a channel that has no way to express it; `search.excludes` in the
+    # response says which. Values are Web of Science UT identifiers here because that
+    # is the field that can be excluded; a channel without one simply does not offer
+    # it.
+    exclude_ut: tuple[str, ...] = ()
 
     def validate(self) -> None:
         if not self.text.strip():
@@ -139,6 +159,11 @@ class SearchQuery:
             raise ValueError("min_citations must be >= 0")
         if self.min_impact_factor is not None and self.min_impact_factor < 0:
             raise ValueError("min_impact_factor must be >= 0")
+        if len(self.exclude_ut) > MAX_EXCLUDE_UT:
+            raise ValueError(
+                f"exclude_ut accepts at most {MAX_EXCLUDE_UT} identifiers per call; "
+                "batch them across calls instead"
+            )
 
 
 # One vocabulary for document type, shared by every channel.

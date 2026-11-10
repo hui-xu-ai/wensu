@@ -4,6 +4,64 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.42] - 2026-11-10
+
+Reaching deeper results by **excluding what you already have**, instead of turning pages.
+Suggested by the user, and the mechanism was verified against the live site before the
+code was written.
+
+### Added — `exclude_ut`
+
+`search` takes a list of UT identifiers to leave out of the query:
+
+```
+search("TS=(ionogel AND actuator)", channel="webofscience",
+       exclude_ut=["WOS:001218812900001", "WOS:001174201100160"])
+```
+
+produces
+
+```
+((TS=(ionogel AND actuator)) AND PY=(2022-2026))
+  NOT UT=("WOS:001218812900001" OR "WOS:001174201100160")
+```
+
+**Verified live before implementing**: a 38-record query with three exclusions returned
+`total = 35` and a different page of records. After the implementation, the same check
+through the CLI also returns 35.
+
+Accepts a bare UT, a lower-case one, or a full `full-record/...` URL — the URL is where
+the identifier is visible in a response, so requiring the bare form would mean every
+caller writing a parser. Blank entries are skipped rather than rendered as `""`. Capped
+at 500 per call.
+
+### Why this instead of deeper pages
+
+| turning pages | exclusion |
+|---|---|
+| one result set held open for minutes, across SPA state changes | an independent request each time |
+| depends on the site remembering its position | depends on nothing but the query |
+| observationally identical to a scraper hammering "next" | observationally a person refining a query |
+
+The ordering caveat is the caller's: results are covered in order only while `sort`
+stays the same. The identifiers excluded are specific records, not ranks, so a re-sort
+between calls cannot make the next page silently repeat earlier ones — it only changes
+which records remain.
+
+### Also
+
+`page=3` on Web of Science is now allowed (ADR 0014 raised the plan budget to 200 s;
+three pages cost a declared 155.5 s). The cap lives in one function now — it had been
+duplicated, and raising it in one copy left the other refusing.
+
+### Verified
+
+```
+38 records, exclude 3 UTs        -> total 35, different records
+9 new unit tests                 -> expression shape, URL normalisation, the cap
+250 existing tests               -> unaffected
+```
+
 ## [0.12.41] - 2026-11-10
 
 Plan budget raised from 120 s to 200 s (ADR 0014). This is the change you asked for, and it

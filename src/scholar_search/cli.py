@@ -68,6 +68,18 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--min-citations", type=int, default=None)
     search.add_argument("--sources-only", action="append", metavar="JOURNAL", default=None)
     search.add_argument("--min-impact-factor", type=float, default=None)
+    search.add_argument(
+        "--exclude-ut",
+        action="append",
+        dest="exclude_ut",
+        metavar="UT",
+        default=None,
+        help=(
+            "leave this UT out of the query (repeatable). Web of Science only. "
+            "Grow the list across calls instead of asking for a deeper page: each "
+            "call is then an independent request rather than one long-held result set"
+        ),
+    )
     search.add_argument("--format", choices=["json", "ris", "endnote"], default="json")
 
     detail = sub.add_parser("detail", help="print one record by its detail URL")
@@ -421,6 +433,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 min_citations=args.min_citations,
                 sources_only=tuple(args.sources_only or ()),
                 min_impact_factor=args.min_impact_factor,
+                exclude_ut=tuple(args.exclude_ut or ()),
             )
             before_quota = service.status(brief=True).get("quota_remaining")
             page = service.search(query)

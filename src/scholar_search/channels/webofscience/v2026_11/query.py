@@ -156,8 +156,38 @@ def build(query: SearchQuery, *, today: dt.date | None = None) -> str:
 
     # An explicit PY= in the caller's expression already bounds the span; adding
     # a second one would intersect two ranges and quietly drop records.
-    if "PY" in field_tokens(text):
-        return body
+    if "PY" not in field_tokens(text):
+        start, end = resolve_span(query, today)
+        body = f"({body}) AND PY=({start}-{end})"
 
-    start, end = resolve_span(query, today)
-    return f"({body}) AND PY=({start}-{end})"
+    exclusion = _exclusion(query.exclude_ut)
+    return f"({body}){exclusion}" if exclusion else body
+
+
+def _exclusion(identifiers: tuple[str, ...]) -> str:
+    """`NOT UT=(...)` for the records a caller has already seen.
+
+    Verified against the live site: excluding three UTs from a 38-record query
+    returned a total of 35 and a different page of results, so the clause narrows the
+    set rather than being ignored.
+
+    Values are normalised to the bare `WOS:...` form the site uses. A caller that
+    passes the full detail URL is tolerated, because that is where the identifier is
+    visible in a response.
+    """
+
+    cleaned: list[str] = []
+    for raw in identifiers:
+        value = str(raw).strip()
+        if not value:
+            continue
+        # Accept a full record URL, a bare UT, or a lower-cased one.
+        if "/" in value:
+            value = value.rsplit("/", 1)[-1]
+        value = value.upper()
+        if not value.startswith("WOS:"):
+            value = f"WOS:{value}"
+        cleaned.append(f'"{value}"')
+    if not cleaned:
+        return ""
+    return " NOT UT=(" + " OR ".join(cleaned) + ")"

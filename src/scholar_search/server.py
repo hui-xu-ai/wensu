@@ -357,6 +357,18 @@ def build_server(service: ScholarService) -> FastMCP:
         min_impact_factor: Annotated[float, Field(ge=0)] | None = None,
         site_sort: Literal["relevance", "date", "citation"] | None = None,
         local_sort: Literal["none", "citations", "year"] | None = None,
+        exclude_ut: Annotated[
+            list[str] | None,
+            Field(
+                default=None,
+                description=(
+                    "UT identifiers already seen, left out of this query. Web of "
+                    "Science only. Ask again with the excluded set grown instead of "
+                    "turning to a deeper page: each call is then an independent "
+                    "request rather than one long-held result set."
+                ),
+            ),
+        ] = None,
         fields: Annotated[
             list[FieldName] | None,
             Field(
@@ -449,6 +461,7 @@ def build_server(service: ScholarService) -> FastMCP:
             min_citations=min_citations,
             sources_only=tuple(sources_only or ()),
             min_impact_factor=min_impact_factor,
+            exclude_ut=tuple(exclude_ut or ()),
         )
         try:
             result_page = service.search(request)
