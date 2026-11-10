@@ -30,7 +30,19 @@ class HardLimits:
     cooldown_hours: int = 24
     concurrency: int = 1
     max_actions_per_plan: int = 40
-    max_plan_seconds: int = 120
+    # Wall-clock ceiling for one plan, checked as the sum of every action's declared
+    # timeout *before* the plan runs.
+    #
+    # 200 s, raised from 120 s by ADR 0014. The check is a static worst case, not a
+    # measurement: a Web of Science page declares ~118 s of timeouts and typically
+    # finishes in ~49 s, so the old ceiling was refusing work that fits comfortably
+    # in reality, and the response was to shrink per-action deadlines (a 15 s wait
+    # became 9 s) to satisfy arithmetic. Raising the ceiling restores those deadlines
+    # instead of pretending the network is faster than it is.
+    #
+    # It stays a ceiling: a plan still cannot declare more than this, which is what
+    # stops a channel from asking a tab to sit for an unbounded time.
+    max_plan_seconds: int = 200
 
 
 HARD = HardLimits()

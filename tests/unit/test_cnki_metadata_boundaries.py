@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from scholar_search.channels.cnki.v2026_10 import parse_detail, plan_search
+from scholar_search.core.config import HARD
 from scholar_search.core.contracts import SearchQuery, SortOrder
 
 FIXTURE = (
@@ -55,7 +56,7 @@ def test_search_waits_reserve_reply_time(text: str, page: int, sort: SortOrder, 
     # Validate every public search combination without opening a browser.
     query = SearchQuery(text, page=page, sort=sort, limit=limit)
     plan = plan_search.build(query)
-    assert sum(action.timeout_ms for action in plan.actions) <= 120_000
+    assert sum(action.timeout_ms for action in plan.actions) <= HARD.max_plan_seconds * 1000
     waits = [action for action in plan.actions if action.verb == "wait_for"]
     assert waits
     for action in waits:

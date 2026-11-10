@@ -4,6 +4,59 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.41] - 2026-11-10
+
+Plan budget raised from 120 s to 200 s (ADR 0014). This is the change you asked for, and it
+turned out to unblock page 3 as a side effect.
+
+### Changed — `max_plan_seconds` 120 → 200
+
+`PolicyEngine.validate_plan` sums every action's declared `timeout_ms` **before** the plan
+runs. That is a static worst case, not a measurement, and the gap was large:
+
+| plan | declared | actually took |
+|---|---|---|
+| WoS page 1 | 92 s | 31.6 s |
+| WoS page 2 | 124 s | 49.2 s |
+
+The declared figure is ~2.5× reality because every `wait_for` counts as "waits its full
+deadline", while in practice it returns in milliseconds (result list: 30 ms) or seconds
+(capture: 5 s).
+
+So the 120 s ceiling was refusing work that fits comfortably, and my response had been to
+shrink per-action deadlines — the 15 s wait for the result list became 9 s. **That made the
+tool worse at exactly the thing the deadline exists for: a slow network.** Those deadlines
+are restored to 15 s.
+
+### Changed — WoS accepts 3 pages instead of 2
+
+Measured marginal cost per page turn is ~32 s: 93 → 124 → 155.5 s, all inside 200 s.
+
+Page 4 is still refused, and not on clock grounds — it would be a fourth re-submission of
+the same query, which is the traffic pattern the cadence rules exist to avoid. The kernel's
+`max_pages_per_call` is 3 as well.
+
+The cap now lives in one function, `_reject_too_many_pages`. It had been duplicated in both
+plan builders, and raising the number in one of them left the other silently refusing —
+which is exactly what happened during this change.
+
+### Not done
+
+**The check is still static.** The right fix is to accumulate wall-clock time during
+execution and keep the static sum as a fallback, but that touches the planner loop, and two
+core extension behaviours were already changed today. Recorded in ADR 0014 as the deferred
+option.
+
+### Verified
+
+```
+page 1: 92.0 s declared
+page 2: 123.9 s declared
+page 3: 155.5 s declared   ← was refused, now allowed
+page 4: refused
+budget: 200 s
+```
+
 ## [0.12.40] - 2026-11-10
 
 The WoS split path now completes without a single timeout. Two changes, both from field

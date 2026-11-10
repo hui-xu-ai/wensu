@@ -61,7 +61,7 @@ READ_TIMEOUT_MS = 8_000
 #
 # 10 s: the audit trail shows about 9.5 s from the submit click to a rendered result
 # list on a slow run, and two-page plans have to stay inside the kernel's 120 s budget.
-RESULT_TIMEOUT_MS = 9_000
+RESULT_TIMEOUT_MS = 15_000
 
 # Must exceed capture.js's standby budget (6 windows x 1.5 s = 9 s), otherwise a
 # payload whose tail takes a while to parse is declared complete *after* this wait
@@ -241,6 +241,30 @@ def build_until_click(query: SearchQuery, *, today: dt.date | None = None) -> Pl
     )
 
 
+def _reject_too_many_pages(query: SearchQuery) -> None:
+    """Refuse a page count the plan cannot fit inside the kernel's budget.
+
+    One place, called by both builders. Having this check in two functions meant
+    raising the limit in one of them left the other still refusing — which is exactly
+    what happened when the ceiling moved from 120 s to 200 s.
+
+    Three pages fit: measured marginal cost per turn is ~32 s, so 93 + 32 + 32 ≈ 157 s
+    against a 200 s ceiling (ADR 0014). It stops at three because the kernel's
+    `max_pages_per_call` is 3, and because a fourth turn would be a fourth
+    re-submission of the same query — the traffic pattern the cadence rules exist to
+    avoid.
+    """
+
+    if query.page > 3:
+        raise ChannelError(
+            "the webofscience channel supports at most 3 pages per call: each page "
+            "re-submits the search and waits for the capture stream to refill (~32 s "
+            "per turn). Narrow the query or change the year range instead of asking "
+            "for a later page — there is no continuation interface, so repeating the "
+            "same page number returns the same records."
+        )
+
+
 def build_after_click(query: SearchQuery) -> Plan:
     """Reload for the full result set, then read it.
 
@@ -254,12 +278,7 @@ def build_after_click(query: SearchQuery) -> Plan:
             "clicks, each page costs two more actions, and together they exceed the "
             "kernel's 120 s plan budget"
         )
-    if query.page > 2:
-        raise ChannelError(
-            "the webofscience channel supports at most 2 pages per call: every page "
-            "needs a scroll round to refill 50 records, and a third would exceed the "
-            "kernel's 120 s plan budget"
-        )
+    _reject_too_many_pages(query)
 
     actions: list[Action] = [
         # The click navigates in-page. A reload navigates to the *current* URL, so
@@ -286,14 +305,9 @@ def build(query: SearchQuery, *, today: dt.date | None = None) -> Plan:
             "clicks, each page costs two more actions, and together they exceed the "
             "kernel's 120 s plan budget"
         )
-    if query.page > 2:
-        raise ChannelError(
-            "the webofscience channel supports at most 2 pages per call: each page "
-            "re-submits the search and waits for the capture stream to refill, and a "
-            "third would exceed the kernel's 120 s plan budget. Narrow the query or "
-            "change the year range instead of asking for page 3 — there is no "
-            "continuation interface, so repeating page 2 returns the same records."
-        )
+    # Kept in one place: `build_after_click` enforces the same cap, and two copies of
+    # this check meant raising the limit in one spot left the other refusing.
+    _reject_too_many_pages(query)
 
     head = build_until_click(query, today=today)
     tail = build_after_click(query)

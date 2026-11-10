@@ -66,7 +66,7 @@ the kernel and the host.
 ## Validation layers
 
 1. **Kernel** – whole plan before the first action: verb set, manifest domains,
-   parameter schema, action count (≤40), duration (≤120s).
+   parameter schema, action count (≤40), duration (≤200s).
 2. **Host** – re-validates verb, parameter schema, deadline, domains supplied
    with the request, and frame size. A request failing here never reaches the
    browser.
@@ -101,7 +101,7 @@ plans until `wensu reset --confirm`.
 
 - each frame ≤ 2 MiB; `write_frame` refuses to emit more;
 - `read_html` truncates by UTF-8 bytes (1 MB) and sets `truncated: true`;
-- per-action deadline ≤ 15s, whole plan ≤ 120s.
+- per-action deadline ≤ 15s, whole plan ≤ 200s.
 
 ## Versioning
 

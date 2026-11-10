@@ -95,11 +95,22 @@ def test_worst_case_budget_holds_across_random_pacing() -> None:
         assert sum(a.timeout_ms for a in plan.actions) <= HARD.max_plan_seconds * 1000
 
 
-def test_a_third_page_is_refused() -> None:
-    """Each page needs a scroll round to refill; three of them blow the budget."""
+def test_three_pages_fit_and_a_fourth_is_refused() -> None:
+    """The cap is a channel decision measured against the kernel's budget.
+
+    Measured marginal cost per page turn is ~32 s, so three pages land near 155 s
+    against a 200 s ceiling (ADR 0014). A fourth would still fit the clock but is
+    refused on traffic grounds: it is a fourth re-submission of the same query, and
+    the kernel's `max_pages_per_call` is 3.
+    """
+
+    for page in (1, 2, 3):
+        plan = plan_search.build(_query(page=page))
+        assert sum(a.timeout_ms for a in plan.actions) <= HARD.max_plan_seconds * 1000
+        assert len(plan.actions) <= HARD.max_actions_per_plan
 
     with pytest.raises(ChannelError):
-        plan_search.build(_query(page=3))
+        plan_search.build(_query(page=4))
 
 
 def test_pages_and_sort_cannot_share_one_call() -> None:

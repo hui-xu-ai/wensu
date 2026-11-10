@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from scholar_search.channels.cnki.v2026_10 import get_channel, plan_search
+from scholar_search.core.config import HARD
 from scholar_search.core.contracts import SearchQuery
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "cnki_search_2026_10.html"
@@ -174,14 +175,16 @@ def test_unsupported_filters_fail_loudly() -> None:
 
 def test_plan_stays_within_budget() -> None:
     plan = plan_search.build(SearchQuery(text="IPMC", channel="cnki", page=3))
-    assert sum(action.timeout_ms for action in plan.actions) <= 120_000
+    # Read the limit, do not restate it: a literal here means raising the ceiling
+    # silently breaks a test that was only ever asserting the current number.
+    assert sum(action.timeout_ms for action in plan.actions) <= HARD.max_plan_seconds * 1000
 
 
 def test_worst_case_plan_stays_within_budget() -> None:
     plan = plan_search.build(
         SearchQuery(text="IPMC", channel="cnki", page=3, limit=50, sort="date")
     )
-    assert sum(action.timeout_ms for action in plan.actions) <= 120_000
+    assert sum(action.timeout_ms for action in plan.actions) <= HARD.max_plan_seconds * 1000
 
 
 def test_sleep_actions_leave_room_for_a_throttled_tab() -> None:

@@ -59,7 +59,7 @@ client ──search(query)──▶ server.search
                             ▼
                        planner.run(plan, manifest)
                             ├─ 跨进程锁 state/plan.lock（超时 90s）
-                            ├─ policy.validate_plan：动词、域名、≤40 动作、≤120s
+                            ├─ policy.validate_plan：动词、域名、≤40 动作、≤200s
                             └─ 逐个动作：
                                  ├─ risk.ensure_ready()（别的进程可能刚触发冷却）
                                  ├─ 网络动作 → policy.wait_turn()（3s 下限 + 抖动）
@@ -99,7 +99,7 @@ client ──search(query)──▶ server.search
 
 几个容易踩的点：
 
-- **读类动作不占配额**，但占计划时长预算（总和 ≤120s）。所以"多等一下"不是免费的。
+- **读类动作不占配额**，但占计划时长预算（总和 ≤200s）。所以"多等一下"不是免费的。
 - **`sleep` 的 `timeout_ms` 必须大于 `ms`**。浏览器在窗口非前台时会把定时器按整秒分桶，
   暂停最多晚到近 1 秒；0.3.15 起统一用 `plan_search.settle(ms)`（自带 2s 余量），
   不要手写 `Action("sleep", ...)`。
