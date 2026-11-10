@@ -4,6 +4,41 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.38] - 2026-11-10
+
+Field test of 0.12.37 found that the W02 fix broke the channel it was meant to help.
+
+### Reverted — the landing guard rejected a real Web of Science search (W02)
+
+0.12.37 failed the call when a submit click returned no URL *and* the control never
+reported going busy. That condition is always true on WoS: its submit button never goes
+busy, so the query ran, spent four quota points, and then the call reported "the query
+may not have started".
+
+An unconfirmed landing is now carried forward instead of judged. The tail plan reads
+the page and the caller sees what is actually there — if the click really did nothing,
+the read returns the form and the parse fails visibly rather than being pre-empted by a
+guess. **The old behaviour (silently reloading the form) is not restored**; what changed
+is that the guard no longer asserts a failure it cannot prove.
+
+Verified live: `TS=(ionic AND actuator)` on WoS returns `total=794`, 3 records, 4 quota,
+26.8 s.
+
+### Confirmed by field test
+
+| fix | live result |
+|---|---|
+| **W08** seeding | a WoS record with no abstract now returns full detail (DOI, volume, issue) at `charged=0` from cache |
+| **W07** JCR year | `IF=5.8 JCR=2025`, `IF=4.9 JCR=2025`, `IF=null JCR=null` |
+| **W09** lock probe | stale `Default/LOCK` reports `False`, falls back to `browser start` |
+| **W01** page limit | `page=3` rejected in 0 quota with a message that now also says why repeating page 2 will not help |
+
+### Changed
+
+The WoS page-limit error said each page "needs a scroll round", which stopped being true
+when the split plan replaced scrolling with a reload. It now describes what the plan
+actually does and what to do instead.
+
 ## [0.12.37] - 2026-11-10
 
 WoS review (`docs/reviews/wensu-wos-0.12.36-2026-11-10.md`), from a real research task rather than a

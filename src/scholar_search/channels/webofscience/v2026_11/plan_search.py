@@ -249,9 +249,11 @@ def build(query: SearchQuery, *, today: dt.date | None = None) -> Plan:
         )
     if query.page > 2:
         raise ChannelError(
-            "the webofscience channel supports at most 2 pages per call: every page "
-            "needs a scroll round to refill 50 records, and a third would exceed the "
-            "kernel's 120 s plan budget"
+            "the webofscience channel supports at most 2 pages per call: each page "
+            "re-submits the search and waits for the capture stream to refill, and a "
+            "third would exceed the kernel's 120 s plan budget. Narrow the query or "
+            "change the year range instead of asking for page 3 — there is no "
+            "continuation interface, so repeating page 2 returns the same records."
         )
 
     head = build_until_click(query, today=today)

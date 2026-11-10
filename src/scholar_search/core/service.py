@@ -171,21 +171,29 @@ class ScholarService:
             # A click that overran the extension's 2 s race returns
             # `navigation_expected: true` and **no url**. Treating "no url" as "no
             # problem" skipped this guard entirely, and the next step then reloaded the
-            # search form — which is a page refresh that accomplishes nothing, while
-            # the tail plan carried on as if a results page were loaded. A review
-            # reproduced exactly that.
+            # search form.
             #
-            # No url means the landing was not confirmed. If the site also never
-            # reported the submit control going busy, the click did nothing and saying
-            # otherwise is the failure; if it did go busy, the site ran the query and
-            # the missing url is only a reporting gap.
+            # But it cannot be treated as a failure either, which is what the first
+            # attempt at this did: it required `settled` and reported "the query may
+            # not have started" on a real Web of Science search that had already
+            # spent three quota points and did run. WoS's submit control never reports
+            # going busy, so that condition was always true for the one channel that
+            # most needs the split path.
+            #
+            # So an unconfirmed landing is carried forward rather than judged: the
+            # tail plan reads the page, and the caller sees what is actually there. If
+            # the click really did nothing, the read returns the form and the parse
+            # fails visibly instead of being pre-empted by a guess.
+            #
+            # The one thing that must not happen is reloading the *search form*: a
+            # reload there re-runs the query against nothing and wastes a round. When
+            # the landing is unknown, the tail is still run — but the reload is
+            # skipped only if the URL proves it is a form, which is exactly what
+            # `is_results` decides below.
             if landed is None and not settled:
-                raise ActionError(
-                    "the submit click returned no landing url and the control never "
-                    "became busy, so the query may not have started",
-                    verb="click",
-                    code="click.not_started",
-                )
+                # Nothing was confirmed. Carry on without asserting either outcome;
+                # the tail plan reads whatever is on screen.
+                pass
             # The click waits for the site to finish, so this URL is the final state,
             # not a sample taken mid-flight. A tab on anything other than a results
             # route means the query matched nothing: that is where the "no results"
