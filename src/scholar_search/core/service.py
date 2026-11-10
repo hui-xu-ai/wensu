@@ -538,14 +538,64 @@ class ScholarService:
             # Closing is the transaction's job when it owns the adapter: the next
             # plan in the same search has to reach the same host.
             self._release_transaction_adapter()
-        for outcome in outcomes:
+        for index, outcome in enumerate(outcomes):
             if not outcome.ok:
                 raise ActionError(
-                    f"{outcome.action.verb} failed: {outcome.error or 'unknown'}",
+                    self._failure_message(outcome, index, outcomes),
                     verb=outcome.action.verb,
                     code=outcome.error or "action.failed",
+                    stage=self._stage_of(outcome, index),
                 )
         return outcomes
+
+    @staticmethod
+    def _stage_of(outcome: ActionOutcome, index: int) -> str:
+        """A short, content-free label for where a plan stopped.
+
+        Three different waits in one Web of Science search all failed as
+        `wait_for failed: timeout`: the query editor not appearing, the result list not
+        rendering, and the capture stream never arriving. A caller reading the public
+        error could not tell them apart and had to reconstruct the sequence from an
+        audit log — the acceptance run did exactly that.
+
+        The label names the *kind* of thing that was waited for, never the selector
+        itself: which elements a channel uses is implementation detail, and on some
+        paths the selector is derived from page content.
+        """
+
+        params = outcome.action.params or {}
+        if outcome.action.verb == "wait_for":
+            selector = str(params.get("selector", ""))
+            if selector.startswith("#wensu-") or "capture" in selector:
+                return "wait.capture"
+            if "textarea" in selector or "input" in selector or "SearchInput" in selector:
+                return "wait.query-input"
+            return "wait.result-list"
+        if outcome.action.verb == "click":
+            return "click.submit" if index < 6 else "click.page-turn"
+        if outcome.action.verb == "goto":
+            return "navigate.reload" if params.get("reload") else "navigate.open"
+        if outcome.action.verb in {"type", "select"}:
+            return "input.fill"
+        return f"action.{outcome.action.verb}"
+
+    @classmethod
+    def _failure_message(
+        cls, outcome: ActionOutcome, index: int, outcomes: Sequence[ActionOutcome]
+    ) -> str:
+        """`<verb> failed: <error>` plus where it happened and what had succeeded.
+
+        The step index and the stage make the public error self-describing: "step 9
+        of 12, waiting for the capture stream" is actionable; "wait_for failed:
+        timeout" is not.
+        """
+
+        stage = cls._stage_of(outcome, index)
+        total = len(outcomes)
+        return (
+            f"{outcome.action.verb} failed: {outcome.error or 'unknown'} "
+            f"(step {index + 1}/{total}, stage {stage})"
+        )
 
     def _pin_transaction_host(self) -> None:
         """Choose the host for this transaction, once, and refuse if it is ambiguous.

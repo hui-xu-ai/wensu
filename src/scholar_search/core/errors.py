@@ -32,10 +32,14 @@ class PolicyError(ScholarSearchError):
 class ActionError(ScholarSearchError):
     """A browser action failed; dependent actions must not run."""
 
-    def __init__(self, message: str, *, verb: str, code: str) -> None:
+    def __init__(self, message: str, *, verb: str, code: str, stage: str | None = None) -> None:
         super().__init__(message)
         self.verb = verb
         self.code = code
+        # Where in the plan it stopped. `stage` is a short kind label such as
+        # `wait.capture` or `click.submit`, never a selector: three different waits in
+        # one WoS search used to be indistinguishable from the outside.
+        self.stage = stage
 
 
 class RiskBlocked(ScholarSearchError):

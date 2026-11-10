@@ -4,6 +4,66 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.44] - 2026-11-10
+
+Two findings from the 0.12.43 acceptance run, plus a defect that run exposed in my own
+previous fix.
+
+### Fixed — the capture never became ready on a query that had succeeded
+
+0.12.43's acceptance query returned nothing: `wait_for failed: timeout` after the refresh,
+while the browser window title read "115 results".
+
+The cause was the readiness rule I added in 0.12.40:
+
+```js
+return carriesRecords();   // no bound
+```
+
+`data-ready` was withheld until the buffer matched a pattern for the records block. When
+it did not match, the capture waited forever — so a query the site had already answered
+looked like a dead bridge. **A test that can only be satisfied by one specific payload
+shape is not a readiness signal, it is a trap.** I verified that fix against one payload
+and never asked what happens when the pattern does not match.
+
+Now: the pattern is broader, and the wait is bounded to three idle windows (~6 s) before
+handing the buffer to the parser and letting it read a short page. A new capture resets
+the counter.
+
+Verified on the exact query that failed: `total=115, 5 records, 4 quota, 32.5 s`.
+
+### Added — the public error names the stage (W05)
+
+Three waits in one Web of Science search produced the identical message:
+
+```
+wait_for failed: timeout
+```
+
+The query editor, the result list, and the capture stream were indistinguishable from
+outside; the acceptance run had to reconstruct the sequence from the audit log and the plan
+source. Failures now carry `stage`:
+
+```
+wait.query-input    wait.result-list    wait.capture
+click.submit        click.page-turn     navigate.reload    navigate.open
+```
+
+and the message reads `wait_for failed: timeout (step 9/12, stage wait.capture)`.
+
+`stage` names the *kind* of thing waited for, never the selector — which elements a
+channel uses is implementation detail, and on some paths the selector is derived from page
+content. A test asserts the selector cannot reach the payload.
+
+### Fixed — `scholar-detail` said CNKI only
+
+The skill's first rule read "只接受知网域名下的 https 链接". `detail` has accepted a URL
+from either channel and a bare DOI for several releases, and WoS detail is served from the
+search-seeded cache at zero cost. A session reading that skill would not have tried.
+
+The skill now has a per-channel table, says the channel is inferred, and points at
+`detail_many` for batches.
+
 ## [0.12.43] - 2026-11-10
 
 Two ways to get more records existed side by side with no rule saying which to use. This

@@ -266,6 +266,13 @@ def _payload(
         "retryable": _retryable(error),
         "quota_charged": quota_charged,
     }
+    # The stage a plan stopped at, when the failure knows it. Without this a caller
+    # sees `wait_for failed: timeout` and cannot tell a missing query editor from a
+    # result list that never rendered from a capture stream that never arrived — the
+    # acceptance run had to reconstruct that from an audit log.
+    stage = getattr(error, "stage", None)
+    if isinstance(stage, str) and stage:
+        payload["stage"] = stage
     # A caller that cannot act on an error will improvise. When the bridge is the
     # problem, say what the one permitted reaction is — an agent that was left to
     # guess once killed the user's browser.

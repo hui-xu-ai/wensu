@@ -1,6 +1,6 @@
 {
   "name": "@hui-xu-ai/dsh-wensu",
-  "version": "0.12.43",
+  "version": "0.12.44",
   "description": "DSH bundle that mounts the wensu (文溯) MCP server over stdio: read-only CNKI and Web of Science bibliographic search.",
   "license": "MIT",
   "author": "hui-xu-ai",

@@ -124,14 +124,36 @@
   }
 
   function carriesRecords() {
-    return /"key"\s*:\s*"records"/.test(buffer);
+    // Tolerant of spacing and of the key appearing inside a larger object: the
+    // payload is newline-delimited JSON written by the site, not by us, and an exact
+    // pattern here would be a promise we cannot keep about someone else's format.
+    return /"key"\s*:\s*"records"/.test(buffer) || /"records"\s*:/.test(buffer);
   }
+
+  // How many idle windows to keep waiting for promised records before giving up and
+  // letting the reader decide.
+  //
+  // This is the difference between "wait until the data is here" and "wait until my
+  // test passes". The first version of `satisfiesDeclaredCount` had no bound: if the
+  // site declared 115 records and this file's pattern did not recognise them, the
+  // capture never became ready and the caller saw a 10 s timeout on a query that had
+  // actually succeeded — the window title even said "115 results". A test that can
+  // only ever be satisfied by one specific payload shape is not a readiness signal,
+  // it is a trap.
+  //
+  // Three windows (~6 s) is longer than the observed inter-batch gap and far shorter
+  // than the plan's capture deadline, so a real shortfall still reads as a short
+  // capture downstream instead of a timeout here.
+  const MAX_READY_WAITS = 3;
+  let readyWaits = 0;
 
   function satisfiesDeclaredCount() {
     const declared = declaredRecords();
     if (declared === null) return true; // nothing promised: nothing to wait for
     if (declared === 0) return true; // the site itself says there are none
-    return carriesRecords();
+    if (carriesRecords()) return true;
+    readyWaits += 1;
+    return readyWaits > MAX_READY_WAITS;
   }
 
   function looksComplete() {
@@ -187,6 +209,9 @@
       buffer = "";
       needSeparator = false;
       pending = 0;
+      // A new result set gets a fresh readiness budget. Carrying the counter over
+      // would let one slow capture cause the next one to give up immediately.
+      readyWaits = 0;
       const element = ensureNode();
       element.removeAttribute("data-ready");
       element.textContent = "";
