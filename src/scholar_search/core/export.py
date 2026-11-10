@@ -105,14 +105,31 @@ def _year(value: Any) -> str:
     raise ValueError("year must be an integer or a four-digit string")
 
 
+# Keys the tool wraps *around* a record rather than storing *in* it. `detail` flattens
+# them onto the record, so a caller passing a detail response straight to `export` is
+# doing the obvious thing — these are skipped rather than reported as unknown fields.
+ENVELOPE_FIELDS = frozenset({"quota_charged", "quota_remaining"})
+
+
 def record_from_payload(payload: Mapping[str, Any]) -> Record:
     """Build a Record from a client payload, rejecting malformed fields."""
 
     if not isinstance(payload, Mapping):
         raise ValueError("record must be an object")
-    unknown = set(payload) - _KNOWN
+    # `detail` returns the record with the response envelope flattened into it, so the
+    # natural flow — take what `detail` gave you and hand it to `export` — used to fail
+    # on wensu's own bookkeeping fields:
+    #
+    #   unknown record fields: ['quota_charged', 'quota_remaining']
+    #
+    # The caller had to know which keys were "real" and drop the rest, which is exactly
+    # the kind of knowledge an interface should not require. Envelope keys are dropped
+    # here; genuinely unknown keys are still rejected, so a typo is still caught.
+    body = {key: value for key, value in payload.items() if key not in ENVELOPE_FIELDS}
+    unknown = set(body) - _KNOWN
     if unknown:
         raise ValueError(f"unknown record fields: {sorted(unknown)}")
+    payload = body
 
     title = _text(payload.get("title"), "title")
     if not title:

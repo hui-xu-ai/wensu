@@ -197,7 +197,19 @@ def unify_doc_type(value: str | None) -> str | None:
 
 @dataclass(slots=True)
 class Record:
-    """A bibliographic record. Field names are part of the public schema."""
+    """A bibliographic record. Field names are part of the public schema.
+
+    `year` is the publication year the site itself reports — for Web of Science that is
+    `pub_info.pubyear`. It can differ by one from a `PY=` range in the query string:
+    a record indexed as online-first, or a conference proceedings volume dated for the
+    following year, may carry `year=2027` while matching `PY=(2026)`. That is the site's
+    own labelling, not a parsing choice, and there is no second year field to expose —
+    the payload carries `pubyear` and nothing else.
+
+    So: trust `year` for display and for grouping, and do not treat "one record outside
+    the requested span" as evidence of a bug. Filtering by `year` after the fact is
+    safe — that is what `dropped_year` counts.
+    """
 
     channel: str
     title: str

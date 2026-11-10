@@ -4,6 +4,51 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.46] - 2026-11-10
+
+The 0.12.45 acceptance passed its target flow — 115 records covered in three rounds with
+zero duplicate IDs, and the live capture retest clean. It found one real defect and one
+ambiguity in how a response describes itself.
+
+### Fixed — a `detail` response could not be handed to `export`
+
+The natural flow is: find a record, read its details, export what you got. It failed on
+wensu's own bookkeeping fields:
+
+```
+unknown record fields: ['quota_charged', 'quota_remaining']
+```
+
+`detail` flattens the response envelope onto the record, and `export` rejected anything
+outside the record schema — so the obvious thing a caller does was the thing that did not
+work. The acceptance run worked around it by stripping those two keys before calling
+`export`, which is exactly the knowledge an interface should not require.
+
+`export` now drops the envelope keys and still rejects everything else, so a typo is
+still caught (`unknown record fields: ['titel']`). Both halves are asserted: the fix must
+not turn a strict schema into a permissive one.
+
+### Documented — `PY=(2026)` and `year=2027` can both be true
+
+One record in the accepted set carries `year=2027` while matching `PY=(2026)`. For Web of
+Science, `year` is `pub_info.pubyear` — the site's own label — and it can differ by one
+from the query span for online-first items and for proceedings volumes dated the following
+year. **There is no second year field to expose**: the payload carries `pubyear` and
+nothing else, so inventing an "early access year" would have meant guessing a field that
+is not there.
+
+`Record` now says this, and says what follows from it: group and display by `year`, and do
+not read one record outside the requested span as a parse error. Filtering after the fact
+is safe — that is what `dropped_year` counts.
+
+### Not addressed
+
+**`page` / `page_count` are still null** (W04). The acceptance covered the exclusion path,
+which does not need them, so this round says nothing about them.
+
+**Empty `pages` / `keywords`** on some records is the source being empty, not the parser
+dropping data. Left alone deliberately.
+
 ## [0.12.45] - 2026-11-10
 
 The acceptance run's two-round plan failed on its first exclusion call, in 1.6 s and at
