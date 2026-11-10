@@ -215,10 +215,25 @@ async function onHostMessage(message, channel) {
       // replies, so a lost reply means "navigation started". Only that counts:
       // a missing element or a refusal must surface, or the caller sees success
       // for a click that never happened.
+      //
+      // This deadline is a **fallback against hanging**, not a decision. It used to
+      // be a hard 2 s, which silently cut off every click the plan had given more
+      // time to: the WoS submit asks for `wait_until: "enabled"` with a 10 s budget,
+      // and that budget was being discarded here. The result was a click reported as
+      // successful at 2.004 s while the site was still working, so the next step read
+      // the URL too early and reloaded the search form.
+      //
+      // The plan's own `timeout_ms` now sets the ceiling (clamped, because an action
+      // payload must not be able to hang a tab indefinitely). 2 s remains the floor
+      // for callers that pass nothing.
+      const declared = Number(params && params.timeout_ms);
+      const budget = Number.isFinite(declared) && declared > 0
+        ? Math.min(Math.max(declared, 2_000), 30_000)
+        : 2_000;
       try {
         result = await Promise.race([
           sendToTab(),
-          new Promise((resolve) => setTimeout(() => resolve(undefined), 2000)),
+          new Promise((resolve) => setTimeout(() => resolve(undefined), budget)),
         ]);
       } catch (error) {
         const text = String((error && error.message) || error);

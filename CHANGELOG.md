@@ -4,6 +4,73 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.40] - 2026-11-10
+
+The WoS split path now completes without a single timeout. Two changes, both from field
+observation, and the second only became visible after the first was fixed.
+
+### Fixed — the extension discarded the plan's click budget (W02, root cause)
+
+`background.js` raced every click against a hard 2 s and returned
+`{navigation_expected: true}` with **no URL** when it lost. The WoS submit already asked for
+`wait_until: "enabled"` with a 10 s budget — the extension threw it away.
+
+Observed sequence:
+
+```
+click     ok=True  2004ms   ← cut off here
+sleep     ok=True   987ms
+wait_for  ok=False 9005ms   ← waiting for a result list that had not rendered
+```
+
+The plan's `timeout_ms` now sets the ceiling (clamped to 30 s, floored at 2 s for callers
+that pass nothing). After the change:
+
+```
+click     ok=True 10005ms   ← waited the 10 s the plan asked for
+wait_for  ok=True    36ms   ← the result list appeared 36 ms later
+```
+
+2 s was never wrong as a *fallback* — a click on a control that never replies must not hang
+the tab. It was wrong as a **decision**: the plan said "wait up to 10 s for this control to
+come back", and the extension answered at 2 s as if the wait had finished.
+
+### Fixed — `data-ready` meant "the buffer parses", not "the records arrived" (W03)
+
+With the click fixed, the next failure was `capture holds no records; the stream was not
+intercepted (0 unparseable line(s) dropped)` — a message that blames the wrong thing.
+
+`markReady()` set `data-ready=1` whenever the buffer merely parsed, so a capture holding only
+the `searchInfo` block was declared complete.
+
+The site states how many records it will send in that same block, so the capture checks it:
+
+| buffer state | behaviour |
+|---|---|
+| `RecordsFound: 50`, no `records` block yet | keep waiting |
+| `RecordsFound: 0` | ready immediately — that is a real answer |
+| no `RecordsFound` | falls back to the old parse check |
+
+### Verified end to end
+
+```
+page 1: total=38,   2 records, 4 quota, 31.6 s
+page 2: total=2690, 2 records, 6 quota, 49.2 s — 17 actions, all ok=True
+detail: full abstract (1053 chars), IF=5.1 (JCR 2025), 4 quota
+CNKI:   unaffected, total=1158
+```
+
+### Still open
+
+**W01** — page 3 is rejected; two pages plus a detail call already costs 49 s of the 120 s
+budget.
+
+**W05** — three failure stages still share one `bridge.timeout` error. The audit log
+distinguishes them after the fact; the public error does not.
+
+**W04** — no page number, record range, or duplicate flags in the response, and `limit`
+truncates after parsing rather than setting the site's page size.
+
 ## [0.12.38] - 2026-11-10
 
 Field test of 0.12.37 found that the W02 fix broke the channel it was meant to help.

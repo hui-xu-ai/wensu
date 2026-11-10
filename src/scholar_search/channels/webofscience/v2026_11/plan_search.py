@@ -32,6 +32,7 @@ from .selectors import (
     CAPTURE_READY,
     NEXT_PAGE,
     QUERY_INPUT,
+    RESULT_READY,
     SORT,
     SORT_OPEN,
     SUBMIT,
@@ -48,6 +49,19 @@ WAIT_TIMEOUT_MS = 8_000
 INPUT_TIMEOUT_MS = 4_000
 CLICK_TIMEOUT_MS = 2_200
 READ_TIMEOUT_MS = 8_000
+
+# How long to wait for the result list to render after the submit click.
+#
+# This is a **fallback deadline, not a decision**. The click itself gives up after
+# 2.2 s because the extension races it against 2 s — that deadline exists so a
+# click on a control that never replies cannot hang the plan. It must never be read
+# as "the navigation finished, or did not happen": the site is a slow SPA and the
+# navigation routinely outlives it. What actually decides is whether the result
+# list exists, which is what this wait observes.
+#
+# 10 s: the audit trail shows about 9.5 s from the submit click to a rendered result
+# list on a slow run, and two-page plans have to stay inside the kernel's 120 s budget.
+RESULT_TIMEOUT_MS = 9_000
 
 # Must exceed capture.js's standby budget (6 windows x 1.5 s = 9 s), otherwise a
 # payload whose tail takes a while to parse is declared complete *after* this wait
@@ -124,16 +138,41 @@ def sort_actions(order: str) -> tuple[Action, ...]:
     )
 
 
-def reload_and_wait() -> tuple[Action, ...]:
-    """Reload the result page and wait for the payload it streams.
+def reload_and_wait(*, expect_navigation: bool = True) -> tuple[Action, ...]:
+    """Wait for the result list, then reload it and wait for the payload.
 
     Measured on the live site: a reload answers with all 50 records through three
-    ``runQueryGetRecordsStream`` batches and never issues ``runQuerySearch`` at
-    all. Scrolling for the same records costs four more actions and two more
-    requests, so the plan reloads instead of walking down the list.
+    ``runQueryGetRecordsStream`` batches and never issues ``runQuerySearch`` at all.
+    Scrolling for the same records costs four more actions and two more requests, so
+    the plan reloads instead of walking down the list.
+
+    **The wait is not decoration.** `goto` with `reload` navigates to the tab's
+    *current* URL. The previous version reloaded immediately after the click, using
+    whatever URL was current at that instant — and because the click had given up
+    after 2.2 s while the site was still navigating, that URL was still
+    `advanced-search`. The reload then refreshed the search form: a page load that
+    accomplishes nothing, followed by waiting for a capture stream the query had
+    already sent elsewhere. The audit trail showed exactly this.
+
+    `expect_navigation` is False after a page turn: the result list is already on
+    screen and only its contents change, so waiting for it to "appear" would burn the
+    deadline for nothing — and two of those would push a two-page plan past the
+    kernel's 120 s budget.
     """
 
+    wait: tuple[Action, ...] = (
+        (
+            Action(
+                "wait_for",
+                {"selector": RESULT_READY, "state": "visible"},
+                timeout_ms=RESULT_TIMEOUT_MS,
+            ),
+        )
+        if expect_navigation
+        else ()
+    )
     return (
+        *wait,
         Action("goto", {"reload": True}, timeout_ms=NAV_TIMEOUT_MS),
         settle(jitter(1_500, 2_500)),
         *capture_wait(),
@@ -147,7 +186,7 @@ def pagination(page: int) -> tuple[Action, ...]:
     for _ in range(max(0, page - 1)):
         actions.append(Action("click", {"selector": NEXT_PAGE}, timeout_ms=CLICK_TIMEOUT_MS))
         actions.append(settle(jitter(1_500, 2_500)))
-        actions.extend(reload_and_wait())
+        actions.extend(reload_and_wait(expect_navigation=False))
     return tuple(actions)
 
 

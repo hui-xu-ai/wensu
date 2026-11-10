@@ -108,6 +108,32 @@
     ensureNode().setAttribute("data-ready", "1");
   }
 
+  // `markReady` says "the payload is complete", but it was being called whenever the
+  // buffer merely *parsed* — including when the buffer held only the `searchInfo`
+  // block and no records at all. A plan waiting on `data-ready` then read an empty
+  // capture and reported "the stream was not intercepted", which is a different
+  // problem with a different fix.
+  //
+  // The site states how many records it will send, in the same `searchInfo` block, so
+  // the honest test is "did the records I was promised arrive". A page that genuinely
+  // matched nothing declares 0 and is ready immediately — that is a real answer, not
+  // a wait.
+  function declaredRecords() {
+    const match = /"RecordsFound"\s*:\s*(\d+)/.exec(buffer);
+    return match ? Number(match[1]) : null;
+  }
+
+  function carriesRecords() {
+    return /"key"\s*:\s*"records"/.test(buffer);
+  }
+
+  function satisfiesDeclaredCount() {
+    const declared = declaredRecords();
+    if (declared === null) return true; // nothing promised: nothing to wait for
+    if (declared === 0) return true; // the site itself says there are none
+    return carriesRecords();
+  }
+
   function looksComplete() {
     const text = buffer.replace(/\s+$/, "");
     if (!text) return false;
@@ -139,6 +165,12 @@
         return;
       }
       if (!looksComplete()) {
+        armIdle(gen);
+        return;
+      }
+      // Records are promised but have not arrived yet: keep waiting rather than
+      // declaring a payload that cannot answer the query.
+      if (!satisfiesDeclaredCount()) {
         armIdle(gen);
         return;
       }
