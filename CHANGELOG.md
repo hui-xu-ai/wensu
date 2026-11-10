@@ -4,6 +4,72 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.48] - 2026-11-10
+
+The 0.12.47 acceptance passed all four target items and then found a regression I had
+introduced in the same release, in both directions at once, on one channel.
+
+### Fixed — the cache identity was guessed, and guessed wrong for CNKI (N1, N2)
+
+To stop `local_sort` from re-running a search, 0.12.47 replaced "the whole query is the
+cache key" with a hand-picked list of site-facing fields. That list was then wrong twice:
+
+* **`limit` was excluded**, but CNKI's plan **does** change above 20 — it switches the
+  site's page size. So a cached 20-record page answered a later `limit: 50` with 20
+  records and `cache_hit: true`, reporting a truncated list as the answer.
+* **`year_from`/`year_to` were kept**, but CNKI filters locally only and its plan does
+  not change at all. So adding a year bought a 14.9 s re-search for a byte-identical
+  site request, and charged 3 quota for it.
+
+Both are the same mistake: predicting what a channel will do. `_site_signature` now
+**builds the plan and hashes it**. Whatever the plan does is by definition what the site
+is asked to do; anything absent from the plan cannot change the fetch. One rule, no
+per-channel list, and it cannot be wrong twice in opposite directions.
+
+Two details the first attempt got wrong:
+
+* `settle(jitter(...))` randomises every `sleep` duration, so hashing raw actions made two
+  identical queries hash differently and would have disabled caching entirely. Pauses are
+  dropped from the signature — pacing is not content.
+* The stripped query text rides along, so a channel that sends its expression some other
+  way cannot collide. This also removes the leading/trailing-space quirk the acceptance
+  run had to control for: `  ionogel actuator  ` and `ionogel actuator` are one fetch.
+
+Added `_cache_can_answer`: a cached page holding fewer records than requested, while
+`total` says more exist, is not served. The signature normally prevents the situation;
+this is the guard for a channel that uses one plan for both sizes.
+
+### Added — a capture timeout now reports what the page held (N3)
+
+`wait_for failed: timeout (stage wait.capture)` has appeared in every acceptance run, and
+each time the only fact available was that it timed out. Three different failures produce
+that one symptom: the stream never started, it started and never finished, or the records
+arrived and the readiness flag was never raised. They need different fixes.
+
+Failures at `wait.capture` now carry a `diagnostics` block describing the capture node:
+
+```json
+"diagnostics": {"verdict": "metadata_only", "bytes": 58, "lines": 1,
+                "declared_records": 115, "has_search_info": true,
+                "has_records_block": false}
+```
+
+`verdict` is one of `no_stream`, `metadata_only`, `stream_started_no_records`,
+`records_present_not_ready`. The probe is a `read_text`, which is not a network verb, so
+it is free and starts no traffic. It counts and classifies; it never re-parses records,
+because a second parser is a second thing to disagree.
+
+**This is a diagnostic, not a fix.** The cause of the first-capture timeout is still
+unknown, and per the report the next step is to let the next occurrence say which of the
+three it was rather than to guess at a behaviour change.
+
+### Changed — the filter count is public in both places
+
+`dropped_filter` is now a top-level field beside `dropped_year`, as well as
+`filters.dropped.filter`. The acceptance run read only the top level, found `dropped_year`
+and no `dropped_filter`, and had to be told where the second one lived — which is the
+right complaint about an interface that publishes two counters in two different places.
+
 ## [0.12.47] - 2026-11-10
 
 From a 39-call usability report. The two findings that mattered most were both cases of

@@ -161,6 +161,12 @@ def _page_payload(
         # Non-zero with empty records means the local year filter removed
         # everything on this page — not that the topic has no papers that year.
         "dropped_year": page.dropped_year,
+        # Top level, beside `dropped_year`, because that is where a caller looks for
+        # "how much did filtering remove". The nested `filters.dropped` carries the
+        # same numbers next to the thresholds that produced them; the acceptance run
+        # read only the top level, found `dropped_year` and no `dropped_filter`, and
+        # had to be told where the second one lived.
+        "dropped_filter": page.dropped_filter,
         # "no_match" means the channel proved the query matched nothing. Without it
         # an empty page is indistinguishable from a failed capture.
         "empty_reason": page.empty_reason,
@@ -293,6 +299,13 @@ def _payload(
     stage = getattr(error, "stage", None)
     if isinstance(stage, str) and stage:
         payload["stage"] = stage
+    # What the page held when a wait ran out, when the channel could describe it. A
+    # `wait.capture` timeout means "no reply in time" and nothing more: no stream, an
+    # unfinished stream, and a finished stream with the flag unraised are three
+    # different bugs, and only the page can say which. Absent when nothing can be said.
+    diagnostics = getattr(error, "diagnostics", None)
+    if isinstance(diagnostics, dict) and diagnostics:
+        payload["diagnostics"] = diagnostics
     # A caller that cannot act on an error will improvise. When the bridge is the
     # problem, say what the one permitted reaction is — an agent that was left to
     # guess once killed the user's browser.

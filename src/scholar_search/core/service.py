@@ -142,7 +142,7 @@ class ScholarService:
                 f"channel {query.channel!r} does not report journal metrics, "
                 "so min_impact_factor cannot be applied"
             )
-        key = _key("search", spec, _site_fields(query))
+        key = _key("search", spec, _site_signature(channel, query))
 
         cached = self._cache.get(key)
         if cached is not None:
@@ -152,7 +152,9 @@ class ScholarService:
             #
             # The cached page is the site's raw answer, so the caller's own view —
             # sort, filters, limit, abstract — is applied here, at no cost.
-            return replace(_present(_page_from(cached), query), cache_hit=True)
+            stored = _page_from(cached)
+            if _cache_can_answer(stored, query):
+                return replace(_present(stored, query), cache_hit=True)
 
         self._ensure_ready()
 
@@ -518,13 +520,60 @@ class ScholarService:
             self._release_transaction_adapter()
         for index, outcome in enumerate(outcomes):
             if not outcome.ok:
+                stage = self._stage_of(outcome, index)
                 raise ActionError(
                     self._failure_message(outcome, index, outcomes),
                     verb=outcome.action.verb,
                     code=outcome.error or "action.failed",
-                    stage=self._stage_of(outcome, index),
+                    stage=stage,
+                    diagnostics=self._diagnose_failure(stage, spec),
                 )
         return outcomes
+
+    def _diagnose_failure(self, stage: str, spec: ChannelSpec) -> dict[str, Any] | None:
+        """What the page looked like when a wait ran out — read locally, charged nothing.
+
+        `wait.capture` has timed out in every acceptance run so far, and each time the
+        only fact available was "it timed out". Three different situations produce that
+        symptom: the stream never started, the stream started and never finished, or the
+        records arrived and the readiness flag did not. They need different fixes, and
+        guessing which one it was is how a diagnosis turns into a wrong instruction.
+
+        A channel that can describe its own capture does so here. The probe is a
+        `read_text`, which is not a network verb, so it costs nothing and cannot start
+        new traffic.
+
+        Returns None when nothing can be said: an absent field is better than a
+        confident guess, which is the lesson of 0.12.47's remediation text.
+        """
+
+        if stage != "wait.capture":
+            return None
+        try:
+            impl = self._registry.load(spec.name, spec.site_version)
+        except (ScholarSearchError, KeyError, OSError):
+            return None
+        hook = getattr(impl, "capture_state", None)
+        if hook is None:
+            return None
+        probe = Plan(
+            channel=spec.name,
+            purpose="probe",
+            actions=(Action("read_text", {"selector": hook.selector, "mode": "text"}),),
+        )
+        try:
+            outcomes = self._run(probe, spec)
+        except (ActionError, ScholarSearchError):
+            return None
+        for outcome in outcomes:
+            data = outcome.data
+            text = data.get("text") if isinstance(data, dict) else data
+            if outcome.ok and isinstance(text, str):
+                with suppress(Exception):
+                    described = hook.describe(text)
+                    if isinstance(described, dict):
+                        return described
+        return None
 
     @staticmethod
     def _stage_of(outcome: ActionOutcome, index: int) -> str:
@@ -745,6 +794,94 @@ def normalise_doi(identifier: str) -> str | None:
     if value.lower().startswith("10.") and "/" in value:
         return value
     return None
+
+
+def _site_signature(channel: Any, query: SearchQuery) -> Any:
+    """A stable digest of the actions this channel would run for this query.
+
+    Deciding "which parameters are site-facing" by hand was a mistake that cost two
+    rounds. The first version put the whole query in the cache key, so re-sorting a
+    page in hand re-ran the search. The second version kept only a hand-picked list —
+    and got it wrong for CNKI in both directions at once:
+
+    * `limit` was excluded, but CNKI's plan **does** differ above 20 (it switches the
+      site's page size), so a cached 20-record page answered a later `limit: 50` with
+      20 records and `cache_hit: true`;
+    * `year_from`/`year_to` were kept, but CNKI filters locally only, so adding a year
+      cost a full 14 s re-search for an identical site request.
+
+    Both are the same mistake: guessing what the channel will do. So stop guessing —
+    build the plan and hash it. Whatever the plan does is, by definition, what the site
+    is asked to do; anything not in the plan cannot change the fetch.
+
+    The fallback matters: a query the channel refuses to plan (an out-of-range page, an
+    unknown field code) still needs a key, and collapsing every such query into one
+    entry would let a later valid query read a page it never fetched. Falling back to
+    the whole query is conservative and correct.
+    """
+
+    try:
+        splitter = getattr(channel, "plan_search_split", None)
+        plans: tuple[Any, ...]
+        if splitter is not None:
+            head, tail = splitter(query)
+            plans = (head, tail)
+        else:
+            plans = (channel.plan_search(query),)
+        # The stripped text rides along with the plan. A channel is supposed to put the
+        # expression into a `type` action, and both of ours do — but "supposed to" is
+        # the kind of assumption that produced the two bugs above. Including the
+        # question makes the identity correct even for a channel that sends it some
+        # other way.
+        #
+        # Stripped, not raw: surrounding whitespace produces byte-identical plans and
+        # this repository's own acceptance run paid for a control query that differed
+        # only by leading and trailing spaces.
+        #
+        # Sleep durations are dropped. `settle(jitter(...))` picks a random pause on
+        # every call, so hashing it made two identical queries hash differently and the
+        # cache never hit at all. A pause is pacing, not content: it cannot change what
+        # the site is asked.
+        return [
+            query.text.strip(),
+            [[action.verb, _content_of(action)] for plan in plans for action in plan.actions],
+        ]
+    except (ChannelError, ValueError, AttributeError, TypeError):
+        return {"fallback": dict(_site_fields(query))}
+
+
+def _content_of(action: Action) -> dict[str, Any]:
+    """The part of an action that decides what the site is asked.
+
+    Only `sleep` has a randomised parameter (`settle(jitter(...))` picks a pause per
+    call). Everything else is deterministic per query, so it is kept as-is.
+    """
+
+    params = dict(action.params or {})
+    if action.verb == "sleep":
+        params.pop("ms", None)
+    return params
+
+
+def _cache_can_answer(cached: SearchPage, query: SearchQuery) -> bool:
+    """Whether a cached page actually holds what this call asked for.
+
+    A page the site returned short is still a valid cache entry — it is what happened.
+    But serving 20 records to a request for 50, while `total` says 128 exist, reports a
+    truncated list as the answer. The signature usually prevents this by making the two
+    requests different; this is the belt to that braces, because a channel that uses one
+    plan for both sizes would otherwise reintroduce it.
+    """
+
+    held = len(cached.records)
+    if held >= query.limit:
+        return True
+    if cached.total is None:
+        # Nothing said how many exist, so nothing proves more do. Refusing here would
+        # disable caching for any channel that never reports a total, and the short
+        # list plus a null `total` already tells the caller not to assume completeness.
+        return True
+    return cached.total <= held
 
 
 def _narrow(records: Sequence[Record], query: SearchQuery) -> tuple[tuple[Record, ...], int]:

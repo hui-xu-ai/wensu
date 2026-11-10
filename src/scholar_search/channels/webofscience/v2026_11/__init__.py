@@ -9,6 +9,7 @@ site's wire format to itself.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,7 +21,7 @@ from ....core.contracts import (
     SearchQuery,
 )
 from ....core.errors import ChannelError
-from . import parse_records, plan_search
+from . import parse_records, plan_search, selectors
 from . import query as expression
 
 
@@ -36,6 +37,44 @@ def _load_manifest() -> ChannelManifest:
         capabilities=tuple(raw["capabilities"]),
         detail_url_prefixes=tuple(raw.get("detail_url_prefixes", ())),
     )
+
+
+@dataclass
+class _CaptureState:
+    """Summarise a capture node without parsing records out of it.
+
+    Deliberately shallow: it counts what is there and reports the site's own declared
+    count, and never decides whether a record is valid. A diagnostic that re-runs the
+    parser is a second parser, and a second parser is a second thing to disagree.
+    """
+
+    selector = selectors.CAPTURE
+
+    def describe(self, text: str) -> dict[str, object]:
+        raw = text or ""
+        declared = None
+        match = re.search(r'"RecordsFound"\s*:\s*(\d+)', raw)
+        if match is not None:
+            declared = int(match.group(1))
+        has_info = '"searchInfo"' in raw
+        has_records = '"key"' in raw and '"records"' in raw
+        lines = [line for line in raw.splitlines() if line.strip()]
+        if not raw.strip():
+            verdict = "no_stream"
+        elif has_records:
+            verdict = "records_present_not_ready"
+        elif has_info:
+            verdict = "metadata_only"
+        else:
+            verdict = "stream_started_no_records"
+        return {
+            "verdict": verdict,
+            "bytes": len(raw),
+            "lines": len(lines),
+            "declared_records": declared,
+            "has_search_info": has_info,
+            "has_records_block": has_records,
+        }
 
 
 @dataclass
@@ -67,6 +106,24 @@ class WebOfScienceChannel:
         submitted but matched nothing, so the site stayed where it was.
         """
         return "/wos/woscc/summary/" in url
+
+    def capture_state(self) -> _CaptureState:
+        """How to describe a capture that never became ready.
+
+        Every acceptance run so far has ended at least once with
+        `wait_for failed: timeout (stage wait.capture)`, and each time the only fact
+        available was that it timed out. Three different failures look identical from
+        there:
+
+        * the data stream never started;
+        * it started and never finished;
+        * the records arrived and the readiness flag was never raised.
+
+        Each needs a different fix, so the page is asked which one it was instead of
+        the cause being assumed.
+        """
+
+        return _CaptureState()
 
     def is_empty_page(self, text: str) -> bool:
         """Whether the page itself says the query matched nothing."""

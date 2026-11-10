@@ -32,7 +32,15 @@ class PolicyError(ScholarSearchError):
 class ActionError(ScholarSearchError):
     """A browser action failed; dependent actions must not run."""
 
-    def __init__(self, message: str, *, verb: str, code: str, stage: str | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        verb: str,
+        code: str,
+        stage: str | None = None,
+        diagnostics: dict[str, object] | None = None,
+    ) -> None:
         super().__init__(message)
         self.verb = verb
         self.code = code
@@ -40,6 +48,11 @@ class ActionError(ScholarSearchError):
         # `wait.capture` or `click.submit`, never a selector: three different waits in
         # one WoS search used to be indistinguishable from the outside.
         self.stage = stage
+        # What the page held when the wait ran out, when the channel can describe it.
+        # `wait.capture` timing out means "no reply in time" and nothing more; whether
+        # the stream never started, never finished, or finished without raising the
+        # readiness flag are three different bugs, and only the page can say which.
+        self.diagnostics = diagnostics
 
 
 class RiskBlocked(ScholarSearchError):
