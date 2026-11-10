@@ -9,7 +9,19 @@ from __future__ import annotations
 from typing import Any
 
 MAX_TIMEOUT_MS = 15_000
-MAX_TEXT_CHARS = 500
+# How much text one `type` action may carry.
+#
+# This is not a human-typing budget — `humanType` assigns `element.value` in a single
+# statement and dispatches events, so the site sees a paste, not 12 000 keystrokes.
+# The cap exists so a tab cannot be handed an unbounded string.
+#
+# 16 000, raised from 500 by ADR 0015. A Web of Science expression that excludes the
+# records already collected grows by ~25 characters per record: 50 exclusions make
+# 1 372 characters and 500 make 12 622. At 500 the ceiling silently limited
+# `exclude_ut` to about seventeen identifiers — the parameter accepted 500 and the
+# type verb refused the expression built from them, so the feature worked in testing
+# (three identifiers) and failed at the size it was documented for.
+MAX_TEXT_CHARS = 16_000
 MAX_SLEEP_MS = 3_000
 
 ALLOWED_KEYS: dict[str, frozenset[str]] = {

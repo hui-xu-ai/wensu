@@ -4,6 +4,61 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.45] - 2026-11-10
+
+The acceptance run's two-round plan failed on its first exclusion call, in 1.6 s and at
+zero quota cost — the kernel's own parameter validation refused the expression:
+
+```
+wensu: invalid parameters for type: policy.params
+```
+
+### Fixed — two caps that each looked fine and together did not
+
+| constant | value | meaning |
+|---|---|---|
+| `MAX_EXCLUDE_UT` | 500 | identifiers one search may exclude |
+| `MAX_TEXT_CHARS` | 500 | characters one `type` action may carry |
+
+An exclusion adds about 25 characters:
+
+```
+exclude   3 ->   129 chars
+exclude  17 ->   479 chars   ← still under the cap
+exclude  50 ->  1304 chars   ← refused
+exclude 500 -> 12554 chars   ← refused
+```
+
+The effective limit was **seventeen**, while the parameter advertised 500. My own test used
+three identifiers (197 characters) and passed; the feature broke at the size it was
+documented for. **No test of either constant alone could have caught this** — only an
+assertion spanning both.
+
+`MAX_TEXT_CHARS` is now 16 000 (ADR 0015). It was never a typing budget: `humanType`
+assigns `element.value` in one statement and dispatches events, so the site sees a paste,
+not twelve thousand keystrokes. The cap only bounds how long a string a tab can be handed.
+
+### Added — the cross-constant test
+
+```python
+@pytest.mark.parametrize("count", [3, 17, 50, 500])
+def test_the_expression_a_full_exclusion_list_produces_can_actually_be_typed(count):
+    built = _build(text="...", exclude_ut=ids)
+    assert validate_params("type", {"text": built, ...}) is None
+```
+
+plus `assert MAX_TEXT_CHARS > MAX_EXCLUDE_UT * 26`, which pins the advertised cap to
+something the kernel will actually accept.
+
+### Verified
+
+```
+exclude   3 ->    129 chars  type-accepted: True
+exclude  17 ->    479 chars  type-accepted: True
+exclude  50 ->   1304 chars  type-accepted: True
+exclude 500 ->  12554 chars  type-accepted: True
+```
+
 ## [0.12.44] - 2026-11-10
 
 Two findings from the 0.12.43 acceptance run, plus a defect that run exposed in my own

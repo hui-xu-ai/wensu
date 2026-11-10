@@ -20,6 +20,7 @@ import pytest
 
 from scholar_search.channels.webofscience.v2026_11 import query as expression
 from scholar_search.core.contracts import MAX_EXCLUDE_UT, SearchQuery
+from scholar_search.core.params import MAX_TEXT_CHARS, validate_params
 
 TODAY = dt.date(2026, 11, 10)
 
@@ -86,3 +87,36 @@ def test_an_explicit_py_is_still_not_doubled() -> None:
     built = _build(text="TS=(x) AND PY=(2024)", exclude_ut=("WOS:001218812900001",))
     assert built.count("PY=") == 1
     assert "NOT UT" in built
+
+
+@pytest.mark.parametrize("count", [3, 17, 50, 500])
+def test_the_expression_a_full_exclusion_list_produces_can_actually_be_typed(
+    count: int,
+) -> None:
+    """The two caps have to agree, and each one looks reasonable alone.
+
+    `MAX_EXCLUDE_UT` promised 500 identifiers; `MAX_TEXT_CHARS` capped a `type` action
+    at 500 characters. An exclusion adds ~25 characters, so the effective limit was
+    about seventeen — the parameter accepted a list the type verb then refused, and
+    this only surfaced at the size the feature was documented for. Testing with three
+    identifiers (197 characters) passed.
+
+    A cross-constant assertion is the only thing that catches this class: no test of
+    either constant on its own can.
+    """
+
+    ids = tuple(f"WOS:{index:015d}" for index in range(count))
+    built = _build(text="TS=(ionogel AND actuator)", exclude_ut=ids)
+    rejected = validate_params("type", {"selector": "x", "text": built, "clear": True})
+    assert rejected is None, (
+        f"{count} exclusions produce {len(built)} characters, "
+        f"which the type verb refuses (cap {MAX_TEXT_CHARS})"
+    )
+
+
+def test_the_documented_cap_is_actually_reachable() -> None:
+    """`MAX_EXCLUDE_UT` is a promise; this pins it to something the kernel allows."""
+
+    assert MAX_TEXT_CHARS > MAX_EXCLUDE_UT * 26, (
+        "a full exclusion list must fit inside one type action"
+    )
