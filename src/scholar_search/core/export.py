@@ -333,7 +333,16 @@ def to_markdown(records: Iterable[Record]) -> str:
         if record.doi:
             blocks.append(f"DOI: {_clean(record.doi)}")
         if record.impact_factor is not None:
-            blocks.append(f"影响因子: {record.impact_factor}")
+            # The year travels with the number. "影响因子: 29.1" alone invites the
+            # reader to assume the paper's year, and a JCR edition is not the
+            # publication year. When the source did not say which edition, the
+            # absence is stated rather than left to inference.
+            edition = (
+                f"（JCR {record.impact_factor_year}）"
+                if record.impact_factor_year is not None
+                else "（JCR 年份未报告）"
+            )
+            blocks.append(f"影响因子: {record.impact_factor}{edition}")
         if record.citations is not None:
             blocks.append(f"被引: {record.citations}")
         if record.keywords:
@@ -370,6 +379,7 @@ def to_csv(records: Iterable[Record]) -> str:
             "doi",
             "citations",
             "impact_factor",
+            "impact_factor_year",
             "doc_type",
             "keywords",
             "abstract",
@@ -389,6 +399,12 @@ def to_csv(records: Iterable[Record]) -> str:
                 record.doi or "",
                 record.citations if record.citations is not None else "",
                 record.impact_factor if record.impact_factor is not None else "",
+                # Always beside the metric. A figure of 29.1 without its JCR edition
+                # reads as "29.1 in the paper's publication year" — and the paper's
+                # year and the metric's year are different facts that differ by one
+                # or two routinely. An export that separates them cannot be used to
+                # compare journals safely.
+                record.impact_factor_year if record.impact_factor_year is not None else "",
                 record.doc_type or "",
                 "; ".join(record.keywords),
                 _clean(record.abstract),

@@ -4,6 +4,100 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.47] - 2026-11-10
+
+From a 39-call usability report. The two findings that mattered most were both cases of
+the tool charging for something it had already done, or claiming a fact it could not know.
+
+### Fixed — a local view change re-ran the whole search (A1)
+
+One WoS query cost 25 s and 4 quota. The **same** query with only `local_sort: "year"`
+added cost another 24 s and 4 quota and returned the same single record. Same for
+`min_citations` and `min_impact_factor`. Meanwhile changing `fields` was free — because
+that one never reached the query object at all.
+
+The cache key was the whole `SearchQuery`, so parameters that only describe how a page
+should be *presented* were part of the identity of the *fetch*. Fixing it needed three
+things together:
+
+1. the key covers only what is sent to the site (`text`, `channel`, `sort`, `page`,
+   `year_from`/`year_to`, `source_types`, `exclude_ut`);
+2. the cached page is stored **as the site returned it**, before any filtering;
+3. one `_present()` derives the caller's view on both the live and the cached path.
+
+The impact-factor threshold had to move out of the WoS parser for this to hold — it was
+filtering during the parse, so the stored page was already filtered. A threshold is a
+view over a page, and it now lives with every other view.
+
+Measured effect: re-sorting, re-filtering, changing `limit` or `include_abstract` all
+return `cache_hit: true` and `quota_charged: 0`.
+
+### Fixed — `min_citations` returned records whose count was unknown (A3)
+
+A paper with `citations: null` came back from `min_citations: 1000`. The old reasoning was
+recall — "not measured" is not "zero". But a caller asking for *at least 1000 citations*
+reads the returned record as meeting that bar, and the data does not support it. That is
+not recall, it is a wrong answer with a plausible shape.
+
+Unknown counts and unknown impact factors are now dropped, and `dropped_filter` reports
+how many. `filters.min_citations_drops_unmeasured` says so explicitly.
+
+### Fixed — export dropped the impact factor's year (A2)
+
+The CSV had an `impact_factor` column and no `impact_factor_year`; the Markdown rendered
+`影响因子: 29.1` alone. Beside a 2026 publication date that reads as "29.1 in 2026" — the
+JCR edition was 2025, and comparing journals across unknowable editions is the exact
+mistake the year field exists to prevent.
+
+CSV gains the column (empty when unreported, never 0). Markdown renders
+`影响因子: 29.1（JCR 2025）`, or `（JCR 年份未报告）` rather than implying the paper's year.
+
+### Fixed — a timeout asserted a cause it could not know (A4)
+
+`bridge.timeout` produced "the browser extension is not connected" and sent the user to
+`wensu browser start`. The report's run had `bridge_ready: true` immediately before *and*
+after, so that was a confident wrong answer about a working browser.
+
+The remediation now names a check (`wensu status`, read `bridge_ready`) and a human step,
+and leaves the diagnosis open — the connection, the content script in that tab, and the
+page itself are all candidates. `stage` (added in 0.12.44) says which layer stopped.
+
+### Fixed — year ranges and identifiers (C1, C2, B1)
+
+* `year_from=2027` with no end produced `PY=(2027-2026)` — a backwards range no human
+  meant. The missing end is clamped, so it becomes the single year.
+* `year_from=year_to=2026` produced `PY=(2026-2026)` while a typed `PY=(2026-2026)` was
+  folded to `PY=(2026)`. One spelling now.
+* A record URL carrying `?locale=en_US` produced the identifier
+  `"WOS:...?LOCALE=EN_US"`, so the exclusion matched nothing and the caller paid for a
+  search returning the same records. Query strings and fragments are stripped.
+* `doi:10.…`, `https://doi.org/10.…` and `https://dx.doi.org/10.…` were reported as
+  `UNKNOWN_CHANNEL` — "no channel claims the host", accurate and useless. All spellings
+  are normalised to the bare DOI in both entry points.
+
+### Added
+
+* `overwritten` in the export response when `out_path` replaced a file (B6).
+* `filters.dropped.filter` and `year_scope: "site_and_page"` — a year bound becomes part
+  of the WoS expression, so calling it page-local told callers `total` was unfiltered (B5).
+* `filters.min_citations_drops_unmeasured`.
+
+### Documentation
+
+Eight contradictions the report listed, all corrected: year filtering is two layers and
+differs by channel; `total` is the site's count and one record can fall outside a `PY=`
+span; a repeated CNKI `detail` is free; export supports four formats, not two; the WoS
+cache returns abstracts too; timeouts now report `quota_charged`; there is no
+document-type filter, so filter on `doc_type_unified` after the fact; and installing
+requires reconnecting the MCP client, with a version check that settles it.
+
+### Not done
+
+**Error shapes are still inconsistent** (B4): a blank query, a bad field name, an
+out-of-range limit and an unknown channel each produce a differently shaped error. They
+are all free and all correct, but a caller has to parse four shapes. Unifying them means
+changing the MCP contract for every error path — a separate change, not a line edit.
+
 ## [0.12.46] - 2026-11-10
 
 The 0.12.45 acceptance passed its target flow — 115 records covered in three rounds with

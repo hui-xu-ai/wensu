@@ -48,25 +48,44 @@ def test_ensure_bridge_passes_when_an_extension_is_listening(
     service._ensure_bridge()  # must not raise
 
 
-def test_bridge_remediation_names_a_command_not_a_gesture() -> None:
-    """The remediation must be actionable, and it must forbid touching the browser.
+def test_bridge_remediation_does_not_assert_a_cause_it_cannot_know() -> None:
+    """A `bridge.timeout` says an action got no reply — nothing more.
 
-    The previous version was one sentence that said to click the extension icon. When
-    no browser was running — the common case — that sent the user to click an icon in
-    a window that did not exist. The report hit exactly this: it relayed the
-    instruction, and the user answered "did you forget E:\\LiteratureEdgeProfile".
+    The static remediation used to state "the browser extension is not connected" and
+    send the user to `wensu browser start`. The acceptance run that hit this had
+    `bridge_ready: true` immediately before and after the failure; restarting a
+    working browser was the wrong instruction, and it was stated as fact.
+
+    The connection, the content script in that tab, and the page itself are all
+    candidates. So the payload names a check and a human step, and leaves the
+    diagnosis open.
     """
 
     from scholar_search.core.service import ScholarService
 
     payload = ScholarService.BRIDGE_REMEDIATION
-    assert payload["next_action"] == "browser_start"
-    assert payload["command"] == "wensu browser start"
-    assert payload["human_step_required"] is False
+    diagnosis = str(payload["diagnosis"]).casefold()
+    assert "extension is not connected" not in diagnosis, "a timeout is not a verdict"
+
+    assert payload["next_action"] == "bring_the_tab_forward"
+    assert payload["human_step_required"] is True
+    # It still has to name something the caller can run, and still has to forbid
+    # touching browser processes.
+    assert payload["command"] == "wensu status"
 
     note = str(payload["note"]).casefold()
-    for forbidden in ("never", "start", "stop", "kill"):
+    assert "bridge_ready" in note, "the caller needs to know which check settles it"
+    for forbidden in ("never", "kill"):
         assert forbidden in note, f"the note should forbid {forbidden!r}"
+
+
+def test_bridge_remediation_still_points_at_browser_start_when_that_is_the_fix() -> None:
+    """`status` keeps its case-by-case guidance — that path can tell the cases apart."""
+
+    from scholar_search.bootstrap import _bridge_remediation
+
+    # Never seen a host at all: starting one is the right action.
+    assert _bridge_remediation(None)["next_action"] in {"setup", "browser_start"}
 
 
 def test_remediation_says_start_the_browser_when_it_is_not_running(

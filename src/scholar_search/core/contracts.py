@@ -281,6 +281,15 @@ class SearchPage:
     # page is indistinguishable from a capture failure or a filter that removed
     # everything, all three of which look like `records: []`.
     empty_reason: str | None = None
+    # How many records the local filters removed — the citation threshold, the
+    # impact-factor threshold, the source list. Separate from `dropped_year` because
+    # the two answer different questions, and a caller seeing an empty page needs to
+    # know which filter emptied it.
+    #
+    # These filters are applied to a page already in hand, so they cost nothing and
+    # never re-open the browser: the cached page is the site's own result set, and
+    # every call re-presents it under its own filters.
+    dropped_filter: int = 0
     # True when this answer came from the cache, so nothing was spent. Without it a
     # caller cannot tell a free repeat from a charged search.
     cache_hit: bool = False

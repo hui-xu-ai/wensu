@@ -358,7 +358,6 @@ def parse(text: str, *, query: SearchQuery | None = None) -> SearchPage:
         rows.append(row)
 
     factors = _impact_factors(rows)
-    wanted = query.min_impact_factor if query is not None else None
 
     records: list[Record] = []
     total: int | None = None
@@ -393,10 +392,6 @@ def parse(text: str, *, query: SearchQuery | None = None) -> SearchPage:
             record = _record(raw, factors)
             if record is None:
                 continue
-            if wanted is not None:
-                metric = factors.get(str(raw.get("jcrKey") or ""))
-                if metric is None or metric[0] < wanted:
-                    continue
             records.append(record)
 
     if seen == 0:
@@ -412,11 +407,14 @@ def parse(text: str, *, query: SearchQuery | None = None) -> SearchPage:
             "capture holds no records; the stream was not intercepted "
             f"({malformed} unparseable line(s) dropped)"
         )
-    if not records and wanted is None:
+    if not records:
         raise ParseError("capture holds records but none carried a usable title")
 
-    # An impact-factor filter that matches nothing is a legitimate empty page, not
-    # a parse failure: the capture was fine, the journals just did not qualify.
+    # The impact-factor threshold is **not** applied here any more. Filtering during
+    # the parse meant the fetched page was stored already filtered, so a caller who
+    # had the page in hand and merely changed the threshold paid for another search —
+    # 24 s and 4 quota for a list they were already holding. The threshold is a view
+    # over the page, and it belongs where every other view lives.
     return SearchPage(
         records=tuple(records),
         total=total,

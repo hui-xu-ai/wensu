@@ -204,25 +204,38 @@ def test_impact_factor_is_returned_with_each_record() -> None:
     assert factors == [5.0, 5.0, 2.0, None]
 
 
-def test_impact_factor_filter_uses_the_jcr_block() -> None:
+def test_the_parser_does_not_apply_the_impact_factor_threshold() -> None:
+    """The threshold is a view over a fetched page, not part of fetching it.
+
+    Filtering during the parse stored the page already filtered, so a caller who
+    held the page and changed only the threshold triggered a whole new search —
+    measured at 24 s and 4 quota for a list they already had. The parser now returns
+    everything it found, with each record's metric attached, and the caller's
+    threshold is applied where every other view is applied.
+    """
+
     page = parse_records.parse(
         CAPTURE,
         query=SearchQuery(text="x", channel="webofscience", min_impact_factor=3.0),
     )
-    # Record 1 is in the 5.0 journal, record 2 in the 2.0 one, record 3 has no
-    # jcrKey at all, and the primary record clones record 1 — so it survives too.
-    assert [record.title for record in page.records] == [
-        "Synthetic primary-batch record",
-        "Synthetic example record 1",
-    ]
+    # Every record survives the parse, including the one in the 2.0 journal, the one
+    # with no jcrKey at all, and the primary-batch clone of record 1.
+    assert len(page.records) == 4
+    metrics = {record.title: record.impact_factor for record in page.records}
+    assert metrics["Synthetic example record 1"] == 5.0
+    assert metrics["Synthetic example record 2"] == 2.0
+    assert metrics["Synthetic example record 3"] is None
+    assert metrics["Synthetic primary-batch record"] == 5.0
 
 
-def test_impact_factor_filter_can_empty_the_page_without_error() -> None:
+def test_an_impact_threshold_of_99_no_longer_empties_the_parse() -> None:
+    """An impossible threshold is a filter question, not a capture question."""
+
     page = parse_records.parse(
         CAPTURE,
         query=SearchQuery(text="x", channel="webofscience", min_impact_factor=99.0),
     )
-    assert page.records == ()
+    assert page.records, "the parser must not decide what the caller's threshold means"
 
 
 def test_zero_results_is_an_empty_page_not_an_error() -> None:

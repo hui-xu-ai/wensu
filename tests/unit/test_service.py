@@ -185,7 +185,15 @@ def test_local_sort_orders_by_citations(tmp_path: Path) -> None:
     assert [record.title for record in page.records] == ["High", "Low"]
 
 
-def test_min_citations_keeps_records_without_a_count(tmp_path: Path) -> None:
+def test_min_citations_drops_records_without_a_count(tmp_path: Path) -> None:
+    """`min_citations: 1000` must not return a paper whose count is unknown.
+
+    Keeping unknown counts was the old choice, argued as recall. But a caller asking
+    for "at least 1000 citations" reads the returned record as meeting that bar, and
+    the data does not support the claim — that is not recall, it is a wrong answer
+    with a plausible shape. The drop is counted instead, so the cost is visible.
+    """
+
     measured = make_record("Measured")
     measured.citations = 1
     unmeasured = make_record("Unmeasured")  # citations stays None
@@ -194,7 +202,9 @@ def test_min_citations_keeps_records_without_a_count(tmp_path: Path) -> None:
 
     page = service.search(SearchQuery(text="x", channel="fake", min_citations=5))
 
-    assert [record.title for record in page.records] == ["Unmeasured"]
+    assert page.records == ()
+    assert page.dropped_filter == 2
+    assert page.empty_reason == "all_dropped_by_filter"
 
 
 def test_sources_only_filters_by_journal(tmp_path: Path) -> None:

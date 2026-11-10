@@ -142,14 +142,17 @@ class ScholarService:
                 f"channel {query.channel!r} does not report journal metrics, "
                 "so min_impact_factor cannot be applied"
             )
-        key = _key("search", spec, query)
+        key = _key("search", spec, _site_fields(query))
 
         cached = self._cache.get(key)
         if cached is not None:
             # A cache hit sends nothing to the site, so a cooldown should not hide
             # it: the cooldown exists to stop traffic, not to withhold data already
             # retrieved. Checking readiness first made it do the latter.
-            return replace(_page_from(cached), cache_hit=True)
+            #
+            # The cached page is the site's raw answer, so the caller's own view —
+            # sort, filters, limit, abstract — is applied here, at no cost.
+            return replace(_present(_page_from(cached), query), cache_hit=True)
 
         self._ensure_ready()
 
@@ -266,45 +269,6 @@ class ScholarService:
             if seeds or record.abstract:
                 self._cache.set(_key("detail", spec, {"url": record.url}), record.to_dict())
 
-        records = page.records
-        dropped_year = 0
-        if query.year_from is not None or query.year_to is not None:
-            # The site's year control is unreliable, so filter what we fetched.
-            # `total` still describes the site's result set, not the subset — and a
-            # page filtered to nothing does NOT mean the topic has no papers in that
-            # year. A caller that reads an empty page as "no literature" draws a
-            # wrong conclusion, so the number dropped is counted and reported.
-            before = records
-            records = tuple(
-                record
-                for record in records
-                if record.year is not None
-                and (query.year_from is None or record.year >= query.year_from)
-                and (query.year_to is None or record.year <= query.year_to)
-            )
-            dropped_year = len(before) - len(records)
-        records = _narrow(records, query)
-        if len(records) > query.limit:
-            records = records[: query.limit]
-        if not query.include_abstract:
-            # An abstract is roughly 85% of a record's context cost. Dropping it
-            # is what keeps a fifty-record page affordable; `detail(url)` serves
-            # the full record from the cache seeded above, with no second visit.
-            records = tuple(replace(record, abstract=None) for record in records)
-        if records is not page.records:
-            # Never overwrite this with `query.page`. Doing so reported "page 2"
-            # even when the site had served page 1, which made a failed page turn
-            # invisible: the caller saw success and a page number it asked for.
-            # What lands here is whatever the channel actually observed.
-            page = replace(page, records=records)
-        if dropped_year:
-            page = replace(page, dropped_year=dropped_year)
-            # The site had results and this page lost all of them to the year
-            # filter. Reporting `empty_reason: null` there left the caller to work it
-            # out from `dropped_year == total` — and one concluded "this topic has no
-            # literature" when the years simply did not match.
-            if not records and page.empty_reason is None:
-                page = replace(page, empty_reason="all_dropped_by_year")
         # What the channel actually typed. A bare keyword becomes `SU='…'` on CNKI,
         # and Web of Science appends `AND PY=(…)` when no year range was given — so
         # the query that ran is often not the query the caller sent, and a
@@ -315,10 +279,15 @@ class ScholarService:
             # stays None and the response is still complete without it.
             with suppress(ChannelError, ValueError):
                 page = replace(page, query_effective=effective(query))
+        # Cache the page **as the site returned it**, before any local filtering.
+        # That is what makes the local view free: the same fetched page can be
+        # re-sorted, re-filtered and re-projected as often as the caller likes.
+        # Caching the narrowed page is why changing `local_sort` used to trigger a
+        # whole new search and charge for it.
         self._cache.set(key, _page_to(page))
         # `channel` is untyped here (it is whatever the plugin module exposes), so
         # `parse_search` returns Any. Narrow it once, at the exit.
-        result: SearchPage = page
+        result: SearchPage = _present(page, query)
         return result
 
     def channel_for_url(self, url: str) -> str | None:
@@ -471,12 +440,21 @@ class ScholarService:
     # diagnosis (profile running or not) and names the command; this is the fallback
     # for callers that only see the error payload.
     BRIDGE_REMEDIATION: ClassVar[dict[str, object]] = {
-        "diagnosis": "the browser extension is not connected",
-        "next_action": "browser_start",
-        "command": "wensu browser start",
-        "human_step_required": False,
-        "note": "If a browser is already using the profile, click the wensu icon in "
-        "that window instead. Never start, stop, reload or kill browser processes.",
+        # Deliberately not "the browser extension is not connected". A
+        # `bridge.timeout` says only that an action got no reply in time; the
+        # connection, the content script in that tab, and the page itself are all
+        # candidates, and the acceptance run that hit this had `bridge_ready: true`
+        # immediately before and after. Asserting one cause sent the user to restart
+        # a browser that was already working.
+        "diagnosis": "the browser did not answer one action in time",
+        "next_action": "bring_the_tab_forward",
+        "command": "wensu status",
+        "human_step_required": True,
+        "note": "Check `bridge_ready` first. If it is true, the connection is fine and "
+        "the tab itself stopped answering — bring that window to the foreground, or "
+        "click the wensu icon in it, and retry. Only run `wensu browser start` when "
+        "`bridge_ready` is false. Never start, stop, reload or kill browser processes "
+        "that are already running.",
     }
 
     def _effective_query(self, channel: Any, query: SearchQuery) -> str | None:
@@ -701,6 +679,7 @@ def _page_to(page: SearchPage) -> dict[str, Any]:
         "query_effective": page.query_effective,
         "empty_reason": page.empty_reason,
         "dropped_year": page.dropped_year,
+        "dropped_filter": page.dropped_filter,
     }
 
 
@@ -713,6 +692,7 @@ def _page_from(payload: dict[str, Any]) -> SearchPage:
         query_effective=payload.get("query_effective"),
         empty_reason=payload.get("empty_reason"),
         dropped_year=payload.get("dropped_year") or 0,
+        dropped_filter=payload.get("dropped_filter") or 0,
     )
 
 
@@ -727,20 +707,74 @@ def _record_from(payload: dict[str, Any]) -> Record:
     return Record(**data)
 
 
-def _narrow(records: Sequence[Record], query: SearchQuery) -> tuple[Record, ...]:
+def normalise_doi(identifier: str) -> str | None:
+    """The bare DOI inside whatever the caller typed, or None if it is not a DOI.
+
+    A DOI arrives in at least four spellings, and only one of them used to be
+    recognised:
+
+        10.1002/adma.74981
+        doi:10.1002/adma.74981
+        https://doi.org/10.1002/adma.74981
+        https://dx.doi.org/10.1002/adma.74981
+
+    The last three were reported as `UNKNOWN_CHANNEL` with "no channel claims the
+    host" — true but useless: the host is a resolver, not a publisher, and the thing
+    the caller has *is* the identifier. Naming the fix is the whole job here, so the
+    prefix is stripped rather than diagnosed.
+
+    Returns None for anything that is not a DOI, so a URL keeps going to the channel
+    that owns it.
+    """
+
+    value = identifier.strip()
+    lowered = value.lower()
+    for prefix in (
+        "https://doi.org/",
+        "http://doi.org/",
+        "https://dx.doi.org/",
+        "http://dx.doi.org/",
+    ):
+        if lowered.startswith(prefix):
+            value = value[len(prefix) :]
+            break
+    else:
+        if lowered.startswith("doi:"):
+            value = value[4:]
+    value = value.strip()
+    if value.lower().startswith("10.") and "/" in value:
+        return value
+    return None
+
+
+def _narrow(records: Sequence[Record], query: SearchQuery) -> tuple[tuple[Record, ...], int]:
     """Apply the local filters and ordering — none of these touch the browser.
 
-    A missing citation count is *kept* rather than dropped: some result views do
-    not ship one at all, and an empty page would read as "no such papers" when
-    the truth is "not measured".
+    A missing citation count is **dropped**, not kept. Keeping it meant
+    `min_citations: 1000` returned a paper whose citation count was unknown, which a
+    caller reads as "this paper has at least 1000 citations" — a claim the data does
+    not support. Recall was the old argument, but an unverifiable record is not
+    recall, it is a wrong answer with a plausible shape. The number dropped is
+    reported so the caller can see the cost.
+
+    Same for the impact-factor threshold: a journal without a metric cannot be shown
+    to clear a bar, so it does not clear it.
     """
 
     narrowed = tuple(records)
     if query.min_citations is not None:
+        threshold = query.min_citations
         narrowed = tuple(
             record
             for record in narrowed
-            if record.citations is None or record.citations >= query.min_citations
+            if record.citations is not None and record.citations >= threshold
+        )
+    if query.min_impact_factor is not None:
+        floor = query.min_impact_factor
+        narrowed = tuple(
+            record
+            for record in narrowed
+            if record.impact_factor is not None and record.impact_factor >= floor
         )
     if query.sources_only:
         wanted = tuple(source.casefold() for source in query.sources_only)
@@ -749,11 +783,87 @@ def _narrow(records: Sequence[Record], query: SearchQuery) -> tuple[Record, ...]
             for record in narrowed
             if record.source and any(want in record.source.casefold() for want in wanted)
         )
+    dropped = len(records) - len(narrowed)
     if query.sort_by == "citations":
-        return tuple(sorted(narrowed, key=lambda record: record.citations or 0, reverse=True))
+        by_citations = sorted(narrowed, key=lambda record: record.citations or 0, reverse=True)
+        return tuple(by_citations), dropped
     if query.sort_by == "year":
-        return tuple(sorted(narrowed, key=lambda record: record.year or 0, reverse=True))
-    return narrowed
+        by_year = sorted(narrowed, key=lambda record: record.year or 0, reverse=True)
+        return tuple(by_year), dropped
+    return narrowed, dropped
+
+
+def _site_fields(query: SearchQuery) -> dict[str, Any]:
+    """The part of a query that decides what the site is asked.
+
+    Everything else — `limit`, `include_abstract`, `sort_by`, `local_sort`,
+    `min_citations`, `min_impact_factor`, `sources_only` — acts on a page already in
+    hand. They used to be part of the cache key, so asking the *same* question and
+    merely re-sorting what came back sent a second full search: 24 s and 4 quota for
+    a list the caller was already holding. A user report measured exactly that, and
+    the "local sorting is free" line in the tool description was false as a result.
+
+    `exclude_ut` stays: it is part of the expression typed into the site.
+    `year_from`/`year_to` stay: on Web of Science they become `PY=(…)`.
+    """
+
+    return {
+        "text": query.text,
+        "channel": query.channel,
+        "sort": query.sort,
+        "page": query.page,
+        "year_from": query.year_from,
+        "year_to": query.year_to,
+        "source_types": query.source_types,
+        "exclude_ut": query.exclude_ut,
+    }
+
+
+def _present(page: SearchPage, query: SearchQuery) -> SearchPage:
+    """Apply the caller's view to a page — identical for a fresh or a cached fetch.
+
+    One function for both paths, because keeping them separate is how the cached
+    answer and the live answer drift apart.
+    """
+
+    records = page.records
+    dropped_year = 0
+    if query.year_from is not None or query.year_to is not None:
+        # The site's year control is unreliable, so filter what we fetched.
+        # `total` still describes the site's result set, not the subset — and a
+        # page filtered to nothing does NOT mean the topic has no papers in that
+        # year. A caller that reads an empty page as "no literature" draws a
+        # wrong conclusion, so the number dropped is counted and reported.
+        before = records
+        records = tuple(
+            record
+            for record in records
+            if record.year is not None
+            and (query.year_from is None or record.year >= query.year_from)
+            and (query.year_to is None or record.year <= query.year_to)
+        )
+        dropped_year = len(before) - len(records)
+    records, dropped_filter = _narrow(records, query)
+    if len(records) > query.limit:
+        records = records[: query.limit]
+    if not query.include_abstract:
+        # An abstract is roughly 85% of a record's context cost. Dropping it
+        # is what keeps a fifty-record page affordable; `detail(url)` serves
+        # the full record from the cache seeded above, with no second visit.
+        records = tuple(replace(record, abstract=None) for record in records)
+
+    page = replace(page, records=records, dropped_year=dropped_year, dropped_filter=dropped_filter)
+    # The site had results and this page lost all of them. Reporting
+    # `empty_reason: null` there left the caller to work it out from the counters —
+    # and one concluded "this topic has no literature" when the filters simply did
+    # not match. Which filter emptied the page matters: a year range is a different
+    # mistake from a citation threshold.
+    if not records and page.empty_reason is None:
+        if dropped_year:
+            page = replace(page, empty_reason="all_dropped_by_year")
+        elif dropped_filter:
+            page = replace(page, empty_reason="all_dropped_by_filter")
+    return page
 
 
 def _click_landing(outcomes: Sequence[ActionOutcome]) -> tuple[str | None, bool]:

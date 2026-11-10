@@ -1,6 +1,6 @@
 ---
 name: scholar-export
-description: 把 scholar-search 返回的题录导出为 RIS 或 EndNote 文本，用于 Zotero、EndNote、NoteExpress 导入；不涉及全文下载。
+description: 把 scholar-search 返回的题录导出为 RIS/EndNote/Markdown/CSV 文本，用于 Zotero、EndNote、NoteExpress 导入或制表；不涉及全文下载。
 ---
 
 # 题录导出
@@ -25,7 +25,7 @@ description: 把 scholar-search 返回的题录导出为 RIS 或 EndNote 文本�
 {"records": [{"title": "…", "authors": ["…"], "source": "…", "year": 2026, "url": "…"}], "format": "ris"}
 ```
 
-`format` 取值：`ris` 或 `endnote`。
+`format` 取值：`ris`、`endnote`、`markdown`、`csv`。前两种是引文格式（给 Zotero/EndNote 导入）；后两种是展示导出，带影响因子和它的 JCR 年份，但不是完整元数据备份。
 
 ## 返回
 

@@ -23,7 +23,7 @@ from .core.errors import (
     ScholarSearchError,
 )
 from .core.export import record_from_payload
-from .core.service import ScholarService
+from .core.service import ScholarService, normalise_doi
 
 
 def _filters_payload(page: Any, query: SearchQuery) -> dict[str, Any] | None:
@@ -40,12 +40,19 @@ def _filters_payload(page: Any, query: SearchQuery) -> dict[str, Any] | None:
     if query.year_from is not None or query.year_to is not None:
         applied["year_from"] = query.year_from
         applied["year_to"] = query.year_to
-        # Local, not site-side: it removed records from this page only.
-        applied["year_scope"] = "page"
+        # How the year bound acted, per channel. Web of Science writes it into the
+        # expression (`query_effective` shows `PY=…`), CNKI filters the fetched page.
+        # Calling both "page" told a caller that `total` was unfiltered when on WoS it
+        # is not.
+        applied["year_scope"] = "site_and_page" if _writes_year_into_query(query) else "page"
         if page.dropped_year:
             dropped["year"] = page.dropped_year
     if query.min_citations is not None:
         applied["min_citations"] = query.min_citations
+        # Stated explicitly because it changes what the threshold means: a record
+        # whose count the source did not report cannot clear a bar it cannot be
+        # measured against, so it is dropped rather than kept.
+        applied["min_citations_drops_unmeasured"] = True
     if query.min_impact_factor is not None:
         applied["min_impact_factor"] = query.min_impact_factor
         # Channels drop journals with no metric, which lowers recall by design.
@@ -54,6 +61,8 @@ def _filters_payload(page: Any, query: SearchQuery) -> dict[str, Any] | None:
         applied["sort_by"] = query.sort_by
     if query.sources_only:
         applied["sources_only"] = list(query.sources_only)
+    if page.dropped_filter:
+        dropped["filter"] = page.dropped_filter
     if not applied:
         return None
     if dropped:
@@ -74,6 +83,17 @@ _PROJECTION_ALWAYS = frozenset({"url", "quota_charged", "quota_remaining"})
 _PROJECTION_KEYS = (
     frozenset(Record.__dataclass_fields__) | _PROJECTION_ALWAYS | {"doc_type_unified"}
 )
+
+
+def _writes_year_into_query(query: SearchQuery) -> bool:
+    """Whether this channel turns the year bound into part of the expression.
+
+    Only Web of Science does. Kept as a static answer rather than a manifest lookup:
+    it is used to word a response field, and a wrong manifest path must not be able to
+    break a response.
+    """
+
+    return query.channel == "webofscience"
 
 
 def _has_exclusion(channel: str) -> bool:
@@ -468,6 +488,13 @@ def build_server(service: ScholarService) -> FastMCP:
         * `local_sort` (`none` / `citations` / `year`) re-orders the page already in
           hand: free, no browser action, no quota.
 
+        **Which parameters cost a fetch.** The fetched page is cached as the site
+        returned it, and every local view is derived from it, so these are free even
+        when they change: `limit`, `include_abstract`, `sort_by` / `local_sort`,
+        `min_citations`, `min_impact_factor`, `sources_only`, `fields`. These are a
+        different request and cost a fetch: `query`, `channel`, `site_sort`, `page`,
+        `year_from` / `year_to`, `exclude_ut`.
+
         The older names `sort` and `sort_by` still work and mean the same thing; the
         new names say which one is which.
 
@@ -565,8 +592,13 @@ def build_server(service: ScholarService) -> FastMCP:
         """
 
         identifier = url.strip()
-        is_doi = identifier.lower().startswith("10.") and "/" in identifier
-
+        # `doi:…`, `https://doi.org/…` and `https://dx.doi.org/…` all name the same
+        # paper. Only the bare form used to be recognised, so the others came back as
+        # "no channel claims the host" — accurate, unhelpful, and easy to fix here.
+        bare_doi = normalise_doi(identifier)
+        is_doi = bare_doi is not None
+        if bare_doi is not None:
+            identifier = bare_doi
         # Before anything is fetched. `_detail_payload` raises for an unknown key, but
         # it runs after the network action — so a typo in `fields` paid for a detail
         # fetch whose result was then discarded, and in `detail_many` it aborted the
@@ -709,6 +741,11 @@ def build_server(service: ScholarService) -> FastMCP:
             if out_path:
                 target = Path(out_path).expanduser()
                 target.parent.mkdir(parents=True, exist_ok=True)
+                # Replacing an existing file is allowed — the caller named the path —
+                # but it is not silent. A fixed filename across several export runs
+                # used to lose the previous batch with the response saying only
+                # `written: true`, which reads as "a new file appeared".
+                replaced = target.exists()
                 # `newline=""` keeps the text byte-identical to what `text` holds.
                 # Without it Python translates every "\n" to "\r\n" on Windows, and
                 # the `bytes` field then reported 2004 for a 2054-byte file.
@@ -718,6 +755,7 @@ def build_server(service: ScholarService) -> FastMCP:
                 # anyway would defeat the point of writing it there.
                 return {
                     "written": True,
+                    "overwritten": replaced,
                     "path": str(target.resolve()),
                     "format": format,
                     "records": len(typed),

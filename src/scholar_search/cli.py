@@ -289,6 +289,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.out:
             target = Path(args.out).expanduser()
             target.parent.mkdir(parents=True, exist_ok=True)
+            # Replacing an existing file is allowed, but not silent: a fixed filename
+            # across several runs used to lose the previous batch while the response
+            # said only `written: true`.
+            replaced = target.exists()
             # newline="": no CRLF translation, so the size matches the text.
             with target.open("w", encoding="utf-8", newline="") as handle:
                 handle.write(text)
@@ -296,6 +300,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 json.dumps(
                     {
                         "written": True,
+                        "overwritten": replaced,
                         "path": str(target.resolve()),
                         "format": args.format,
                         "records": len(typed),
@@ -368,6 +373,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         from .bootstrap import build_service
         from .core.contracts import SearchQuery
         from .core.errors import RiskBlocked, ScholarSearchError
+        from .core.service import normalise_doi
 
         service = build_service()
         try:
@@ -387,10 +393,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
                 identifier = args.url.strip()
                 before_q = service.status(brief=True).get("quota_remaining")
-                if identifier.lower().startswith("10.") and "/" in identifier:
+                # `doi:…`, `https://doi.org/…` and `https://dx.doi.org/…` all name the
+                # same paper; only the bare form used to be recognised. Both entry
+                # points share one normaliser so they cannot drift.
+                bare_doi = normalise_doi(identifier)
+                if bare_doi is not None:
                     # A DOI is short and stable; a CNKI detail URL is hundreds of
                     # characters of encrypted signature and easy to truncate.
-                    by_doi = service.detail_by_doi(identifier, channel=args.channel)
+                    by_doi = service.detail_by_doi(bare_doi, channel=args.channel)
                     raw = by_doi.to_dict()
                 else:
                     resolved = args.channel or service.channel_for_url(identifier)

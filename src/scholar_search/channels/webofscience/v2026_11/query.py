@@ -104,17 +104,38 @@ def default_span(today: dt.date | None = None) -> tuple[int, int]:
 
 
 def resolve_span(query: SearchQuery, today: dt.date | None = None) -> tuple[int, int]:
-    """Fill in whichever end of the year range the caller left out."""
+    """Fill in whichever end of the year range the caller left out.
+
+    The result is always ordered. A one-sided range used to be able to produce a
+    backwards span — `year_from=2027` with no end gave `PY=(2027-2026)`, which reads
+    as a range that cannot match anything and was never sent to the site by a human
+    who meant it. Clamping the missing end to at least the given one turns "from
+    2027" into the single year 2027, which is what it says.
+    """
 
     default_start, default_end = default_span(today)
     start, end = query.year_from, query.year_to
     if start is not None and end is not None:
+        if end < start:
+            raise ChannelError(f"year_to ({end}) must not be earlier than year_from ({start})")
         return start, end
     if start is not None:
-        return start, default_end
+        return start, max(start, default_end)
     if end is not None:
         return end - (DEFAULT_SPAN_YEARS - 1), end
     return default_start, default_end
+
+
+def _py_clause(start: int, end: int) -> str:
+    """`PY=(2026)` for one year, `PY=(2020-2026)` for a span.
+
+    The site folds a same-year range itself — a typed `PY=(2026-2026)` is stored as
+    `PY=(2026)` — so generating the long form made two spellings of one query that
+    behaved identically but looked different in `query_effective` and produced
+    different cache entries. Generate the folded form.
+    """
+
+    return f"PY=({start})" if start == end else f"PY=({start}-{end})"
 
 
 def _normalise_py(text: str) -> str:
@@ -158,7 +179,7 @@ def build(query: SearchQuery, *, today: dt.date | None = None) -> str:
     # a second one would intersect two ranges and quietly drop records.
     if "PY" not in field_tokens(text):
         start, end = resolve_span(query, today)
-        body = f"({body}) AND PY=({start}-{end})"
+        body = f"({body}) AND {_py_clause(start, end)}"
 
     exclusion = _exclusion(query.exclude_ut)
     return f"({body}){exclusion}" if exclusion else body
@@ -184,6 +205,14 @@ def _exclusion(identifiers: tuple[str, ...]) -> str:
         # Accept a full record URL, a bare UT, or a lower-cased one.
         if "/" in value:
             value = value.rsplit("/", 1)[-1]
+        # A URL copied out of a browser can carry a query string or a fragment:
+        # `.../full-record/WOS:001874427500001?locale=en_US`. Taking the tail of the
+        # path kept the parameter, producing `"WOS:...?LOCALE=EN_US"` — an identifier
+        # that does not exist, so the exclusion silently matched nothing and the
+        # caller paid for a search that returned the same records again.
+        for separator in ("?", "#"):
+            if separator in value:
+                value = value.split(separator, 1)[0]
         value = value.upper()
         if not value.startswith("WOS:"):
             value = f"WOS:{value}"

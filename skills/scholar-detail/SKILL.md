@@ -16,7 +16,7 @@ description: 通过 scholar-search MCP 服务读取单篇文献详情（摘要�
 | 渠道 | 怎么给 | 费用 |
 |---|---|---|
 | 知网 | `url` 或 `j.cnki.` / `d.cnki.` 前缀的 DOI | **列表不播种详情**，第一次取扣 1；再取同一篇扣 0 |
-| WoS | `url` 或其它 DOI | **列表已播种完整题录**（除摘要），`detail` 命中缓存扣 0 |
+| WoS | `url` 或其它 DOI | **列表已播种完整题录**，`detail` 命中缓存扣 0；`include_abstract=true` 也从缓存返回摘要，同样扣 0 |
 
 **渠道由 URL 的域名或 DOI 前缀推断，不用手动指定。** 只有推断不出来时才传 `channel`。
 

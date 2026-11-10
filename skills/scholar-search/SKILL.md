@@ -82,18 +82,27 @@ status → bridge.ready = false，但 browser_profile 有值
 **这是唯一允许的启动方式**：`wensu browser start` 只对**它自己记录的那个 `--user-data-dir`** 生效。
 **不要**用 `Start-Process msedge`、**不要**按进程名批量操作、**不要**改 profile 或注册表。
 
-## 最重要的陷阱：年份过滤是「当前页过滤」
+## 最重要的陷阱：年份过滤是两层，不是一层
 
-`year_from` / `year_to` **只在刚抓到的那一页上过滤**，不会让站点重新检索。
+`year_from` / `year_to` 的行为**按渠道不同**，而且同一渠道上两层都有：
+
+| 渠道 | 这两个参数做了什么 |
+|---|---|
+| **WoS** | **写进站点检索式**（`… AND PY=(2026)`，`query_effective` 能看到），**并且**再对抓到的那一页做一次本地过滤 |
+| **CNKI** | 只做本地过滤，不改变检索式 |
+
+所以 WoS 上 `total` 已经是年份限定的数量，而 `dropped_year` 通常很小；CNKI 上
+`total` 是全量，`dropped_year` 可能吞掉整页。
 
 后果：`records: []` 加 `total: 65` 意味着「**这一页没有符合年份的**」，**不是**「这个主题没有该年份的文献」。
 
-**判断方法**——看 `dropped_year`：
+**判断方法**——看 `dropped_year` 和 `dropped_filter`：
 
 | 返回 | 含义 | 该怎么办 |
 |---|---|---|
-| `records: []`，`dropped_year: 0`，`total: 0` | 真的没有匹配 | 可以下「无文献」结论 |
-| `records: []`，`dropped_year: 30` | 这一页 30 条全被年份筛掉了 | **换检索式或翻页**，不要说无文献 |
+| `records: []`，`total: 0`，`empty_reason: no_match` | 真的没有匹配 | 可以下「无文献」结论 |
+| `records: []`，`dropped_year: 30`，`empty_reason: all_dropped_by_year` | 这一页 30 条全被年份筛掉了 | **换检索式或翻页**，不要说无文献 |
+| `records: []`，`dropped_filter: 30`，`empty_reason: all_dropped_by_filter` | 全被影响因子/被引阈值筛掉 | 放宽阈值，不要说无文献 |
 | `records: [9 条]`，`total: 401` | 只有 9 条落在今年 | 引用时说明「共 401 条，本页 9 条符合年份」|
 
 **空结果不等于没有文献。** 交付前至少用同义词再交叉验证一次，别凭单次空结果下结论。
@@ -127,11 +136,20 @@ WoS   TS=(ionic) AND PY=(2025-2026)              → 年份区间
 
 **`PY=(2026-2026)` 会被自动改成 `PY=(2026)`**——站点不接受两端相同的区间。
 
+**只给一端年份时的规则**（自动生成的表达式可见 `query_effective`）：
+
+| 你给的 | WoS 生成的 | 说明 |
+|---|---|---|
+| `year_from=2024`，无 `year_to` | `PY=(2024-2026)` | 到今年为止 |
+| `year_from=2027`，无 `year_to` | `PY=(2027)` | 未来年份收敛成单年，不会倒序 |
+| 无 `year_from`，`year_to=2020` | `PY=(2016-2020)` | 默认五年窗口 |
+
 ### 想要的年份不在这一页时
 
-`year_from` / `year_to` **只过滤当前页**。如果首页没有目标年份：
+WoS 上这两个参数会进检索式，所以首页就已经是年份限定的；CNKI 上只做本地过滤，
+首页可能整页被筛掉。不管哪种，首页没有目标年份时：
 
-1. **首选**：`sort=date`（站点按时间倒序重排）——**多花 2 个额度**（3 → 5），但一页就能拿到最新的；
+1. **首选**：`site_sort=date`（站点按时间倒序重排）——**多花 2 个额度**（3 → 5），但一页就能拿到最新的；
 2. 或者：把年份写进检索式。**WoS 已验证**：`PY=(2026)`、`PY=(2025-2026)` 都有效。
    **知网未验证**：`年='2026'` 实测 0 命中（2026-11-09），不要照抄；知网请用 `site_sort=date`
    或 `year_from`。
@@ -209,12 +227,17 @@ TI='生态' and KY='生态文明' and (AU % '陈' + '王')
 
 布尔：`AND` / `OR` / `NOT`，括号分组，`*` 通配。
 
-**年份有两个入口，效果不同**：
+**年份有两个入口，效果按渠道不同**：
 
-- 写进检索式 `PY=(2026)` —— **站点侧过滤**，`total` 就是该年的真实命中数（更准，需要一次完整检索）；
-- 用参数 `year_from=2026` —— **当前页过滤**，`total` 仍是全量（快，但看 `dropped_year`）。
+- 写进检索式 `PY=(2026)` —— **站点侧过滤**，`total` 是站点在该年命中的数量；
+- 用参数 `year_from=2026` —— **WoS 上同样写进检索式**（`query_effective` 能看到），
+  **CNKI 上只过滤当前页**，`total` 仍是全量，要配合 `dropped_year` 读。
 
-要结论可靠时，把年份写进检索式。
+**`total` 不等于「该年有那么多篇」**：一条记录匹配 `PY=(2026)` 却可能带 `year=2027`
+（在线首发，或次年卷期的会议录）。按 `year` 分组显示是对的，看到一两条落在区间外
+不是错误；`dropped_year` 就是按 `year` 再筛掉的条数。
+
+覆盖率（要拿全一年的文献）只能靠 `exclude_ut` 多轮取，`total` 本身不给这个保证。
 
 ### 影响因子（仅 WoS）
 
@@ -259,7 +282,6 @@ WoS 记录自带 `impact_factor`（JCR 影响因子，可能为 `null`——该�
 - 默认不含摘要。需要时把 `url` 交给 `detail`，它**自动从域名判断渠道**。
 
 ### 跨渠道比较用 `doc_type_unified`
-
 `doc_type` 是各站点自己的词表：CNKI 说 `journal`，WoS 说 `article`、`proceedings`。直接比较等于比较
 措辞而不是概念。**要跨渠道筛选用 `doc_type_unified`**：
 
@@ -271,6 +293,14 @@ WoS 记录自带 `impact_factor`（JCR 影响因子，可能为 `null`——该�
 | `thesis` | 学位论文 |
 | `book` / `newspaper` / `patent` | 图书 / 报纸 / 专利 |
 | `other` | 渠道给了类型但不在词表里 |
+
+**但只能「输出」，不能「输入」**：没有文献类型筛选参数。
+
+- `source_types=["review"]` 在 WoS 上会报 `CHANNEL_ERROR`（那是刊名方向，不是类型）；
+- `DT=(Review)` 会被本地拒绝为未知字段码（`DT` 不在 WoS 的可用字段表里）。
+
+**要「只要综述」，就在拿到的 `records` 上按 `doc_type_unified == "review"` 自己筛**，
+并说明这只覆盖已取回的那些，不是站点全集。想缩小召回，用检索式收窄主题。
 
 ### `filters`：这次到底筛掉了什么
 
@@ -287,28 +317,45 @@ WoS 记录自带 `impact_factor`（JCR 影响因子，可能为 `null`——该�
 }
 ```
 
-- **没出现的键 = 该过滤器没生效**，而不是「生效了但没筛掉东西」；
+- **没出现的键 = 该过滤器没生效**，而不是「生效了但没有丢弃任何记录」；
 - `dropped.year` 是被年份筛掉的条数，和 `dropped_year` 同义；
-- `impact_factor_drops_unrated: true` 提醒：没有 JCR 指标的期刊会被**丢弃**，召回因此降低。
+- `dropped.filter` 是被阈值/刊名筛掉的条数，和 `dropped_filter` 同义；
+- `impact_factor_drops_unrated: true` 提醒：没有 JCR 指标的期刊会被**丢弃**，
+  召回因此降低。`min_citations` 同理：**被引数未知的记录会被丢弃**，
+  不再当作「未知所以保留」——「至少被引 1000 次」的调用方不应收到一条查不到被引数的论文。
 
 `total` 永远是**站点侧**命中数，`records` 是过滤后的结果。两者不一致是正常的。
+
+**这些过滤器都不要钱**：它们作用在已经抓到的那一页上。改 `sort_by` / `limit` /
+`min_citations` / `min_impact_factor` / `include_abstract` 不会重新访问站点，
+会直接命中缓存（`cache_hit: true`，`quota_charged: 0`）。**真正会重新检索的**是
+`text`、`channel`、`sort`（站点排序）、`page`、`year_from`/`year_to`、`exclude_ut`。
 
 ## 详情与导出
 
 ```
 detail(url, include_abstract=false, fields=[...])   → 完整记录，摘要默认不返回
 detail_many(urls, include_abstract=false)           → 批量，逐条失败隔离
-export(records, format="ris"|"endnote", out_path=…) → 可落盘
+export(records, format="ris"|"endnote"|"markdown"|"csv", out_path=…) → 可落盘
 ```
+
+**导出前看清楚手里是什么记录**：
+
+- `ris` / `endnote` 是**引文格式**，只带题录字段，**不带影响因子**；
+- `markdown` / `csv` 是**展示导出**，带影响因子**和它的 JCR 年份**（`impact_factor_year`
+  列 / `（JCR 2025）` 后缀），但不是完整元数据备份——例如 CSV 不含单位；
+- **用 `fields` 投影过的结果不要直接导出**：缺作者/期刊会得到 `TY  - GEN`，
+  而且看起来像「来源没提供」。要完整题录，先用记录的 `url` 调 `detail` 取回完整缓存再导出。
+- `out_path` 指向已存在文件时会被覆盖，响应里 `overwritten: true` 会告诉你。
 
 **关于缓存，实测结论（2026-11-09）**：
 
 | 渠道 | 检索后 `detail` 是否免费 |
 |---|---|
 | **WoS** | **是**。检索行自带摘要和 DOI，详情缓存已被预热，`quota_charged: 0` |
-| **知网** | **否**。检索行没有摘要，缓存不会被预热，**每次 detail 都扣 1** |
+| **知网** | **否**。检索行没有摘要，缓存不会被预热，**第一次 detail 扣 1，同一 URL 再取扣 0** |
 
-所以「search 之后 detail 免费」这句话**只对 WoS 成立**。知网按 1/篇预算。
+所以「search 之后 detail 免费」这句话**只对 WoS 成立**。知网按 1/篇预算，但重复取同一篇不再扣。
 
 **摘要很贵**：知网约 1200 字，WoS 约 1000 字，占单篇详情响应的 60–80%。
 只要卷期页/DOI 就**不要**传 `include_abstract`；`detail_many` 一次取十二篇带摘要约 14 KB。
@@ -332,8 +379,22 @@ detail(url, fields=["title","doi","pages"])                         → 只要�
 | `BridgeTimeout` | 传输层超时 | 这是**唯一** `retryable: true` 的情况，可以重试一次 |
 | `ParseError` | 页面结构变化 | 报告并停止，不要重试同一请求 |
 
-**超时会消耗额度**（请求已经真实发出去了），响应里目前不报告扣了多少。用 `status` 的
-`quota_remaining` 前后对比。
+**超时会消耗额度**（请求已经真实发出去了），错误响应里会带 `quota_charged`，
+不用自己去比对 `status`。
+
+`message` 里带 `stage`，用它可以判断停在哪一步：
+
+| `stage` | 含义 |
+|---|---|
+| `wait.query-input` | 检索输入框没出现（页面没开或没加载完） |
+| `wait.result-list` | 点了检索，结果列表没出现 |
+| `wait.capture` | 结果列表有了，但数据流没截到 |
+| `input.fill` / `click.submit` | 填检索式 / 点提交时没回应 |
+| `navigate.*` | 打开或刷新页面时没回应 |
+
+`stage` 只说明**哪一层没回应**，不说明原因。`bridge_ready` 为 true 而 `stage` 是
+`input.fill` 时，连接是好的，多半是那个标签页没响应：把窗口切到前台、或点一下
+wensu 图标再试。**不要重启一个已经在工作的浏览器。**
 
 ## 不要做的
 
