@@ -76,6 +76,17 @@ _PROJECTION_KEYS = (
 )
 
 
+def _has_exclusion(channel: str) -> bool:
+    """Whether this channel can leave records out of a query.
+
+    Only Web of Science carries a field for it. Deliberately a static answer rather
+    than a manifest lookup: the advice is cosmetic, and a wrong manifest path should
+    not be able to break a response.
+    """
+
+    return channel == "webofscience"
+
+
 def _check_fields(fields: list[str] | None) -> None:
     """Reject an impossible projection before anything is spent.
 
@@ -143,6 +154,17 @@ def _page_payload(
         applied = _filters_payload(page, query)
         if applied is not None:
             payload["filters"] = applied
+    # A caller who reached for `page` on a channel that offers `exclude_ut` took the
+    # more expensive route and may not know the other one exists. Say so in the answer
+    # rather than only in the tool description: the choice has already been made by the
+    # time a description is read again.
+    if query is not None and query.page > 1 and _has_exclusion(query.channel):
+        payload["advice"] = (
+            f"{query.channel} can exclude records instead of turning pages: pass the UT "
+            "values you already have as exclude_ut and the same query returns the ones "
+            "you have not seen. Each such call is an independent request; a page turn "
+            "re-submits the query and keeps one result list open."
+        )
     # The price and the balance belong to every surface. They were added in the MCP
     # tool, outside this function, so the CLI silently returned neither — the fifth
     # time a field was added to one entry point and not the other.
@@ -282,7 +304,13 @@ PageNumber = Annotated[
     Field(
         ge=MIN_PAGE,
         le=MAX_PAGE,
-        description=f"1-based. {MAX_PAGE} at most: one page turn per extra page.",
+        description=(
+            "Page of the site's own result list. **Reach for `exclude_ut` first on "
+            "Web of Science** — see below. Use `page` when a channel has no exclusion "
+            "field (CNKI), or when you need a few more records and the query is "
+            "already narrow. Each turn re-submits the search and opens the next page, "
+            "so it is not a way to walk a large result set."
+        ),
     ),
 ]
 PageSize = Annotated[
@@ -362,10 +390,12 @@ def build_server(service: ScholarService) -> FastMCP:
             Field(
                 default=None,
                 description=(
-                    "UT identifiers already seen, left out of this query. Web of "
-                    "Science only. Ask again with the excluded set grown instead of "
-                    "turning to a deeper page: each call is then an independent "
-                    "request rather than one long-held result set."
+                    "Records to leave out, by UT identifier (Web of Science only). "
+                    "**This is the way to go deeper on WoS**: pass the UTs you already "
+                    "have and the same query returns the ones you have not seen. Each "
+                    "call is an independent request, and the set shrinks predictably "
+                    "(38 records, exclude 5 → total 33). `page` still exists for "
+                    "channels without an exclusion field."
                 ),
             ),
         ] = None,
@@ -401,6 +431,14 @@ def build_server(service: ScholarService) -> FastMCP:
 
         An empty records list is a normal answer, not a failure: read `total` and
         `dropped_year` before concluding that a topic has no papers.
+
+        **To get more records, the channel decides which lever exists.** Web of
+        Science has `exclude_ut`: pass back the UT values you already have (the last
+        segment of each record's `url`) and the same query returns the records you
+        have not seen. Do that rather than asking for a deeper `page` — each
+        exclusion call is one independent request, while each page turn re-submits the
+        query and keeps a result list open. CNKI has no exclusion field, so `page` is
+        how you go further there.
 
         **`total` is the site's count for the query, before any local filter.** With
         a year range applied, `total: 363` alongside nine records does NOT mean

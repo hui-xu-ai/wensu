@@ -4,6 +4,45 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.43] - 2026-11-10
+
+Two ways to get more records existed side by side with no rule saying which to use. This
+gives the choice an answer in all three places a caller might look.
+
+### The rule
+
+| channel | how to go deeper | why |
+|---|---|---|
+| **Web of Science** | `exclude_ut` | independent request each time; set shrinks predictably |
+| **CNKI** | `page` | no exclusion field exists |
+| either, query already narrow | `page` | one turn for a few more records |
+
+### Where it now says so
+
+**Tool description** — `page` used to read `"1-based. 3 at most: one page turn per extra
+page."`, which says what it is and nothing about when not to use it. It now opens with
+"Reach for `exclude_ut` first on Web of Science". The `search` docstring gained a
+paragraph, and `exclude_ut`'s own description names the case where `page` is still right.
+
+**The response** — a caller who already turned a WoS page gets:
+
+```json
+"advice": "webofscience can exclude records instead of turning pages: pass the UT
+           values you already have as exclude_ut ..."
+```
+
+A description is read before the first call and rarely again; the advice arrives at the
+moment the wrong lever was just used. It appears only for `page > 1` on a channel that has
+an exclusion field — CNKI and page 1 stay silent, because there the advice would be noise.
+
+**The skill** — the rule, plus the reason `page` is not a way to walk a large set.
+
+### Not done
+
+`page` is not removed for Web of Science. Deleting it would break anyone already using it
+and would leave the tool unable to answer "one more page" without the caller computing UT
+lists first. The guidance makes the expensive path available rather than invisible.
+
 ## [0.12.42] - 2026-11-10
 
 Reaching deeper results by **excluding what you already have**, instead of turning pages.
