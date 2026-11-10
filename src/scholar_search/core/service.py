@@ -168,6 +168,24 @@ class ScholarService:
             heads = self._run(head, spec)
             landed, settled = _click_landing(heads)
             is_results = getattr(channel, "is_results_url", None)
+            # A click that overran the extension's 2 s race returns
+            # `navigation_expected: true` and **no url**. Treating "no url" as "no
+            # problem" skipped this guard entirely, and the next step then reloaded the
+            # search form — which is a page refresh that accomplishes nothing, while
+            # the tail plan carried on as if a results page were loaded. A review
+            # reproduced exactly that.
+            #
+            # No url means the landing was not confirmed. If the site also never
+            # reported the submit control going busy, the click did nothing and saying
+            # otherwise is the failure; if it did go busy, the site ran the query and
+            # the missing url is only a reporting gap.
+            if landed is None and not settled:
+                raise ActionError(
+                    "the submit click returned no landing url and the control never "
+                    "became busy, so the query may not have started",
+                    verb="click",
+                    code="click.not_started",
+                )
             # The click waits for the site to finish, so this URL is the final state,
             # not a sample taken mid-flight. A tab on anything other than a results
             # route means the query matched nothing: that is where the "no results"
@@ -227,12 +245,17 @@ class ScholarService:
         # fetching it from the site would cost a browser action for data we have
         # already parsed and are about to throw away.
         #
-        # Only records that already carry their own detail are seeded. A CNKI
-        # list row has a title and a URL but no abstract — caching it would make
-        # a later detail(url) answer with strictly less than the detail page
-        # would, which is worse than not caching at all.
+        # The test is not "has an abstract". A CNKI list row is a title and a link, so
+        # caching it would make a later detail(url) answer with strictly less than the
+        # detail page holds — worse than not caching. A Web of Science row is a full
+        # record minus the abstract, so caching it is not a downgrade. Gating on the
+        # abstract made a WoS paper *without* one unreachable: not cached, and that
+        # channel implements no detail plan to fall back to.
+        seeds = spec.manifest.search_seeds_detail
         for record in page.records:
-            if record.url and record.abstract:
+            if not record.url:
+                continue
+            if seeds or record.abstract:
                 self._cache.set(_key("detail", spec, {"url": record.url}), record.to_dict())
 
         records = page.records

@@ -20,6 +20,7 @@ looks at, starts, or stops any other profile.
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import json
 import os
@@ -228,21 +229,52 @@ def adopt(
     return config
 
 
-def profile_is_running(config: BrowserConfig) -> bool:
+def profile_is_running(config: BrowserConfig) -> bool | None:
     """Whether a browser is currently using this profile.
 
-    Chromium holds `Default/LOCK` for as long as it has the profile open. That file
-    is the signal the remediation message needed: the previous version decided from
-    `host.log`'s last timestamp, which says when a host last ran — not whether one is
-    running now. A stale log line made "the browser is not started" look like "the
-    extension dropped", and the instruction sent the user to click an icon in a window
-    that did not exist.
+    Returns `None` when the answer cannot be established, which is different from
+    `False` and must not be reported as either:
 
-    Best effort by nature: a crashed browser can leave the lock behind. The cost of
-    being wrong is one wasted instruction, which is what the message already was.
+    - **True**: `Default/LOCK` is held. Chromium keeps it open for as long as it has
+      the profile, and an exclusive OS lock cannot outlive the process that held it.
+    - **False**: no lock, or a lock file nobody is holding.
+    - **None**: the file exists but cannot be probed.
+
+    The previous version returned `True` for "the file exists". A crashed browser
+    leaves the file behind, so a closed browser was reported as "a browser is using
+    the profile, but the extension is not connected" — sending the user to click an
+    icon in a window that was not open. The recovery advice was wrong in the one case
+    it existed for.
     """
 
-    return (Path(config.profile_dir) / "Default" / "LOCK").exists()
+    lock = Path(config.profile_dir) / "Default" / "LOCK"
+    if not lock.exists():
+        return False
+    try:
+        handle = lock.open("rb")
+    except OSError:
+        return None
+    try:
+        # Chromium holds an exclusive lock on this file. Trying to take it tells us
+        # whether anyone is holding it, which a presence check cannot.
+        if os.name != "nt":
+            # The POSIX equivalent (flock) is not wired up: this project runs on
+            # Windows, and guessing at untested locking code is worse than saying the
+            # answer is unknown.
+            return None
+        import msvcrt
+
+        try:
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            return True  # someone holds it: a browser is using the profile
+        else:
+            with contextlib.suppress(OSError):
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            return False
+    finally:
+        with contextlib.suppress(OSError):
+            handle.close()
 
 
 def start(config: BrowserConfig, *, settle_s: float = 1.5) -> subprocess.Popen[bytes]:

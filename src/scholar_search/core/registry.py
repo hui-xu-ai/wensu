@@ -58,6 +58,7 @@ def _load_manifest(path: Path) -> ChannelManifest:
         detail_url_prefixes=tuple(raw.get("detail_url_prefixes", ())),
         field_support=dict(raw.get("field_support", {})),
         detail_field_support=dict(raw.get("detail_field_support", {})),
+        search_seeds_detail=bool(raw.get("search_seeds_detail", False)),
     )
     manifest.validate()
     return manifest

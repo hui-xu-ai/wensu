@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "wensu bridge",
-  "version": "0.12.36",
+  "version": "0.12.37",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+1TAQ5PE6BaLE3TJArPTG9rZY7xdpIC8Um16mcs8oLOYdOiTgEtCpFBo+CX2ktpLDU5b6S1qcrtiKYNpLyvyNMwB0btqxTE95y4rk0yt06aEicSygPoW7ncLe3b/l2FYVj0UHKqJBou+vcEz6qpzKdMkOZo0oKoTFOqNZ/gbqC2chyXXl+xcc66mAKcJ9/mSUpiintmbRFC+EHamFT0aoIvM6AsdEq9FGJklY1MyUMrU278VwCdh8Oe4ImUuihggtLH8a9WXU/rU5D4aC6XcpmxYq5N9e2TeYCJZm5dvtjHGzIsClz+nnC++SnwDFNeMpmzp2or+B/FQuGt5IL9nQIDAQAB",
   "description": "Read-only bibliographic retrieval bridge. Nine generic verbs, no site logic.",
   "permissions": ["nativeMessaging", "tabs"],

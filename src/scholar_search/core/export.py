@@ -31,7 +31,7 @@ _STRING_FIELDS = (
     "url",
 )
 _LIST_FIELDS = ("authors", "keywords")
-_INT_FIELDS = ("citations", "downloads")
+_INT_FIELDS = ("citations", "downloads", "impact_factor_year")
 _FLOAT_FIELDS = ("impact_factor",)
 # Derived at serialisation time from `doc_type`, never stored. Accepted here so a
 # payload that came out of `Record.to_dict()` can go back in.
@@ -146,6 +146,12 @@ def record_from_payload(payload: Mapping[str, Any]) -> Record:
             raise ValueError("impact_factor must be a number")
         impact = float(impact)
 
+    impact_year = payload.get("impact_factor_year")
+    if impact_year is not None and (
+        isinstance(impact_year, bool) or not isinstance(impact_year, int)
+    ):
+        raise ValueError("impact_factor_year must be an integer")
+
     year_text = _year(payload.get("year"))
     fetched = payload.get("fetched_at")
     if isinstance(fetched, str):
@@ -172,6 +178,7 @@ def record_from_payload(payload: Mapping[str, Any]) -> Record:
         fetched_at=fetched,
         doc_type=_text(doc_type, "doc_type").casefold() or None,
         impact_factor=impact,
+        impact_factor_year=impact_year,
     )
 
 

@@ -16,6 +16,7 @@
   ],
   "detail_url_prefixes": [],
   "capabilities": ["search", "export", "journal_metrics"],
+  "search_seeds_detail": true,
   "field_support": {
     "abstract": true,
     "keywords": true,

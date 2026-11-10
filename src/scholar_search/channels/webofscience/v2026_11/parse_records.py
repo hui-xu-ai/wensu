@@ -237,14 +237,20 @@ def _order(key: str) -> int:
     return int(key) if key.isdigit() else 0
 
 
-def _impact_factors(rows: list[dict[str, Any]]) -> dict[str, float]:
-    """Map a record's ``jcrKey`` to its journal's impact factor.
+def _impact_factors(rows: list[dict[str, Any]]) -> dict[str, tuple[float, int | None]]:
+    """Map a record's ``jcrKey`` to ``(impact factor, JCR year)``.
 
     The metrics ride in their own ``jcr`` block, and it arrives *after* the
     records it describes — hence a separate pass rather than inline lookup.
+
+    The year is carried, not dropped. An impact factor without its JCR edition cannot
+    be compared against another one: 4.2 from the 2024 edition and 4.2 from 2025 are
+    different claims about a journal, and a caller ranking venues had no way to see
+    which it was reading. The parser used to take only `ImpactFactor` and discard the
+    `Year` beside it.
     """
 
-    factors: dict[str, float] = {}
+    factors: dict[str, tuple[float, int | None]] = {}
     for row in rows:
         if row.get("key") != "jcr":
             continue
@@ -255,26 +261,43 @@ def _impact_factors(rows: list[dict[str, Any]]) -> dict[str, float]:
             if not isinstance(entry, dict):
                 continue
             value = entry.get("ImpactFactor")
+            parsed: float | None = None
             if isinstance(value, bool):
                 continue
             if isinstance(value, (int, float)):
-                factors[str(key)] = float(value)
+                parsed = float(value)
             elif isinstance(value, str):
                 try:
-                    factors[str(key)] = float(value)
+                    parsed = float(value)
                 except ValueError:
-                    continue
+                    parsed = None
+            if parsed is None:
+                continue
+            year: int | None = None
+            raw_year = entry.get("Year")
+            if isinstance(raw_year, int) and not isinstance(raw_year, bool):
+                year = raw_year
+            elif isinstance(raw_year, str):
+                try:
+                    year = int(raw_year.strip())
+                except ValueError:
+                    year = None
+            factors[str(key)] = (parsed, year)
     return factors
 
 
-def _record(payload: dict[str, Any], factors: dict[str, float] | None = None) -> Record | None:
+def _record(
+    payload: dict[str, Any],
+    factors: dict[str, tuple[float, int | None]] | None = None,
+) -> Record | None:
     titles = _titles(payload)
     title = _title_of(titles.get("item"))
     if title is None:
         return None
     ut = _as_text(payload.get("ut")) or _as_text(payload.get("colluid"))
     jcr_key = _as_text(payload.get("jcrKey"))
-    impact = factors.get(jcr_key) if (factors and jcr_key) else None
+    metric = factors.get(jcr_key) if (factors and jcr_key) else None
+    impact, impact_year = metric if metric is not None else (None, None)
     return Record(
         channel=CHANNEL,
         title=title,
@@ -294,6 +317,7 @@ def _record(payload: dict[str, Any], factors: dict[str, float] | None = None) ->
         fetched_at=datetime.now(timezone.utc),
         doc_type=_doc_type(payload),
         impact_factor=impact,
+        impact_factor_year=impact_year,
     )
 
 
@@ -370,8 +394,8 @@ def parse(text: str, *, query: SearchQuery | None = None) -> SearchPage:
             if record is None:
                 continue
             if wanted is not None:
-                factor = factors.get(str(raw.get("jcrKey") or ""))
-                if factor is None or factor < wanted:
+                metric = factors.get(str(raw.get("jcrKey") or ""))
+                if metric is None or metric[0] < wanted:
                     continue
             records.append(record)
 

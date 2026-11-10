@@ -194,6 +194,12 @@ class Record:
     # Journal metric, where the channel ships one — Web of Science does, through
     # the `jcr` block. Optional so CNKI, which has no such notion, stays valid.
     impact_factor: float | None = None
+    # Which JCR edition the number came from. Without it a caller cannot tell whether
+    # two impact factors are comparable: a paper published in 2026 may carry a 2025
+    # or a 2024 JIF, and the values are not interchangeable. The parser used to read
+    # only `ImpactFactor` and drop the `Year` sitting next to it, so a fixture's year
+    # could change from 2025 to 2020 with no visible difference in the record.
+    impact_factor_year: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -212,6 +218,7 @@ class Record:
             "citations": self.citations,
             "downloads": self.downloads,
             "impact_factor": self.impact_factor,
+            "impact_factor_year": self.impact_factor_year,
             "url": self.url,
             "fetched_at": self.fetched_at.isoformat() if self.fetched_at else None,
             "doc_type": self.doc_type,
@@ -279,6 +286,15 @@ class ChannelManifest:
     # the complete one; declaring only `field_support` told a caller that CNKI
     # "cannot do abstracts", which is false at the endpoint they would use.
     detail_field_support: Mapping[str, bool] = field(default_factory=dict)
+    # Whether a search row is itself a usable record. A Web of Science search
+    # captures full records — authors, DOI, volume, pages, keywords — so caching the
+    # row is not a downgrade. A CNKI list row is a title and a link, so caching it
+    # would make a later `detail` answer with strictly less than the page holds.
+    #
+    # This field exists because the seeding rule was `url and abstract`: a WoS paper
+    # with no abstract was not cached, and since that channel implements no detail
+    # plan, the record became unreachable even though every other field was in hand.
+    search_seeds_detail: bool = False
 
     def validate(self) -> None:
         unknown = set(self.verbs) - VERBS

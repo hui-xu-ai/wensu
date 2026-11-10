@@ -21,6 +21,7 @@
     "citations": { "type": ["integer", "null"], "minimum": 0 },
     "downloads": { "type": ["integer", "null"], "minimum": 0 },
     "impact_factor": { "type": ["number", "null"] },
+    "impact_factor_year": { "type": ["integer", "null"] },
     "url": { "type": ["string", "null"] },
     "doc_type": {
       "type": ["string", "null"],

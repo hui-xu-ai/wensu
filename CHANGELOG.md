@@ -4,6 +4,89 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.37] - 2026-11-10
+
+WoS review (`docs/reviews/wensu-wos-0.12.36-2026-11-10.md`), from a real research task rather than a
+matrix. Nine items; the three that could be closed without redesigning the WoS capture path are below.
+
+### Fixed — a click with no URL skipped the results-page guard (W02)
+
+When the submit click overruns the extension's 2 s race, it returns `navigation_expected: true` and
+**no url**. The guard read:
+
+```python
+if landed and is_results is not None and not is_results(landed):
+```
+
+`landed` was `None`, so the whole condition was skipped and the tail plan reloaded whatever page was
+open — the search form. A review reproduced the reload against the advanced-search URL.
+
+No URL now means "landing unconfirmed". If the site also never reported the submit control going
+busy, the click did nothing and the call fails; if it did go busy, the query ran and the missing URL
+is only a reporting gap.
+
+### Fixed — a WoS paper without an abstract became unreachable (W08)
+
+Detail records were cached only when `record.url and record.abstract`. A Web of Science row is a full
+record minus the abstract, so a paper with none was not cached — and that channel implements no detail
+plan, so `detail` fell through to "webofscience channel does not implement detail yet". Every field
+the caller wanted was already in hand.
+
+Channels now declare `search_seeds_detail`. WoS sets it; CNKI does not, because its rows really are a
+title and a link.
+
+### Fixed — a stale LOCK file looked like a running browser (W09)
+
+`profile_is_running` returned `Path(...).exists()`. Chromium leaves `Default/LOCK` behind when it
+crashes, so a closed browser was reported as "a browser is using the profile, but the extension is
+not connected" — advice to click an icon in a window that was not open.
+
+The file is now *probed*: an exclusive lock is taken to learn whether anyone holds it. The function
+returns `True`, `False`, or **`None` when it cannot tell** — and `None` produces an honest
+"cannot tell" diagnosis with `wensu browser start`, which is safe either way.
+
+### Fixed — the JCR year was parsed and discarded (W07)
+
+`_impact_factors` read `ImpactFactor` and dropped the `Year` beside it, so two records with identical
+numbers could come from different JCR editions. `Record` gained `impact_factor_year`, the parser keeps
+it, `schemas/record.json` describes it, and the export round-trip preserves it.
+
+### Fixed — the skill contradicted the tool (W06, W01)
+
+- The skill said to retry a `wait_for` timeout once. `_retryable` returns false for it, and retrying
+  re-submits the query and spends quota. Only `BridgeTimeout` is retryable, and the skill says so.
+- The skill offered `page` 1–3 for both channels. WoS rejects page 3; the skill now says so.
+- The skill called `impact_factor` "the JCR value for this year". It now points at
+  `impact_factor_year` and warns that different editions are not comparable.
+
+### Still open
+
+**W01** — no way to reach page 3 of a WoS result set. The third page would exceed the kernel's 120 s
+plan budget, so the limit is real, but 115 results cannot be covered through a public interface. Needs
+a paginated/continuation plan, not a relaxed limit.
+
+**W03** — `capture.js` marks `data-ready` before the page's records are complete or current: a
+secondary stream does not clear it, an idle timer can fire while a response is still open, and a
+payload holding only `searchInfo` counts as ready. Fixing this means tracking request generations and
+expected record counts, which changes the capture contract.
+
+**W04** — no page number, record range, result-set id, or duplicate/corruption flags in the response,
+and `limit` truncates after parsing instead of setting the site's page size.
+
+**W05** — three different failure stages (search form, first capture, next-page capture) all return
+`ACTION_TIMEOUT / wait_for failed: timeout` with no selector or step. `ParseError` also conflates "the
+stream was not intercepted" with "it was intercepted but held no records".
+
+These four need design work on the WoS capture path and are recorded here rather than patched.
+
+### Verified
+
+```
+pytest                251 passed
+ruff check / format   clean
+mypy --strict         clean
+```
+
 ## [0.12.36] - 2026-11-09
 
 v2 matrix acceptance (`docs/reviews/wensu-acceptance-v2-0.12.35-2026-11-09.md`). The matrix covered

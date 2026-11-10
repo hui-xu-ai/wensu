@@ -68,7 +68,21 @@ def _bridge_remediation(last_seen: str | None) -> dict[str, object]:
         }
 
     running = browser_cfg.profile_is_running(recorded)
-    if not running:
+    if running is None:
+        # Cannot tell whether the profile is in use — the lock exists but could not be
+        # probed. Guessing here is what produced the wrong advice twice: "click the
+        # icon" when no window existed, and "start the browser" when one did. Say the
+        # answer is unknown and give the command that is safe either way.
+        return {
+            "diagnosis": "cannot tell whether the wensu profile browser is running",
+            "next_action": "browser_start",
+            "command": "wensu browser start",
+            "profile_dir": recorded.profile_dir,
+            "human_step_required": False,
+            "note": "`browser start` is safe when a window is already open: it hands "
+            "the request over and reports that, rather than failing.",
+        }
+    if running is False:
         return {
             "diagnosis": "the wensu profile browser is not running",
             "next_action": "browser_start",
