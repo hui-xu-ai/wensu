@@ -33,8 +33,15 @@
  */
 
 (() => {
-  const QUERY_PREFIX = "/api/wosnx/core/runQuery";
-  const PRIMARY = "/api/wosnx/core/runQuerySearch";
+  // Both sites, because the mirror and the global site are not the same application
+  // server-side. `.cn` answers on `/api/wosnx/core/runQuery…`; `.com` answers on
+  // `/api/esti/SearchEngine/…`. Tracking only the first meant the capture never fired
+  // on `.com`: `wait_for #wensu-wos-capture` sat on `not_found` while the page itself
+  // was healthy.
+  const QUERY_PREFIXES = ["/api/wosnx/core/runQuery", "/api/esti/SearchEngine/"];
+  // A primary query starts a new result set; everything else appends to the current
+  // one. Both spellings name the same event on their respective site.
+  const PRIMARY_MARKERS = ["/api/wosnx/core/runQuerySearch", "/api/esti/SearchEngine/search"];
   const ID = "wensu-wos-capture";
   const MAX_CHARS = 8 * 1024 * 1024;
   const IDLE_MS = 2_000;
@@ -202,7 +209,7 @@
 
   function begin(url) {
     const text = String(url || "");
-    if (text.indexOf(PRIMARY) !== -1) {
+    if (PRIMARY_MARKERS.some((marker) => text.indexOf(marker) !== -1)) {
       // A primary query means a new result set: drop everything the previous one
       // left behind, and invalidate every request still in flight.
       generation += 1;
@@ -258,7 +265,9 @@
   }
 
   function tracked(url) {
-    return typeof url === "string" && url.indexOf(QUERY_PREFIX) !== -1;
+    return (
+      typeof url === "string" && QUERY_PREFIXES.some((prefix) => url.indexOf(prefix) !== -1)
+    );
   }
 
   async function drain(response, gen) {

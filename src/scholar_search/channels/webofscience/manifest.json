@@ -3,7 +3,7 @@
   "site_version": "2026.11",
   "schema_version": 1,
   "min_core": "0.5.0",
-  "domains": ["webofscience.clarivate.cn", "www.webofscience.com"],
+  "domains": ["webofscience.com", "www.webofscience.com", "webofscience.clarivate.cn"],
   "verbs": [
     "goto",
     "wait_for",

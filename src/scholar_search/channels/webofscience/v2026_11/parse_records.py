@@ -17,6 +17,7 @@ from typing import Any
 
 from ....core.contracts import Record, SearchPage, SearchQuery
 from ....core.errors import ParseError
+from . import selectors
 
 CHANNEL = "webofscience"
 PRIMARY_API = "runQuerySearch"
@@ -43,7 +44,7 @@ EMPTY_MARKERS = (
     "found no records",
 )
 
-DETAIL_PREFIX = "https://webofscience.clarivate.cn/wos/woscc/full-record/"
+DETAIL_PREFIX = selectors.DETAIL_PREFIX
 
 # WoS document types are a small English vocabulary; anything outside it is
 # kept as lower-cased text rather than dropped, so nothing is lost silently.

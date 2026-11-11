@@ -11,6 +11,22 @@ change per render.
 
 from __future__ import annotations
 
+# The China mirror, because it is the only host this channel can currently **parse**.
+#
+# The global site (`www.webofscience.com`) is reachable — the extension is authorised
+# there, injects, and captures — but it answers on a different API and in a different
+# payload shape:
+#
+#   mirror : /api/wosnx/core/runQuery…  -> newline-delimited JSON
+#            {"key": "searchInfo", "payload": {"RecordsFound": 115}}
+#            {"key": "records",    "payload": [...]}
+#   global : /api/esti/SearchEngine/…   -> one JSON document
+#            {"QueryResult": {"RecordsFound": 6}, "Data": {"Records": [...]}}
+#
+# `parse_records` reads the first shape. Pointing this constant at the global site today
+# would move the failure from "cannot reach the site" to "cannot read the answer", and
+# would break the host that works. See docs/reviews for the captured sample and what
+# supporting the global site requires.
 ADVANCED_SEARCH = "https://webofscience.clarivate.cn/wos/woscc/advanced-search"
 
 # The editor keeps whatever the previous search left in it; ``type`` always

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from scholar_search.core.contracts import Action, ActionOutcome
+from scholar_search.core.contracts import Action, ActionOutcome, Plan
 from scholar_search.core.errors import ActionError
 from scholar_search.core.service import ScholarService
 from scholar_search.server import _payload
@@ -56,11 +56,33 @@ def test_a_capture_wait_is_not_confused_with_a_result_list() -> None:
 
 def test_the_message_names_the_step_and_the_stage() -> None:
     failed = _outcome("wait_for", {"selector": "#wensu-wos-capture[data-ready='1']"})
-    outcomes = [ActionOutcome(action=Action("goto", {}), ok=True)] * 7 + [failed]
-    message = ScholarService._failure_message(failed, 7, outcomes)
+    plan = Plan(
+        channel="webofscience",
+        purpose="search",
+        actions=(*(Action("goto", {}) for _ in range(8)), failed.action),
+    )
+    message = ScholarService._failure_message(failed, 8, plan)
     assert "wait.capture" in message
-    assert "step 8/8" in message
+    assert "step 9/9" in message
     assert failed.error in message
+
+
+def test_the_step_count_is_against_the_plan_not_the_actions_that_ran() -> None:
+    """`step 2/2` on a seven-action plan sent one investigation after a plan that
+    did not exist. The denominator is the plan."""
+
+    failed = _outcome("sleep", {"ms": 1_369}, error="bridge.timeout")
+    plan = Plan(
+        channel="webofscience",
+        purpose="search",
+        actions=(
+            Action("goto", {}),
+            Action("sleep", {"ms": 1_369}),
+            *(Action("wait_for", {"selector": "x"}) for _ in range(5)),
+        ),
+    )
+    message = ScholarService._failure_message(failed, 1, plan)
+    assert "step 2/7" in message, message
 
 
 def test_the_selector_never_reaches_the_payload() -> None:

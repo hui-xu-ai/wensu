@@ -4,6 +4,85 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.52] - 2026-11-11
+
+Chasing the global Web of Science site turned up four defects on the path that was
+already working. Those are fixed here. The global site itself is **not** supported yet,
+and the reason is a different data format, not a missing permission.
+
+### Fixed — a pause was executed by the page instead of by the browser
+
+`sleep` was forwarded to the content script like every other verb, and every WoS plan
+opens with `goto` then a pause. Right after a navigation the content script is being
+re-injected, so the pause sat in the "waiting for the script" retry queue and spent its
+whole budget there:
+
+```
+16:13:35  sleep  ok=False  3106ms  ERR=bridge.timeout
+```
+
+on a page that had loaded perfectly well. A pause does not touch the page, so it now runs
+in the extension's background worker: `sleep ok=True 1207ms`.
+
+### Fixed — a content script that never injected on a slow link
+
+Web of Science was injected at `document_idle`, which waits for the load event. On a
+high-latency link `window.onload` never arrives, so no script was injected at all — and
+it did not recover minutes later:
+
+```
+wait_for failed: content_not_ready (step 4/5, stage wait.capture)
+```
+
+`actions.js` only registers a message listener at load and touches the DOM inside
+handlers, so it can run before the body exists. The global host now injects at
+`document_start`. **The working mirror host keeps `document_idle`** — changing the timing
+of the only path that works, to serve a path that does not work yet, is a bad trade.
+
+### Fixed — the retry budget was shorter than the action's own deadline
+
+Eight attempts reached ~6.4 s and then declared the page broken, while the kernel was
+still willing to wait 11 s. The retry now runs until just before the action's
+`timeout_ms`, so the four and a half unspent seconds are used, and stopping early keeps
+the error specific (`content_not_ready` rather than the host's `bridge.timeout`).
+
+### Fixed — "step 2/2" on a seven-action plan
+
+The step count used the number of actions that ran, not the plan's length. A plan that
+died on its second action reported `step 2/2`, which sent one investigation looking for a
+two-action plan that did not exist.
+
+### Added — a channel failure can carry facts the message cannot
+
+`content_not_ready` covers three unrelated situations: no such tab, the document is not
+there yet, and the script is there but its channel closed. The extension now returns the
+tab's URL and its own wording, and the kernel renders both:
+
+```
+wait_for failed: content_not_ready (step 4/5, stage wait.capture)
+  [reached www.webofscience.com] [Could not establish connection. Receiving end does not exist.]
+```
+
+That line is what distinguished "never injected" from "injected then lost" — the previous
+two rounds were spent guessing between them.
+
+### Known limitation — the global site is not supported
+
+`www.webofscience.com` is reachable now (authorised, injected, capturing), but it answers
+on a different API and in a different shape:
+
+```
+mirror : /api/wosnx/core/runQuery…   newline-delimited JSON, key/payload rows
+global : /api/esti/SearchEngine/…    one JSON document, QueryResult/Data.Records
+```
+
+`parse_records` reads the first. The default host therefore stays on the mirror: pointing
+it at the global site today would trade "cannot reach the site" for "cannot read the
+answer", and break the host that works. `docs/reviews/wos-global-site-2026-11-11.md`
+records the captured sample, what is still unknown (the document endpoint has not been
+identified — the captured response was author data from a typeahead), and the six steps
+needed to support it.
+
 ## [0.12.51] - 2026-11-11
 
 A refused navigation did not say where the tab went, which is the one fact that tells the

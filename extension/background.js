@@ -11,7 +11,9 @@ const DEFAULT_DOMAINS = [
   "kns.cnki.net",
   "www.cnki.net",
   "webofscience.clarivate.cn",
-  "www.webofscience.com",
+  // The apex covers `www.` and any other subdomain through the same
+  // `host === d || host.endsWith("." + d)` test the kernel uses.
+  "webofscience.com",
 ];
 
 let port = null;
@@ -186,27 +188,66 @@ async function onHostMessage(message, channel) {
 
     const message = { type: "dom_action", action, params };
 
+    // A pause does not touch the page, so it must not wait for one.
+    //
+    // `sleep` used to be forwarded to the content script like everything else, and the
+    // plan opens with `goto` then a pause. Right after a navigation the content script
+    // is re-injected at document_idle, so the pause sat in the retry loop below and
+    // spent its entire budget waiting for a script that had nothing to do — the run
+    // died with `sleep failed: bridge.timeout (step 2/7)` on a page that had loaded
+    // perfectly well. Waiting here instead costs exactly `params.ms` and cannot be
+    // blocked by a slow page.
+    if (action === "sleep") {
+      const ms = Math.max(0, Math.min(Number(params && params.ms) || 0, 3_000));
+      const began = Date.now();
+      await new Promise((resolve) => setTimeout(resolve, ms));
+      return reply({ ok: true, data: {}, duration_ms: Date.now() - began, url: current.url });
+    }
+
     // document_idle injection can lag behind a navigation. A fixed 6 x 300 ms gave
-    // a slow page 1.8 s and then declared the extension broken; back off instead,
-    // which covers roughly 6.4 s within the action budget.
+    // a slow page 1.8 s and then declared the extension broken; back off instead.
+    //
+    // The budget now comes from the action's own deadline rather than a fixed eight
+    // attempts. Eight attempts reached ~6.4 s and gave up while the kernel was still
+    // willing to wait 11 s, so a Web of Science summary page that had just been
+    // reloaded failed as `content_not_ready` with 4.6 s of its budget unspent. Stopping
+    // 600 ms early keeps the error specific: the host's deadline would otherwise fire
+    // first and report `bridge.timeout`, which says less.
+    const declaredBudget = Number(params && params.timeout_ms);
+    const budget = Math.min(
+      Math.max(Number.isFinite(declaredBudget) ? declaredBudget : 8_000, 2_000) - 600,
+      12_000,
+    );
+    const deadline = Date.now() + Math.max(budget, 1_000);
+    let lastError = "";
+
     const sendToTab = async () => {
       let delay = 200;
-      for (let attempt = 0; attempt < 8; attempt += 1) {
+      while (Date.now() < deadline) {
         try {
           return await chrome.tabs.sendMessage(tabId, message);
         } catch (error) {
           const text = String((error && error.message) || error);
+          lastError = text;
           // A navigation tears down the content script mid-flight. All three
           // wordings mean "the new document is not ready yet", not "the page is
           // broken", so they are retried rather than surfaced.
           if (!/Receiving end|Could not establish|message channel closed/i.test(text)) {
             throw error;
           }
-          await new Promise((resolve) => setTimeout(resolve, delay));
+          const remaining = deadline - Date.now();
+          if (remaining <= 0) break;
+          await new Promise((resolve) => setTimeout(resolve, Math.min(delay, remaining)));
           delay = Math.min(delay * 2, 1000);
         }
       }
-      throw new Error("content_not_ready");
+      // Carry the tab's URL and the channel's own wording. A bare
+      // `content_not_ready` cannot distinguish "no such tab", "the document is not
+      // there yet" and "the script is there but its channel closed", and one
+      // investigation was spent guessing between them.
+      throw Object.assign(new Error("content_not_ready"), {
+        detail: { url: current.url, reason: lastError.slice(0, 160), waited_ms: budget },
+      });
     };
 
     let result;
@@ -280,7 +321,15 @@ async function onHostMessage(message, channel) {
     }
     return reply({ ok: Boolean(result.ok), error: result.error, data });
   } catch (error) {
-    return reply({ ok: false, error: String((error && error.message) || error) });
+    // `detail` carries facts the message cannot: the tab's URL, the channel's own
+    // failure wording. The kernel turns a `url` into `[reached <host>]`, which is how
+    // an auth redirect was told apart from a slow page.
+    const detail = error && typeof error === "object" ? error.detail : undefined;
+    return reply({
+      ok: false,
+      error: String((error && error.message) || error),
+      data: detail && typeof detail === "object" ? { ...detail } : {},
+    });
   }
 }
 

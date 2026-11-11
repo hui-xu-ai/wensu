@@ -522,7 +522,7 @@ class ScholarService:
             if not outcome.ok:
                 stage = self._stage_of(outcome, index)
                 raise ActionError(
-                    self._failure_message(outcome, index, outcomes),
+                    self._failure_message(outcome, index, plan),
                     verb=outcome.action.verb,
                     code=outcome.error or "action.failed",
                     stage=stage,
@@ -613,18 +613,17 @@ class ScholarService:
         return f"action.{outcome.action.verb}"
 
     @classmethod
-    def _failure_message(
-        cls, outcome: ActionOutcome, index: int, outcomes: Sequence[ActionOutcome]
-    ) -> str:
-        """`<verb> failed: <error>` plus where it happened and what had succeeded.
+    def _failure_message(cls, outcome: ActionOutcome, index: int, plan: Any) -> str:
+        """`<verb> failed: <error>` plus where it happened and what the page was.
 
-        The step index and the stage make the public error self-describing: "step 9
-        of 12, waiting for the capture stream" is actionable; "wait_for failed:
-        timeout" is not.
+        The step count is against the **plan**, not against the actions that ran. It
+        used to be `len(outcomes)`, which for a plan that died on its second action
+        read `step 2/2` — indistinguishable from a two-action plan, and it sent one
+        investigation looking for a small plan that did not exist.
         """
 
         stage = cls._stage_of(outcome, index)
-        total = len(outcomes)
+        total = len(plan.actions)
         message = (
             f"{outcome.action.verb} failed: {outcome.error or 'unknown'} "
             f"(step {index + 1}/{total}, stage {stage})"
@@ -641,6 +640,14 @@ class ScholarService:
             host = urlparse(url).hostname
             if host:
                 message = f"{message} [reached {host}]"
+        # The channel's own wording for why it could not reach the page. A bare
+        # `content_not_ready` covers "no such tab", "the document is not there yet" and
+        # "the script is there but its channel closed"; only the extension can say
+        # which, and one investigation was spent guessing between them.
+        if isinstance(outcome.data, dict):
+            reason = outcome.data.get("reason")
+            if isinstance(reason, str) and reason.strip():
+                message = f"{message} [{reason.strip()[:160]}]"
         return message
 
     def _pin_transaction_host(self) -> None:
