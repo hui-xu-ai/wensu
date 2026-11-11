@@ -4,6 +4,52 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.50] - 2026-11-11
+
+A blocked response told the user to wait 24 hours and nothing else. For a login problem
+that is both the wrong cause and the wrong remedy.
+
+### Added — each risk signal explains itself
+
+The 0.12.48 acceptance hit `signal: login_redirect` on its first Web of Science call and
+received:
+
+```json
+{"status": "blocked", "signal": "login_redirect",
+ "cooldown_until": "2026-11-12T01:04:06+00:00", "action_required": "manual_verification"}
+```
+
+Nothing said the session had expired. Nothing said waiting was pointless. The way out —
+`wensu reset --confirm` — appeared in no field the caller reads, and the user's reaction
+was "I didn't see any such result, my searches are fine", which is the correct reading of
+a payload that only contains a timestamp.
+
+What actually happened, from the audit trail: the `goto` to the advanced-search page came
+back `policy.domain` after 3.6 s — the tab had been sent to an out-of-domain sign-in URL
+(the campus SSO/CARSI hop) and the extension refused to treat it as a page it may act on,
+while keeping the final URL so the kernel could see it was an auth redirect. That is the
+detection working. The reporting was what failed.
+
+Each signal now carries `advice`:
+
+| signal | what it now says |
+|---|---|
+| `login_redirect` | the session ended; sign in in that window, then `reset --confirm`; waiting will not help |
+| `captcha` | solve it in the window, then reset; never automate it |
+| `verify_redirect` | complete verification, then reset |
+| `http_403` | stop for the day; retrying or changing network makes it durable |
+| `rate_limited` | stop; the quota is not the problem, the rate is |
+| `text_marker` | read the page — the wording says which of three problems it is |
+| `cooldown` | do not retry; wait or fix the cause first |
+
+**The stop is unchanged.** AGENTS.md requires terminating on these signals and writing the
+24-hour cooldown, and a test asserts `status: blocked` and the cooldown still stand. Only
+the guidance is per-signal, because one message cannot serve a captcha (seconds to fix),
+an expired session (one sign-in), and a 403 (stop for the day).
+
+A signal added later without guidance stays silent rather than inventing advice; a test
+enforces that.
+
 ## [0.12.49] - 2026-11-11
 
 Three defects from the 0.12.48 acceptance, all introduced by 0.12.48. The first disabled

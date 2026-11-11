@@ -64,12 +64,57 @@ class RiskBlocked(ScholarSearchError):
         self.cooldown_until = cooldown_until
 
     def to_payload(self) -> dict[str, str]:
-        return {
+        payload = {
             "status": "blocked",
             "signal": self.signal,
             "cooldown_until": self.cooldown_until,
             "action_required": "manual_verification",
         }
+        advice = _RISK_ADVICE.get(self.signal)
+        if advice is not None:
+            payload["advice"] = advice
+        return payload
+
+
+# What the person in front of the browser has to do, per signal. Without this the
+# payload said only "blocked, try again in 24 hours", which is the wrong instruction for
+# three of the four: a captcha is solved in seconds, and an expired session is signed
+# back in. Waiting a day fixes neither, and the way out — `reset --confirm` — was never
+# mentioned anywhere the caller could see.
+_RISK_ADVICE: dict[str, str] = {
+    "login_redirect": (
+        "The browser profile's session ended: the site sent the tab to a sign-in URL. "
+        "Sign in to the site in that same browser window, confirm a search works there, "
+        "then run `wensu reset --confirm`. Waiting will not help — nothing is wrong with "
+        "the network, only with the session."
+    ),
+    "captcha": (
+        "Solve the captcha in that browser window, then run `wensu reset --confirm`. "
+        "Never automate it, and do not retry before solving it."
+    ),
+    "verify_redirect": (
+        "The site asked for account verification. Complete it in the browser window, "
+        "then run `wensu reset --confirm`."
+    ),
+    "http_403": (
+        "The site refused the request with 403. Stop for the day; retrying, changing "
+        "network or switching profile turns a temporary refusal into a durable one."
+    ),
+    "rate_limited": (
+        "The site answered 429. Stop for the day; the quota is not the problem, the "
+        "request rate is."
+    ),
+    "cooldown": (
+        "A cooldown is already running. Do not retry; wait it out or, after fixing the "
+        "underlying cause in the browser, run `wensu reset --confirm`."
+    ),
+    "text_marker": (
+        "The page itself showed wording that means access was refused — a block notice, "
+        "an account wall, or a 'too many requests' page. Read that page in the browser "
+        "before doing anything else: the wording says which of those it is, and only one "
+        "of them is fixed by signing in."
+    ),
+}
 
 
 class ParseError(ScholarSearchError):
