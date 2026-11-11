@@ -11,23 +11,23 @@ change per render.
 
 from __future__ import annotations
 
-# The China mirror, because it is the only host this channel can currently **parse**.
+# The global site, Core Collection. Both hosts run the same application behind the same
+# API — a capture from `www.webofscience.com` shows
+# `/api/wosnx/core/runQueryGetRecordsStream?SID=…` returning 102 KB, exactly what the
+# mirror returns — so `parse_records` reads either one.
 #
-# The global site (`www.webofscience.com`) is reachable — the extension is authorised
-# there, injects, and captures — but it answers on a different API and in a different
-# payload shape:
+# This was `webofscience.clarivate.cn`, the China mirror. A mirror is not a convenience:
+# it is a separate origin with its own cookies, and it only resolves for a session
+# granted access there. Off an institutional IP the navigation is handed to
+# `access.clarivate.com` and the run stops on a login redirect. The global site is the
+# entry a personal login can reach, so it is the default; the mirror is still allowed by
+# the manifest and works by pointing this constant at it.
 #
-#   mirror : /api/wosnx/core/runQuery…  -> newline-delimited JSON
-#            {"key": "searchInfo", "payload": {"RecordsFound": 115}}
-#            {"key": "records",    "payload": [...]}
-#   global : /api/esti/SearchEngine/…   -> one JSON document
-#            {"QueryResult": {"RecordsFound": 6}, "Data": {"Records": [...]}}
-#
-# `parse_records` reads the first shape. Pointing this constant at the global site today
-# would move the failure from "cannot reach the site" to "cannot read the answer", and
-# would break the host that works. See docs/reviews for the captured sample and what
-# supporting the global site requires.
-ADVANCED_SEARCH = "https://webofscience.clarivate.cn/wos/woscc/advanced-search"
+# `woscc` is Core Collection and stays. `/wos/alldb/` is All Databases: its records come
+# from BIOSIS, MEDLINE, Derwent and others, where `ut` is `MEDLINE:…` rather than `WOS:…`,
+# and the detail URL, the `exclude_ut` list and the JCR lookup all assume a Core
+# Collection identifier. That is a different product, not a different spelling.
+ADVANCED_SEARCH = "https://www.webofscience.com/wos/woscc/advanced-search"
 
 # The editor keeps whatever the previous search left in it; ``type`` always
 # clears before writing (extension/content/actions.js), so runs cannot leak
@@ -61,4 +61,4 @@ CAPTURE_READY = "#wensu-wos-capture[data-ready='1']"
 # URLs also carry a session id in the query string; it is never stored.
 CAPTURE_STREAM = "/api/wosnx/core/runQueryGetRecordsStream"
 
-DETAIL_PREFIX = "https://webofscience.clarivate.cn/wos/woscc/full-record/"
+DETAIL_PREFIX = "https://www.webofscience.com/wos/woscc/full-record/"

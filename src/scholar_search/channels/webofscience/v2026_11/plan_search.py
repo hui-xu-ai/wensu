@@ -66,7 +66,21 @@ RESULT_TIMEOUT_MS = 15_000
 # Must exceed capture.js's standby budget (6 windows x 1.5 s = 9 s), otherwise a
 # payload whose tail takes a while to parse is declared complete *after* this wait
 # has already given up. Observed: 50 records captured, ready marker late, timeout.
-CAPTURE_WAIT_MS = 10_000
+#
+# **13 s is the ceiling, not a preference.** `params.MAX_TIMEOUT_MS` caps one action at
+# 15 s and the native host enforces the same bound, so adding the 1 s reply margin
+# leaves 14 s — and a plan that declares 46 s is refused before it runs
+# (`policy: timeout 46000ms is outside 0..15000`).
+#
+# That is the real reason a deliberately slow link cannot be served: the result page
+# took minutes to render, and no single wait can span that. Waiting longer needs a
+# kernel-level retry of the capture phase, not a bigger number here.
+CAPTURE_WAIT_MS = 13_000
+
+# A page turn reloads an application that is already warm, so it does not need the cold
+# boot window. Giving it one anyway put a three-page plan at 260 s, past the kernel's
+# 200 s budget; 12 s keeps three pages inside it.
+CAPTURE_TURN_WAIT_MS = 12_000
 
 
 def settle(ms: int) -> Action:
@@ -79,20 +93,27 @@ def jitter(low: int, high: int) -> int:
     return random.randint(low, high)
 
 
-def capture_wait() -> tuple[Action, ...]:
+def capture_wait(*, timeout_ms: int | None = None) -> tuple[Action, ...]:
     """Wait for the captured payload to be complete.
 
     There is deliberately no "wait until ready disappears" phase: the first
     batch often lands during the pause after the click, so the marker is already
     set and that phase would do nothing but time out. The pause before this call
     is what gives a fresh request time to start.
+
+    The window is per call because the two situations are not comparable. The first
+    capture waits for a cold single-page application to boot, which on a slow link is
+    the expensive part; a page turn reloads an application that is already warm. Giving
+    both the same 45 s pushed a three-page plan to 260 s, past the kernel's budget, so
+    the first capture gets the long window and page turns get a short one.
     """
 
+    budget = CAPTURE_WAIT_MS if timeout_ms is None else timeout_ms
     return (
         Action(
             "wait_for",
-            {"selector": CAPTURE_READY, "timeout_ms": CAPTURE_WAIT_MS},
-            timeout_ms=CAPTURE_WAIT_MS + WAIT_REPLY_MARGIN_MS,
+            {"selector": CAPTURE_READY, "timeout_ms": budget},
+            timeout_ms=budget + WAIT_REPLY_MARGIN_MS,
         ),
     )
 
@@ -138,7 +159,9 @@ def sort_actions(order: str) -> tuple[Action, ...]:
     )
 
 
-def reload_and_wait(*, expect_navigation: bool = True) -> tuple[Action, ...]:
+def reload_and_wait(
+    *, expect_navigation: bool = True, capture_timeout_ms: int | None = None
+) -> tuple[Action, ...]:
     """Wait for the result list, then reload it and wait for the payload.
 
     Measured on the live site: a reload answers with all 50 records through three
@@ -175,7 +198,7 @@ def reload_and_wait(*, expect_navigation: bool = True) -> tuple[Action, ...]:
         *wait,
         Action("goto", {"reload": True}, timeout_ms=NAV_TIMEOUT_MS),
         settle(jitter(1_500, 2_500)),
-        *capture_wait(),
+        *capture_wait(timeout_ms=capture_timeout_ms),
     )
 
 
@@ -186,7 +209,9 @@ def pagination(page: int) -> tuple[Action, ...]:
     for _ in range(max(0, page - 1)):
         actions.append(Action("click", {"selector": NEXT_PAGE}, timeout_ms=CLICK_TIMEOUT_MS))
         actions.append(settle(jitter(1_500, 2_500)))
-        actions.extend(reload_and_wait(expect_navigation=False))
+        actions.extend(
+            reload_and_wait(expect_navigation=False, capture_timeout_ms=CAPTURE_TURN_WAIT_MS)
+        )
     return tuple(actions)
 
 

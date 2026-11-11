@@ -4,6 +4,55 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.53] - 2026-11-11
+
+The global Web of Science site is the **same application** as the mirror — same API, same
+payload. 0.12.52 said otherwise, and that conclusion was built on a bug I had just
+introduced in the same release.
+
+### Retracted — "the global site uses a different format"
+
+0.12.52 added `/api/esti/SearchEngine/search` to the capture's tracked prefixes and to its
+"new result set" markers. That endpoint is the **author-name typeahead**, which fires while
+the expression is being typed into the search box. It matched the marker, so the capture
+cleared its buffer *after* the real `runQueryGetRecordsStream` response had arrived, kept
+six author records, and I read that wreckage as "the global site's format".
+
+The user's own capture settled it:
+
+```
+https://www.webofscience.com/api/wosnx/core/runQueryGetRecordsStream?SID=…   102 KB
+```
+
+Same endpoint, same batch size as the mirror. The `/api/esti/…` entries are gone, and the
+comment in `capture.js` records why they must stay gone.
+
+### Changed — the default host is the global site
+
+`https://www.webofscience.com/wos/woscc/advanced-search`, Core Collection. Off an
+institutional IP the mirror has no route: the navigation is handed to
+`access.clarivate.com` and the run stops on a login redirect. The mirror stays in the
+manifest and works by pointing one constant at it.
+
+### Changed — the capture window is now the ceiling, not a guess
+
+`CAPTURE_WAIT_MS` 10 s → **13 s**, with page turns at 12 s. Not a preference:
+`params.MAX_TIMEOUT_MS` caps one action at 15 s and the native host enforces the same
+bound, so 13 s plus the 1 s reply margin is the maximum. A plan declaring 46 s is refused
+before it runs (`policy: timeout 46000ms is outside 0..15000`).
+
+Page turns get a shorter window because they reload an application that is already warm;
+giving them the cold-boot window put a three-page plan at 260 s, past the kernel's budget.
+With the split: page 1 is 95.9 s declared, page 3 is 162.3 s, all three inside 200 s.
+
+### Known limitation — a network slow enough cannot be served
+
+On the deliberately high-latency link used for this round, the result page needed **minutes**
+to render, and no single action may wait more than 15 s. That is a structural limit, not a
+number to tune. Serving it needs a kernel-level retry of the capture phase — batched waits
+whose timeouts do not fail the plan — and a further ADR for the budget. Recorded in
+`docs/reviews/wos-global-site-2026-11-11.md`, which replaces the retracted analysis.
+
 ## [0.12.52] - 2026-11-11
 
 Chasing the global Web of Science site turned up four defects on the path that was

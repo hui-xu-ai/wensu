@@ -1,93 +1,71 @@
 # Web of Science 全球站（www.webofscience.com）支持评估
 
-**日期**：2026-11-11
-**结论**：链路已通，**解析层未通**。全球站需要独立解析器，是一个独立工作项，不宜与
-现有修复混在一起发布。
+**日期**：2026-11-11（当日两次修订，第二次推翻了第一次的结论）
+**结论**：两个站点**是同一个应用、同一套 API、同一种载荷格式**。原先"格式不同"的判断
+是一个自造 bug 造成的误读，已作废。剩下的阻碍只有一个：**内核单动作超时上限 15 秒**，
+而极慢网络下结果页需要几分钟才渲染。
 
-## 为什么要评估
+## 撤回的错误结论
 
-用户离开机构 IP 后，镜像站 `webofscience.clarivate.cn` 无法访问（被交给
-`access.clarivate.com` 登录网关）。同一时刻 `www.webofscience.com` 在用户登录后可用。
-产品需要同时支持两个站点，因为用户不一定都在校园网内。
+第一次评估写的是"全球站用不同 API、载荷格式不同，需要独立解析器"。**这是错的。**
+
+起因是我把 `/api/esti/SearchEngine/search`（作者名联想接口）加进了捕获的"新结果集标记"。
+用户输入检索式时触发联想，命中标记 → 捕获逻辑清空缓冲区 → 已经把真正的
+`runQueryGetRecordsStream` 结果丢掉了。我随后把残留的 6 条作者记录当成"全球站的格式"。
+
+用户提供的现场 URL 直接推翻了它：
+
+```
+https://www.webofscience.com/api/wosnx/core/runQueryGetRecordsStream?SID=…   102 KB
+```
+
+**和镜像站同一个端点、同一量级的批次。** 修复方式是把 `/api/esti/…` 从捕获前缀里移除。
 
 ## 逐层验证结果
 
 | 层 | 结果 | 证据 |
 |---|---|---|
-| 内核域名白名单 | ✅ 两个站点都允许 | `channels/webofscience/manifest.json` 的 `domains` |
-| 扩展 host 权限 | ✅ `.com`、`*.webofscience.com`、`.cn` | `extension/manifest.json` |
-| 内容脚本注入 | ✅ `.com` 上注入 | `<html data-wensu-capture="loaded" data-wensu-seen="…">` |
-| 捕获触发 | ✅ 前缀已扩展到 `/api/esti/SearchEngine/` | 捕获节点有 2118 字节真实响应 |
-| **数据解析** | ❌ **格式不同** | 见下 |
+| 内核域名白名单 | ✅ | `domains` 含 `.com`、`www.`、`.cn` |
+| 扩展 host 权限 | ✅ | `manifest.json` |
+| 内容脚本注入 | ✅ | `<html data-wensu-capture="loaded">`；`document_start` 解决慢网络不注入 |
+| 捕获触发 | ✅ | 与镜像站同一前缀 `/api/wosnx/core/runQuery` |
+| 载荷格式 | ✅ 与镜像站相同 | `runQueryGetRecordsStream` |
+| **等待窗口** | ❌ **单动作上限 15 s** | `policy: timeout 46000ms is outside 0..15000` |
 
-## 两个站点的接口与载荷
+## 真正的阻碍：15 秒单动作上限
 
-**镜像站（现用，可解析）** —— 换行分隔 JSON：
+慢网络下结果页需要**几分钟**渲染（用户手动检索时"刷新两次才发现加载了"）。而：
 
-```
-/api/wosnx/core/runQuerySearch
-/api/wosnx/core/runQueryGetRecordsStream
+- `params.MAX_TIMEOUT_MS = 15_000`，内核与宿主双重强制；
+- `wait_for` 的超时计入该动作的 `timeout_ms`，减去 1 秒应答余量后**最多 14 秒**；
+- 声明 46 秒的计划在执行前就被拒绝。
 
-{"key": "searchInfo", "payload": {"RecordsFound": 115}}
-{"key": "records",    "payload": [{...}, ...]}
-```
+所以把 `CAPTURE_WAIT_MS` 提到 13 秒已是这个结构下的上限。**要支持"分钟级"的加载，
+需要内核层面的重试机制**（例如捕获阶段允许分批等待，或把 `wait_for` 的超时失败降级为
+可继续），那不是改一个常量能解决的。
 
-**全球站（已捕获，未解析）** —— 单个 JSON 文档：
+## 要做"耐心模式"需要什么
 
-```
-/api/esti/SearchEngine/search
+1. 给 `Action` 增加"允许超时后继续"的语义，或让计划支持阶段重试；
+2. 计划层把捕获拆成 N 个 14 秒的等待，只在全部用尽后判失败；
+3. 政策层确认这种拆分不违反"最小间隔"之类与流量有关的约束（它不产生额外请求）；
+4. 计划预算相应放宽——当前 200 秒对"分钟级"仍不够，需要又一个 ADR。
 
-{
-  "QueryResult": {"RecordsSearched": 0, "RecordsFound": 6, "RecordsAvailable": 6},
-  "Data": {"Records": [
-    {"author_name": "…", "pref_author_name": "…", "orcid": "…", "rid": "…",
-     "claim_status": true, "dais_ng_id": "…"}
-  ]}
-}
-```
+## 已在 0.12.52/0.12.53 落地的改进
 
-**注意**：捕获到的这一份是**作者记录**，不是文献记录。`type` 动作向检索框写入表达式时，
-全球站触发了作者名联想接口，命中了同一个 `/SearchEngine/search` 路径，把缓冲区覆盖了。
-**文献检索的真实端点尚未定位**——只知道它不产生新的 `/api/` 路径（`data-wensu-seen`
-里只有 6 个，没有明显的文献端点），因此可能是同一路径的另一个参数组合，或走的是被我们
-的 `tracked()` 过滤掉的形式。
-
-## 支持全球站需要做什么
-
-1. **定位文献检索端点**：在一次成功的手动检索中记录所有请求。最省事的办法是给
-   `capture.js` 加一个"记录全部 `/api/` 请求（含方法）"的临时开关，用一次人工检索取样。
-2. **取样真实响应**：拿到文献记录的 JSON，确认标题、作者、来源、年份、DOI、UT、
-   JCR 指标各自的字段名。
-3. **写第二套解析器**：`parse_records` 现在假定 NDJSON + `key`/`payload`。需要一个
-   在 `QueryResult`/`Data.Records` 形状上工作的分支，两条路都产出同一个 `Record`。
-4. **脱敏取样做 fixture**：仓库规范要求 fixture 回放测试，不能只靠线上验证。
-5. **`exclude_ut` 与详情链接要跟着站点走**：`UT` 是全球站还是镜像站的标识、
-   `full-record` 路径是否是 `/wos/woscc/full-record/`，都要在真实响应上确认。
-6. **计划里的主机常量改为可配置**（或按已登录域名自动选），否则两个站点只能二选一。
-
-## 已落地且与上述无关的改进（0.12.52）
-
-这些在 `.cn` 上同样有效，不依赖全球站解析：
-
-- `sleep` 改由扩展后台执行，不再送进页面 —— 导航后那个停顿此前会排在"等内容脚本注入"
-  的重试队列里，耗尽预算后报 `bridge.timeout`，而页面其实早已加载完成。
-- WoS 的 `actions.js` 在 `.com` 上改为 `document_start` 注入。原先是 `document_idle`，
-  高延时网络下 `window.onload` 迟迟不来，脚本永远不注入 —— 表现为
-  `content_not_ready`，且几分钟后仍不复原。`.cn` 保持 `document_idle` 不动，不冒回归风险。
-- 内容脚本等待预算改为按动作自己的 `timeout_ms` 推算，而不是固定 8 次（约 6.4 秒）——
-  之前有 4.6 秒预算没用上就放弃了。
-- `content_not_ready` 现在带回标签页 URL 和扩展自己的措辞，内核把它们拼进错误：
-  `wait_for failed: content_not_ready (step 4/5, stage wait.capture)
-   [reached www.webofscience.com] [Could not establish connection…]`
-   —— 这条信息是分辨"没注入"和"注入了但通道断了"的唯一依据。
-- 失败信息里的 `step N/M` 改成按**计划长度**计。之前用已执行动作数，一个 7 步计划
-  第 2 步失败会显示 `step 2/2`，把排查引向一个不存在的两步计划。
-- `capture.js` 同时跟踪两个站点的 API 前缀（`/api/wosnx/core/runQuery` 与
-  `/api/esti/SearchEngine/`），并保留 `data-wensu-seen` 作为现场自述。
+- `sleep` 改由扩展后台执行（此前导航后的停顿会排在内容脚本等待队列里，耗尽预算）。
+- WoS 在 `.com` 上改为 `document_start` 注入；`.cn` 保持 `document_idle`（不动能用的路径）。
+- 内容脚本等待预算按动作 `timeout_ms` 推算，不再固定 8 次（约 6.4 秒）。
+- `content_not_ready` 带回标签页 URL 与扩展措辞，内核拼进错误——这条信息是分辨
+  "没注入"和"注入了但通道断了"的唯一依据。
+- `step N/M` 改为按计划长度计。
+- 捕获前缀同时覆盖两个站点（同一个前缀，不需要两套）。
+- 默认主机改为 `.com` 核心合集；镜像站仍在白名单内，改一个常量即可切换。
+- `CAPTURE_WAIT_MS` 10 s → 13 s（该结构下的上限），翻页用 12 s（应用已热）。
 
 ## 不做的事
 
-- **不把默认主机指向 `.com`**。在解析器就绪前，那只会把"连不上"换成"读不懂"，
-  同时弄坏目前能用的镜像站路径。
-- **不猜测全球站的字段名**。已捕获的样本是作者记录，用它反推文献字段名会得到
-  一个看起来能跑、实际错位的解析器——这轮已经因为"猜一个渠道会怎么做"付过两次代价。
+- 不猜测全球站的字段名（已证明格式相同，无需猜测）。
+- 不在慢网络下强行拉长单个动作的截止时间：策略层会拒绝，而且那会把"内核有界"这件事
+  变成一句空话。
+

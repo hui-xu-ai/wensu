@@ -33,15 +33,19 @@
  */
 
 (() => {
-  // Both sites, because the mirror and the global site are not the same application
-  // server-side. `.cn` answers on `/api/wosnx/core/runQuery…`; `.com` answers on
-  // `/api/esti/SearchEngine/…`. Tracking only the first meant the capture never fired
-  // on `.com`: `wait_for #wensu-wos-capture` sat on `not_found` while the page itself
-  // was healthy.
-  const QUERY_PREFIXES = ["/api/wosnx/core/runQuery", "/api/esti/SearchEngine/"];
-  // A primary query starts a new result set; everything else appends to the current
-  // one. Both spellings name the same event on their respective site.
-  const PRIMARY_MARKERS = ["/api/wosnx/core/runQuerySearch", "/api/esti/SearchEngine/search"];
+  // Both hosts answer on the same API — the global site is the same application, not a
+  // different one. A user's capture from `www.webofscience.com` shows
+  // `/api/wosnx/core/runQueryGetRecordsStream?SID=…` returning 102 KB, so one prefix
+  // covers both.
+  //
+  // `/api/esti/SearchEngine/…` was briefly added here and is deliberately absent. It is
+  // the author-name typeahead, which fires while the expression is being typed; marking
+  // it as a new result set made it clear the buffer *after* the real stream had arrived,
+  // so the capture kept six author records and discarded the documents. That wreckage
+  // was then read as "the global site uses a different format" — a wrong conclusion
+  // built on a bug I had just introduced.
+  const QUERY_PREFIX = "/api/wosnx/core/runQuery";
+  const PRIMARY = "/api/wosnx/core/runQuerySearch";
   const ID = "wensu-wos-capture";
   const MAX_CHARS = 8 * 1024 * 1024;
   const IDLE_MS = 2_000;
@@ -209,7 +213,7 @@
 
   function begin(url) {
     const text = String(url || "");
-    if (PRIMARY_MARKERS.some((marker) => text.indexOf(marker) !== -1)) {
+    if (text.indexOf(PRIMARY) !== -1) {
       // A primary query means a new result set: drop everything the previous one
       // left behind, and invalidate every request still in flight.
       generation += 1;
@@ -265,9 +269,7 @@
   }
 
   function tracked(url) {
-    return (
-      typeof url === "string" && QUERY_PREFIXES.some((prefix) => url.indexOf(prefix) !== -1)
-    );
+    return typeof url === "string" && url.indexOf(QUERY_PREFIX) !== -1;
   }
 
   async function drain(response, gen) {
