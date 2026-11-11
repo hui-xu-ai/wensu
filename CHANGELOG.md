@@ -4,6 +4,64 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.49] - 2026-11-11
+
+Three defects from the 0.12.48 acceptance, all introduced by 0.12.48. The first disabled
+CNKI's cache entirely; the second turned a capture timeout into an `AttributeError`.
+
+### Fixed — a navigation nonce made every CNKI call a cache miss
+
+CNKI appends `&t=<epoch ms>` to its advanced-search URL to force a real page load. The
+plan signature hashed it, so **two identical requests a second apart were two different
+identities** — the acceptance run paid 3 quota twice for the same page, and adding only a
+year also cost 3.
+
+The channel now declares it:
+
+```python
+class CnkiChannel:
+    volatile_url_params = plan_search.VOLATILE_URL_PARAMS   # frozenset({"t"})
+```
+
+Declared by the channel rather than stripped by the kernel, because only the code that
+writes `&t=…` knows it is a cache-buster and not a search term. This is the one place a
+declaration beats a derivation: the kernel cannot tell a timestamp from a search parameter
+by looking at it.
+
+The regression test builds the real plan **twice with a sleep between**, because two
+builds in the same millisecond can produce the same `t` by luck and let the bug through —
+the report named that exact trap.
+
+### Fixed — `capture_state` was never called
+
+The channel exposes `capture_state()` as a method. The service read `.selector` off the
+bound method:
+
+```
+AttributeError: 'function' object has no attribute 'selector'
+```
+
+That happened **while the real `ActionError` was being constructed**, so a capture timeout
+lost its stage, its message and its quota charge and surfaced as an error about the
+diagnostic instead of the failure. The whole diagnostic is now wrapped so it can never
+replace the error it describes, and the integration test drives the real channel through
+the real service failure path rather than calling the classifier directly — which is why
+the unit test of the classifier passed while the wiring was broken.
+
+### Fixed — a legitimately short last page was treated as a truncated capture
+
+`_cache_can_answer` compared held records against the request. The last page of a result
+set is short by nature: 128 records over three pages of 50 leaves 28, and a request for 50
+there can never be met, so the page would be re-fetched every time. A cached page whose
+`page` is at or past `page_count` is now accepted.
+
+### Documentation
+
+The `diagnostics` verdicts are now explained where a caller will look, with the one rule
+that matters: **if `declared_records` is present, the site did have that result set — do
+not report "no literature"**. Also corrected the claim that a year change always costs a
+fetch: it does on WoS, it does not on CNKI.
+
 ## [0.12.48] - 2026-11-10
 
 The 0.12.47 acceptance passed all four target items and then found a regression I had

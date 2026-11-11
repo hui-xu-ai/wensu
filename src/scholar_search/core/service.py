@@ -539,40 +539,46 @@ class ScholarService:
         records arrived and the readiness flag did not. They need different fixes, and
         guessing which one it was is how a diagnosis turns into a wrong instruction.
 
-        A channel that can describe its own capture does so here. The probe is a
-        `read_text`, which is not a network verb, so it costs nothing and cannot start
-        new traffic.
-
-        Returns None when nothing can be said: an absent field is better than a
-        confident guess, which is the lesson of 0.12.47's remediation text.
+        **This must never raise.** It runs while a real `ActionError` is being built, so
+        anything escaping here replaces the failure the caller needs to see with a
+        diagnostic about it. The first version did exactly that: it read `.selector` off
+        the bound method `capture_state` instead of calling it first, so a capture
+        timeout became `AttributeError: 'function' object has no attribute 'selector'`
+        and the timeout, the stage and the quota charge were all lost. Hence the broad
+        catch below, which is deliberate and not a shortcut.
         """
 
         if stage != "wait.capture":
             return None
         try:
             impl = self._registry.load(spec.name, spec.site_version)
-        except (ScholarSearchError, KeyError, OSError):
-            return None
-        hook = getattr(impl, "capture_state", None)
-        if hook is None:
-            return None
-        probe = Plan(
-            channel=spec.name,
-            purpose="probe",
-            actions=(Action("read_text", {"selector": hook.selector, "mode": "text"}),),
-        )
-        try:
+            factory = getattr(impl, "capture_state", None)
+            if factory is None:
+                return None
+            # A channel may expose either the descriptor itself or a factory for it.
+            descriptor = factory() if callable(factory) else factory
+            selector = getattr(descriptor, "selector", None)
+            describe = getattr(descriptor, "describe", None)
+            if not isinstance(selector, str) or not callable(describe):
+                return None
+            probe = Plan(
+                channel=spec.name,
+                purpose="probe",
+                actions=(Action("read_text", {"selector": selector, "mode": "text"}),),
+            )
             outcomes = self._run(probe, spec)
-        except (ActionError, ScholarSearchError):
-            return None
-        for outcome in outcomes:
-            data = outcome.data
-            text = data.get("text") if isinstance(data, dict) else data
-            if outcome.ok and isinstance(text, str):
-                with suppress(Exception):
-                    described = hook.describe(text)
+            for outcome in outcomes:
+                data = outcome.data
+                text = data.get("text") if isinstance(data, dict) else data
+                if outcome.ok and isinstance(text, str):
+                    described = describe(text)
                     if isinstance(described, dict):
                         return described
+        except Exception:
+            # Deliberate: a diagnostic must never mask the failure it describes.
+            # Anything raised here replaces a `bridge.timeout` that carries the stage
+            # and the quota charge with an error about the diagnostic itself.
+            return None
         return None
 
     @staticmethod
@@ -822,6 +828,12 @@ def _site_signature(channel: Any, query: SearchQuery) -> Any:
 
     try:
         splitter = getattr(channel, "plan_search_split", None)
+        declared: Any = getattr(channel, "volatile_url_params", frozenset())
+        volatile = (
+            frozenset(declared)
+            if isinstance(declared, (set, frozenset, tuple, list))
+            else frozenset()
+        )
         plans: tuple[Any, ...]
         if splitter is not None:
             head, tail = splitter(query)
@@ -842,24 +854,55 @@ def _site_signature(channel: Any, query: SearchQuery) -> Any:
         # every call, so hashing it made two identical queries hash differently and the
         # cache never hit at all. A pause is pacing, not content: it cannot change what
         # the site is asked.
+        #
+        # URL parameters the channel declares as navigation nonces are dropped for the
+        # same reason. CNKI appends `&t=<epoch ms>`, which made every call a new
+        # identity — identical requests a second apart each paid 3 quota for the same
+        # page.
         return [
             query.text.strip(),
-            [[action.verb, _content_of(action)] for plan in plans for action in plan.actions],
+            [
+                [action.verb, _content_of(action, volatile)]
+                for plan in plans
+                for action in plan.actions
+            ],
         ]
     except (ChannelError, ValueError, AttributeError, TypeError):
         return {"fallback": dict(_site_fields(query))}
 
 
-def _content_of(action: Action) -> dict[str, Any]:
+def _content_of(action: Action, volatile_url_params: frozenset[str]) -> dict[str, Any]:
     """The part of an action that decides what the site is asked.
 
-    Only `sleep` has a randomised parameter (`settle(jitter(...))` picks a pause per
-    call). Everything else is deterministic per query, so it is kept as-is.
+    Two kinds of parameter are removed:
+
+    * `sleep.ms` — `settle(jitter(...))` picks a pause per call, so hashing it makes two
+      identical queries hash differently and the cache never hits. A pause is pacing.
+    * URL query parameters the channel declares as navigation nonces. CNKI appends
+      `&t=<epoch ms>` to force a real page load; hashing it made every single call a
+      new identity, so CNKI never reused a cached page at all — identical requests a
+      second apart each paid 3 quota for the same page.
+
+    The second is a declaration by the channel, not a guess here: only the code that
+    writes the nonce knows it is not a search term.
     """
 
     params = dict(action.params or {})
     if action.verb == "sleep":
         params.pop("ms", None)
+    url = params.get("url")
+    if volatile_url_params and isinstance(url, str) and "?" in url:
+        head, _, tail = url.partition("?")
+        fragment = ""
+        if "#" in tail:
+            tail, _, fragment = tail.partition("#")
+            fragment = f"#{fragment}"
+        kept = [
+            pair
+            for pair in tail.split("&")
+            if pair and pair.split("=", 1)[0] not in volatile_url_params
+        ]
+        params["url"] = f"{head}?{'&'.join(kept)}{fragment}" if kept else f"{head}{fragment}"
     return params
 
 
@@ -880,6 +923,15 @@ def _cache_can_answer(cached: SearchPage, query: SearchQuery) -> bool:
         # Nothing said how many exist, so nothing proves more do. Refusing here would
         # disable caching for any channel that never reports a total, and the short
         # list plus a null `total` already tells the caller not to assume completeness.
+        return True
+    if (
+        cached.page is not None
+        and cached.page_count is not None
+        and cached.page >= cached.page_count
+    ):
+        # A last page is legitimately short. The guard below would otherwise re-fetch
+        # it every time, because 128 records over three pages of 50 leaves 28 on the
+        # final page and a request for 50 there can never be satisfied.
         return True
     return cached.total <= held
 

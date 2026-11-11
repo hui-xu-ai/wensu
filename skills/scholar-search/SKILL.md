@@ -328,8 +328,14 @@ WoS 记录自带 `impact_factor`（JCR 影响因子，可能为 `null`——该�
 
 **这些过滤器都不要钱**：它们作用在已经抓到的那一页上。改 `sort_by` / `limit` /
 `min_citations` / `min_impact_factor` / `include_abstract` 不会重新访问站点，
-会直接命中缓存（`cache_hit: true`，`quota_charged: 0`）。**真正会重新检索的**是
-`text`、`channel`、`sort`（站点排序）、`page`、`year_from`/`year_to`、`exclude_ut`。
+会直接命中缓存（`cache_hit: true`，`quota_charged: 0`）。
+
+**会重新检索的**是真正改变抓取动作的东西：`text`、`channel`、`sort`（站点排序）、
+`page`、`exclude_ut`，以及**渠道相关的年份参数**——WoS 把年份写进检索式，所以改年份
+是一次新检索；CNKI 只做本地过滤，改年份命中缓存。
+
+**同一条检索式重复调用是免费的**（`cache_hit: true`）。如果你发现相同请求又扣了额度，
+那是缺陷，不是设计。
 
 ## 详情与导出
 
@@ -395,6 +401,23 @@ detail(url, fields=["title","doi","pages"])                         → 只要�
 `stage` 只说明**哪一层没回应**，不说明原因。`bridge_ready` 为 true 而 `stage` 是
 `input.fill` 时，连接是好的，多半是那个标签页没响应：把窗口切到前台、或点一下
 wensu 图标再试。**不要重启一个已经在工作的浏览器。**
+
+`wait.capture` 失败时还会带 `diagnostics`，说明页面当时到底有什么：
+
+```json
+"diagnostics": {"verdict": "metadata_only", "bytes": 58, "lines": 1,
+                "declared_records": 115, "has_search_info": true,
+                "has_records_block": false}
+```
+
+| `verdict` | 含义 | 该怎么办 |
+|---|---|---|
+| `no_stream` | 一个字节都没截到 | 数据流没开始 |
+| `metadata_only` | 只有元数据，`declared_records` 却说有 N 条 | 流没跑完 |
+| `stream_started_no_records` | 有内容但没有记录块 | 格式变了或流被截断 |
+| `records_present_not_ready` | **记录到了，就绪标记没抬** | 判定逻辑的问题，不是站点 |
+
+有 `declared_records` 就说明站点确实有这个结果集，**不要说「没有文献」**。
 
 ## 不要做的
 

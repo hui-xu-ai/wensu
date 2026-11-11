@@ -39,6 +39,12 @@ def _load_manifest() -> ChannelManifest:
 class CnkiChannel:
     manifest: ChannelManifest
 
+    # The channel declares the navigation nonce it appends, so the kernel can hash
+    # this channel's plan without hashing a millisecond timestamp. Declared here
+    # rather than guessed there: only the code that writes `&t=…` knows it is a
+    # cache-buster and not a search term.
+    volatile_url_params = plan_search.VOLATILE_URL_PARAMS
+
     def plan_search(self, query: SearchQuery) -> Plan:
         return plan_search.build(query)
 

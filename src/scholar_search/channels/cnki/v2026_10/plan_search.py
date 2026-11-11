@@ -145,12 +145,28 @@ def _page_size(query: SearchQuery) -> tuple[Action, ...]:
     )
 
 
+# URL query parameters this channel appends purely to defeat navigation caching.
+#
+# The kernel hashes a channel's plan to decide whether a cached page answers the
+# current request, so anything that changes on every build but does not change the
+# question must be declared. The declaration lives here, next to the code that
+# generates the value, because the channel is the only thing that knows `t` is a
+# timestamp and not a search term.
+VOLATILE_URL_PARAMS = frozenset({"t"})
+
+
 def build(query: SearchQuery) -> Plan:
     if query.source_types:
         raise ChannelError("source-type filters are not implemented for the cnki channel yet")
 
     # A unique parameter forces a real navigation, so the result grid always
     # starts from its default state (20 rows, page 1).
+    #
+    # It is a cache-buster, not part of the query — and the channel declares it as
+    # such, because the channel is what generates it. The kernel hashes this plan to
+    # decide whether a cached page answers the current request; a millisecond
+    # timestamp in there made two identical searches hash differently, so CNKI never
+    # hit its cache at all. See `VOLATILE_URL_PARAMS` below.
     nonce = int(time.time() * 1000)
 
     # One path only. The one-box search and the expert form both end up doing a topic
