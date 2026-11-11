@@ -4,6 +4,85 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.54] - 2026-11-11
+
+The global Web of Science site now yields records. It does so by asking the site for a
+BibTeX export instead of trying to read a response that a content script cannot see, and
+the impact factor comes from a local database built from the user's own JCR workbook.
+
+### Added — reading the global site through its BibTeX export
+
+On `www.webofscience.com` the result payload never passes through the page's
+`fetch`/`XMLHttpRequest`; the requests the site makes are not visible to a content script,
+so the capture path used by the mirror cannot work there. Rather than keep guessing at the
+site's internals, the channel now drives the export the site already provides:
+
+```
+#export-trigger-btn → #exportToBibtexButton → record content → #exportButton → a .bib file
+```
+
+Each selector was observed on the live page, because each step only exists after the
+previous one. The dialog opens on **作者、标题、来源出版物**, which carries neither DOI nor
+abstract, so the plan switches to **完整记录** every time — without that the exported file is
+unusable.
+
+The entry key is the UT (`@article{ WOS:…`), so `url`, `detail`, `exclude_ut` and the export
+formats work unchanged: both paths produce the same `Record`. Measured on a real 166 KB
+export: 39 records, 39 with DOI, 39 with abstract, 35 with an impact factor — the four
+without are conference papers, which JCR does not index.
+
+Cost, stated plainly: **8 network actions per search** on this host against 4 for the
+mirror's capture, because the export takes four clicks.
+
+### Added — `wensu jcr import` / `wensu jcr status`
+
+The impact factor is not in a BibTeX file, so it comes from a local SQLite database built
+from the user's own JCR workbook. The data is **not shipped**: it belongs to Clarivate, and
+a 4.2 MB table does not belong in a wheel. Re-running the import after each yearly release
+replaces the contents.
+
+The workbook is read with the standard library (`zipfile` + `ElementTree`), checked against
+`openpyxl`, and imports 22 249 JCR rows and 21 772 CAS rows from the supplied file in 2.5 s.
+Lookup is **ISSN first**, because the workbook truncates journal names to ~29 characters
+(`CA-A CANCER JOURNAL FOR CLIN`); the name path only accepts a prefix match and returns
+nothing when two journals answer, since a wrong impact factor is worse than none. A journal
+with no metric stays `null` — never `0`, which `min_impact_factor` would believe.
+
+### Fixed — the socket read deadline equalled the action deadline
+
+```
+bridge.error: timed out
+```
+
+The host allows itself the action's full `timeout_ms` and then writes the reply; the client
+waited exactly that long, so the read aborted in the same millisecond and an action that had
+succeeded reported a failure. The socket now waits `timeout_ms + 2 s`.
+
+### Fixed — four separate defects in reporting the downloaded file
+
+Every one of these made a **complete, correct export look like no file at all** — four
+170 KB files were on disk while the kernel reported none:
+
+1. The `chrome.downloads.onCreated` listener was attached *after* the click returned, so the
+   event had already fired. Attached before the click.
+2. An empty `downloads.search` result was treated as "gone" rather than "not indexed yet",
+   abandoning the wait on the first poll.
+3. The export arrives as a **`blob:` URL** with an empty `filename`, so the name and URL
+   tests rejected the very file we had just caused. The tab is the discriminator now.
+4. `onCreated` fired **zero times** on a run that produced a complete export. The wait no
+   longer depends on the event: it polls the download list, which cannot be missed by a
+   service worker that was suspended in between.
+
+A rejected download is now reported with its reason (`[saw not-a-bib:blob:…]`), which is
+what identified defect 3 after three rounds of inference had failed to.
+
+### Known limitation — a companion export extension must be off
+
+With a third-party "WoS BibTeX assistant" extension enabled, every `wait_for` inside the
+export dialog timed out: the four selectors answered in 46 ms / 0 ms once it was disabled.
+It re-renders the dialog, and the visibility test sees a detached node. Documented in
+`docs/reviews/wos-global-site-2026-11-11.md`.
+
 ## [0.12.53] - 2026-11-11
 
 The global Web of Science site is the **same application** as the mirror — same API, same

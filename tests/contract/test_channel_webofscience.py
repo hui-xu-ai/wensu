@@ -26,6 +26,19 @@ SCHEMA = ROOT / "schemas" / "record.json"
 
 CAPTURE = FIXTURE.read_text(encoding="utf-8")
 
+#: The tests in this module describe the **capture** path — its cost in network actions and
+#: the shape of its waits. That path only runs on the mirror: the global site never lets the
+#: result payload through the page's `fetch`, so it is read through an export file instead
+#: (`test_channel_webofscience_export.py`). Pinning the host here keeps these tests about
+#: what they claim to be about, instead of silently testing whichever host is configured.
+MIRROR_HOST = "https://webofscience.clarivate.cn/wos/woscc/advanced-search"
+
+
+@pytest.fixture(autouse=True)
+def _capture_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(plan_search, "ADVANCED_SEARCH", MIRROR_HOST)
+    assert not plan_search.uses_export()
+
 
 def _channel():  # type: ignore[no-untyped-def]
     return ChannelRegistry().load("webofscience")

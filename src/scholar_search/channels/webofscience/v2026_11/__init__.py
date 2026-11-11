@@ -21,7 +21,8 @@ from ....core.contracts import (
     SearchQuery,
 )
 from ....core.errors import ChannelError
-from . import parse_records, plan_search, selectors
+from ....core.jcr import JcrDatabase
+from . import parse_bibtex, parse_records, plan_search, selectors
 from . import query as expression
 
 
@@ -98,6 +99,16 @@ class WebOfScienceChannel:
 
     def parse_search(self, html: str, *, query: SearchQuery) -> SearchPage:
         return parse_records.parse(html, query=query)
+
+    def parse_export(self, text: str, *, query: SearchQuery) -> SearchPage:
+        """Read a BibTeX export. This is how the global host's results are obtained.
+
+        The impact factor is filled from the local JCR database, because the export file
+        carries none. If the database has not been built the metric is simply absent —
+        never zero, which would be a lie a `min_impact_factor` filter would believe.
+        """
+
+        return parse_bibtex.parse(text, query=query, metrics=JcrDatabase().resolver())
 
     def is_results_url(self, url: str) -> bool:
         """Whether the tab landed on a result list rather than the search form.

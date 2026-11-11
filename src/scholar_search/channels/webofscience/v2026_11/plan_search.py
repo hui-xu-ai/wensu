@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import datetime as dt
 import random
+from urllib.parse import urlparse
 
 from ....core.contracts import Action, Plan, SearchQuery
 from ....core.errors import ChannelError
@@ -37,6 +38,11 @@ from .selectors import (
     SORT_OPEN,
     SUBMIT,
 )
+
+# Hosts whose result list has to be read through an exported file instead of a captured
+# response. Kept next to the plan rather than in `selectors` because it is a decision about
+# *how to read the page*, not a CSS anchor.
+EXPORT_HOSTS = frozenset({"www.webofscience.com", "webofscience.com"})
 
 # Browser timers are aligned to one-second buckets in a background tab, so a
 # pause deadline has to cover the pause itself plus a reply margin — the same
@@ -290,12 +296,35 @@ def _reject_too_many_pages(query: SearchQuery) -> None:
         )
 
 
+def uses_export() -> bool:
+    """Whether the configured host has to be read through an export file.
+
+    The global site never lets its result payload through `window.fetch`, so capture cannot
+    work there; the mirror has no BibTeX export at all. The two paths are therefore chosen
+    by host, not by a caller option — a caller cannot pick a path that does not exist.
+    """
+
+    host = urlparse(ADVANCED_SEARCH).hostname or ""
+    return host in EXPORT_HOSTS
+
+
 def build_after_click(query: SearchQuery) -> Plan:
     """Reload for the full result set, then read it.
 
     Safe only when the click actually navigated to `/summary/...`; on a search form
     a reload would discard the "no results" state the page is showing.
     """
+
+    if uses_export():
+        from . import plan_export
+
+        if query.page > 1:
+            raise ChannelError(
+                "the export path reads one page per export; going deeper is what "
+                "`exclude_ut` is for — it reruns the expression without the records you "
+                "already have instead of paying for a page turn"
+            )
+        return plan_export.build_after_click(query)
 
     if query.page > 1 and query.sort != "relevance":
         raise ChannelError(

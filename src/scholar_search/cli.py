@@ -105,6 +105,20 @@ def build_parser() -> argparse.ArgumentParser:
     reset = sub.add_parser("reset", help="clear the risk cooldown after manual verification")
     reset.add_argument("--confirm", action="store_true", help="required to actually clear")
 
+    jcr = sub.add_parser(
+        "jcr",
+        help="build and inspect the local journal-metrics database",
+        description=(
+            "Impact factors are not shipped with wensu: the table belongs to Clarivate. "
+            "Point this at your own JCR workbook and it is turned into a small local "
+            "database; re-run it after each yearly release to replace the contents."
+        ),
+    )
+    jcr_sub = jcr.add_subparsers(dest="jcr_command", required=True)
+    jcr_import = jcr_sub.add_parser("import", help="build the database from a JCR workbook")
+    jcr_import.add_argument("workbook", help="path to the JCR .xlsx file")
+    jcr_sub.add_parser("status", help="show what the database currently holds")
+
     assets = sub.add_parser("assets", help="copy bundled browser assets to a directory")
     assets.add_argument("--target", required=True, help="destination directory")
     assets.add_argument("--force", action="store_true", help="replace existing asset directories")
@@ -181,6 +195,45 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command is None:
         build_parser().print_help()
+        return 0
+
+    if args.command == "jcr":
+        from .core.jcr import JcrDatabase
+
+        database = JcrDatabase()
+        if args.jcr_command == "import":
+            from pathlib import Path as _Path
+
+            workbook = _Path(args.workbook).expanduser()
+            if not workbook.is_file():
+                print(f"no such workbook: {workbook}", file=sys.stderr)
+                return 2
+            try:
+                built = database.build(workbook)
+            except (ValueError, KeyError, OSError) as error:
+                print(f"could not read the workbook: {error}", file=sys.stderr)
+                return 1
+            print(
+                f"built {database.path}\n"
+                f"  JCR rows  : {built.jcr_rows}\n"
+                f"  CAS rows  : {built.cas_rows}\n"
+                f"  edition   : {built.edition}"
+            )
+            return 0
+
+        current = database.status()
+        if current is None:
+            print(f"no journal database at {database.path}", file=sys.stderr)
+            print("build it with: wensu jcr import <JCR workbook.xlsx>", file=sys.stderr)
+            return 1
+        print(
+            f"path      : {database.path}\n"
+            f"JCR rows  : {current.jcr_rows}\n"
+            f"CAS rows  : {current.cas_rows}\n"
+            f"edition   : {current.edition}\n"
+            f"imported  : {current.imported_at}\n"
+            f"source    : {current.source_file}"
+        )
         return 0
 
     if args.command == "reset":

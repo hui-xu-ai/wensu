@@ -62,3 +62,27 @@ CAPTURE_READY = "#wensu-wos-capture[data-ready='1']"
 CAPTURE_STREAM = "/api/wosnx/core/runQueryGetRecordsStream"
 
 DETAIL_PREFIX = "https://www.webofscience.com/wos/woscc/full-record/"
+
+# -- BibTeX export -----------------------------------------------------------
+#
+# Discovered on the live results page rather than guessed. The chain is four clicks, and
+# every step had to be observed because the menu and the dialog are Angular Material
+# components that do not exist in the document until the previous step has happened:
+# `mat-menu` is empty until `#export-trigger-btn` is clicked, and the export dialog only
+# appears once a format has been chosen.
+#
+#   #export-trigger-btn                 the toolbar button labelled 导出
+#   #exportToBibtexButton               "BibTeX" in that menu (siblings: RIS, Excel, 纯文本)
+#   <combobox>                          "记录内容" — defaults to the *least* complete option
+#   #option-fullRecord[role=option]     "完整记录", i.e. no cited references
+#   #exportButton                       the dialog's confirm, which downloads the file
+#
+# The default record content is 作者、标题、来源出版物, which carries no DOI and no abstract.
+# Choosing 完整记录 is therefore not a preference, it is what makes the file usable.
+EXPORT_TRIGGER = "#export-trigger-btn"
+EXPORT_BIBTEX = "#exportToBibtexButton"
+EXPORT_DIALOG = "app-export-out-details form"
+EXPORT_CONTENT_COMBO = f"{EXPORT_DIALOG} wos-select button[role='combobox']"
+EXPORT_CONTENT_MENU = "#global-select[role='dialog']"
+EXPORT_CONTENT_FULL = "#option-fullRecord[role='option']"
+EXPORT_CONFIRM = "#exportButton"

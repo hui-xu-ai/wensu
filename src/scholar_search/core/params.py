@@ -31,7 +31,10 @@ ALLOWED_KEYS: dict[str, frozenset[str]] = {
     # `wait_until` lets a click report when the site finished the work it started.
     # A search button goes disabled while the query runs; waiting for it to come
     # back is the site's own "done" signal, which beats guessing a fixed pause.
-    "click": frozenset({"selector", "wait_until", "timeout_ms"}),
+    # `expect_download` asks the extension to report the file a click produced. It is a
+    # parameter of an existing verb rather than a tenth verb: the click had to happen
+    # anyway to make the site export anything, so the file is the click's own outcome.
+    "click": frozenset({"selector", "wait_until", "timeout_ms", "expect_download"}),
     "select": frozenset({"selector", "value"}),
     "read_html": frozenset(),
     "read_text": frozenset({"selector", "mode"}),
@@ -93,6 +96,12 @@ def validate_params(verb: str, params: Any) -> str | None:
                 or not 0 <= budget <= MAX_TIMEOUT_MS
             ):
                 return "policy.params"
+        if (
+            verb == "click"
+            and "expect_download" in params
+            and not isinstance(params["expect_download"], bool)
+        ):
+            return "policy.params"
         if verb == "wait_for":
             timeout = params.get("timeout_ms", 10_000)
             if (

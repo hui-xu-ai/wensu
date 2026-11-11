@@ -7,8 +7,7 @@
 
 const HOST_NAME = "com.scholar.search";
 const PROTOCOL_VERSION = 1;
-const DEFAULT_DOMAINS = [
-  "kns.cnki.net",
+const DEFAULT_DOMAINS = [  "kns.cnki.net",
   "www.cnki.net",
   "webofscience.clarivate.cn",
   // The apex covers `www.` and any other subdomain through the same
@@ -16,8 +15,103 @@ const DEFAULT_DOMAINS = [
   "webofscience.com",
 ];
 
-let port = null;
-let boundTabId = null;
+// Bounded by the action's own deadline: waiting longer than the caller will is waiting for
+// nobody. The floor covers a download that has not started yet — the site renders the
+// export server-side before the browser sees a file at all.
+//
+// The ceiling is `declared - 3000` rather than `declared`: the host gives the whole action
+// 15 s and the click itself takes ~2 s, so a wait that used the full budget would always
+// lose to the host's deadline and report `bridge.timeout` for a download that may well have
+// landed.
+function downloadBudget(params) {
+  const declared = Number(params && params.timeout_ms);
+  const base = Number.isFinite(declared) && declared > 0 ? declared : 8_000;
+  return Math.min(Math.max(base - 3_000, 3_000), 14_000);
+}
+
+function isBibtexDownload(item) {
+  if (!item) return false;
+  const url = String(item.url || "");
+  if (/\bbibtex\b/i.test(url)) return true;
+  const name = String(item.filename || "").split(/[\\/]/).pop() || "";
+  // Web of Science names every export `savedrecs.bib`, then `savedrecs (1).bib`, and so on.
+  return /^savedrecs( \(\d+\))?\.bib$/i.test(name) || /\.bib$/i.test(name);
+}
+
+// The tab that started the download, so a file the user is downloading by hand cannot be
+// mistaken for ours. Falls back to the shape check when the browser reports no tab.
+//
+// **Polled, not event-driven.** `chrome.downloads.onCreated` is the obvious mechanism and
+// it did not work here: on a run that produced a complete 170 KB export the listener fired
+// zero times (and once fired for the right download but with the empty `filename` a `blob:`
+// URL starts with). Polling the download list costs a few API calls per second, needs no
+// listener, and cannot be missed by a service worker that was suspended in between.
+//
+// Resolves `{ found, seen }`. `seen` records recent downloads that were rejected and why —
+// without it a failed match is indistinguishable from no download at all.
+function waitForDownload(tabId, deadline, startedAfter) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const seen = [];
+
+    const note = (item, why) => {
+      if (seen.length >= 3) return;
+      seen.push({
+        why,
+        filename: String((item && item.filename) || "").split(/[\\/]/).pop() || "",
+        url: String((item && item.url) || "").slice(0, 90),
+        tab: item && Number.isInteger(item.tabId) ? item.tabId : null,
+        state: (item && item.state) || "",
+      });
+    };
+
+    const finish = (payload) => {
+      if (settled) return;
+      settled = true;
+      resolve({ found: payload, seen });
+    };
+
+    const tick = () => {
+      if (settled) return;
+      chrome.downloads.search({ orderBy: ["-startTime"], limit: 10 }, (items) => {
+        if (settled) return;
+        for (const item of items || []) {
+          const started = Date.parse(item.startTime || "") || 0;
+          if (started && started < startedAfter - 2_000) continue;
+          const name = String(item.filename || "");
+          const owned = Number.isInteger(item.tabId) && item.tabId >= 0 && Number.isInteger(tabId)
+            ? item.tabId === tabId
+            : null;
+          const bib = /\.bib$/i.test(name) || /\bbibtex\b/i.test(String(item.url || ""));
+          if (owned === false && !bib) {
+            note(item, "other-tab");
+            continue;
+          }
+          if (item.state === "interrupted") {
+            note(item, "interrupted");
+            continue;
+          }
+          if (item.state !== "complete") continue;
+          if (!name) {
+            note(item, "no-filename");
+            continue;
+          }
+          return finish({
+            path: name,
+            filename: name.split(/[\\/]/).pop() || "",
+            size: item.fileSize || item.totalBytes || 0,
+          });
+        }
+        if (Date.now() < deadline) setTimeout(tick, 300);
+        else finish(null);
+      });
+    };
+
+    tick();
+  });
+}
+
+let port = null;let boundTabId = null;
 let reconnectDelayMs = 3000;
 
 function connect() {
@@ -250,6 +344,16 @@ async function onHostMessage(message, channel) {
       });
     };
 
+    // The download is created *while the click is being handled*, so the listener has to be
+    // in place before the click is dispatched. Attaching it after the content script replied
+    // missed every file: `onCreated` had already fired, the wait timed out, and a run that
+    // produced a complete 170 KB export reported "no file". The listener therefore starts
+    // here and is awaited where the reply is assembled.
+    const pendingDownload =
+      action === "click" && params && params.expect_download
+        ? waitForDownload(tabId, Date.now() + downloadBudget(params), Date.now() - 1_500)
+        : null;
+
     let result;
     if (action === "click") {
       // A navigational click can destroy the content-script context before it
@@ -287,7 +391,13 @@ async function onHostMessage(message, channel) {
         // No snapshot is available: the document was replaced mid-click. The risk
         // layer reads a missing `captcha_visible` as "no opinion", which is the
         // honest answer here, and the plan's next wait_for verifies the page.
-        return reply({ ok: true, data: { navigation_expected: true } });
+        const data = { navigation_expected: true };
+        if (pendingDownload) {
+          const outcome = await pendingDownload;
+          if (outcome.found) data.download = outcome.found;
+          else if (outcome.seen.length) data.download_seen = outcome.seen;
+        }
+        return reply({ ok: true, data });
       }
     } else {
       result = await sendToTab();
@@ -318,6 +428,15 @@ async function onHostMessage(message, channel) {
     } else {
       const after = await chrome.tabs.get(tabId).catch(() => null);
       if (after && after.url) data.url = after.url;
+    }
+    // A click that asks for it can be followed by a file download, and the file itself is
+    // the payload we want. Reporting the path here is why no tenth verb was needed: the
+    // caller already had to click to make the export happen, so the click is the natural
+    // place to say where the result went.
+    if (pendingDownload) {
+      const outcome = await pendingDownload;
+      if (outcome.found) data.download = outcome.found;
+      else if (outcome.seen.length) data.download_seen = outcome.seen;
     }
     return reply({ ok: Boolean(result.ok), error: result.error, data });
   } catch (error) {

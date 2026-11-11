@@ -12,6 +12,7 @@ from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, suppress
 from dataclasses import replace
 from datetime import datetime
+from pathlib import Path
 from typing import Any, ClassVar, Literal
 from urllib.parse import urlparse
 
@@ -241,7 +242,9 @@ class ScholarService:
                     self._cache.set(key, _page_to(empty))
                     return empty
                 raise
-        html = _html(outcomes)
+        # An export-capable channel has no read action in its plan — the payload is a file —
+        # so demanding a page payload here would fail before the file is even looked at.
+        html = "" if getattr(channel, "parse_export", None) is not None else _html(outcomes)
         fixer = getattr(channel, "sort_fix", None)
         for _ in range(2):
             if fixer is None:
@@ -251,7 +254,7 @@ class ScholarService:
                 break
             outcomes = self._run(fix_plan, spec)
             html = _html(outcomes)
-        page = channel.parse_search(html, query=query)
+        page = self._read_result(channel, outcomes, html, query)
 
         # Seed the detail cache before any filtering happens. A caller that wants
         # five records now may want the abstract of the twelfth one later, and
@@ -291,6 +294,74 @@ class ScholarService:
         # `parse_search` returns Any. Narrow it once, at the exit.
         result: SearchPage = _present(page, query)
         return result
+
+    def _read_result(
+        self,
+        channel: Channel,
+        outcomes: Sequence[ActionOutcome],
+        html: str,
+        query: SearchQuery,
+    ) -> SearchPage:
+        """Turn what the plan produced into records, whichever way the channel reads.
+
+        A channel that can only be read through an export file declares `parse_export`;
+        the file path arrives in the click's reply, so nothing else in the kernel has to
+        know that this path exists. When such a channel reports no file, that is a
+        failure, not an empty result — reading the (empty) page instead would report
+        "no records found" for a run that never got any.
+        """
+
+        parse_export = getattr(channel, "parse_export", None)
+        if parse_export is None:
+            return channel.parse_search(html, query=query)
+
+        download = next(
+            (
+                outcome.data.get("download")
+                for outcome in outcomes
+                if isinstance(outcome.data, dict) and isinstance(outcome.data.get("download"), dict)
+            ),
+            None,
+        )
+        path = download.get("path") if isinstance(download, dict) else None
+        if not isinstance(path, str) or not path:
+            seen = next(
+                (
+                    outcome.data.get("download_seen")
+                    for outcome in outcomes
+                    if isinstance(outcome.data, dict) and outcome.data.get("download_seen")
+                ),
+                None,
+            )
+            detail = ""
+            if isinstance(seen, list) and seen:
+                detail = (
+                    " [saw "
+                    + "; ".join(
+                        f"{item.get('why')}:{item.get('filename') or item.get('url') or '?'}"
+                        for item in seen[:3]
+                        if isinstance(item, dict)
+                    )
+                    + "]"
+                )
+            raise ActionError(
+                "the export click produced no file: the browser reported no completed "
+                "BibTeX download for this tab" + detail,
+                verb="click",
+                code="export.missing",
+                stage="action.click",
+            )
+        try:
+            text = Path(path).read_text(encoding="utf-8", errors="replace")
+        except OSError as error:
+            raise ActionError(
+                f"the export file could not be read ({error.__class__.__name__})",
+                verb="click",
+                code="export.unreadable",
+                stage="action.click",
+            ) from error
+        page: SearchPage = parse_export(text, query=query)
+        return page
 
     def channel_for_url(self, url: str) -> str | None:
         """Which channel owns this URL, judged by the manifests' domain lists.

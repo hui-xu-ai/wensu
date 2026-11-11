@@ -33,6 +33,10 @@ from ...core.errors import BridgeAmbiguous, BridgeError
 
 PING_TIMEOUT_S = 0.6
 
+# How much longer the socket read waits than the action deadline the host was given. Zero
+# margin means the two deadlines race, and the loser is always the reply.
+BRIDGE_REPLY_MARGIN_S = 2.0
+
 
 class BridgeAdapter:
     name = "bridge"
@@ -276,6 +280,12 @@ class BridgeAdapter:
 
     def _send(self, action: Action, timeout_ms: int) -> ActionOutcome:
         assert self._socket is not None and self._reader is not None
+        # The client must outwait the server, not match it. The host allows itself the
+        # action's whole `timeout_ms` and then writes the reply; a socket read deadline of
+        # exactly that long aborts the read in the same millisecond, so an action that used
+        # its full budget could never report what happened — it surfaced as
+        # `bridge.error: timed out` on a run that had in fact succeeded.
+        self._socket.settimeout(max(self._timeout, timeout_ms / 1000 + BRIDGE_REPLY_MARGIN_S))
         request_id = uuid.uuid4().hex
         request = {
             "id": request_id,

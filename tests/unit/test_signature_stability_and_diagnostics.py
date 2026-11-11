@@ -25,8 +25,20 @@ import pytest
 
 from scholar_search.channels.cnki.v2026_10 import get_channel as cnki_channel
 from scholar_search.channels.webofscience.v2026_11 import get_channel as wos_channel
+from scholar_search.channels.webofscience.v2026_11 import plan_search as wos_plan
 from scholar_search.core.contracts import SearchPage, SearchQuery
 from scholar_search.core.service import _cache_can_answer, _site_signature
+
+#: The diagnostics under test belong to the **capture** path: `wait.capture`, the capture
+#: selector, the capture state. On the global host that path is replaced by the export file,
+#: so these tests pin the mirror — otherwise they would assert the behaviour of a plan they
+#: are not about.
+MIRROR_HOST = "https://webofscience.clarivate.cn/wos/woscc/advanced-search"
+
+
+@pytest.fixture(autouse=True)
+def _capture_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(wos_plan, "ADVANCED_SEARCH", MIRROR_HOST)
 
 
 def _signature(channel, **kwargs):  # type: ignore[no-untyped-def]
