@@ -625,10 +625,23 @@ class ScholarService:
 
         stage = cls._stage_of(outcome, index)
         total = len(outcomes)
-        return (
+        message = (
             f"{outcome.action.verb} failed: {outcome.error or 'unknown'} "
             f"(step {index + 1}/{total}, stage {stage})"
         )
+        # A refused navigation says `goto failed: policy.domain`, and the one thing a
+        # caller needs is *where* it was sent instead. The acceptance run that hit this
+        # could only see a cooldown timestamp, and had to reconstruct the cause from an
+        # audit line that did not carry the host either.
+        url = outcome.url or ""
+        if not url and isinstance(outcome.data, dict):
+            nested = outcome.data.get("url")
+            url = nested if isinstance(nested, str) else ""
+        if url:
+            host = urlparse(url).hostname
+            if host:
+                message = f"{message} [reached {host}]"
+        return message
 
     def _pin_transaction_host(self) -> None:
         """Choose the host for this transaction, once, and refuse if it is ambiguous.

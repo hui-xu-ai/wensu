@@ -4,6 +4,43 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.51] - 2026-11-11
+
+A refused navigation did not say where the tab went, which is the one fact that tells the
+cases apart.
+
+### Added — the reached host, in the error and in the cooldown reason
+
+A blocked Web of Science call produced:
+
+```
+goto failed: policy.domain
+reason: login_redirect after goto
+```
+
+Three unrelated situations produce exactly that pair: an institutional sign-in (what
+actually happened), a publisher's own login wall, or a redirect to another legitimate WoS
+host. The first is fixed by signing in, the third by adding a domain to the manifest, and
+distinguishing them took an inference chain across the audit log, the extension and the
+risk module.
+
+Now:
+
+```
+goto failed: policy.domain (step 1/12, stage navigate.open) [reached carsi.example.edu.cn]
+reason: login_redirect after goto at carsi.example.edu.cn (policy.domain)
+```
+
+**Host only** — never the path or query. The path can carry a session ticket, and the
+audit log is not a place for one; a test asserts the query string cannot reach either
+field.
+
+### Not changed
+
+The detection itself. `policy.domain` on a redirect, and a login marker in the resulting
+URL, is a real signal: the extension correctly refused to act on a page it was not
+allowed to touch. The problem was never that it stopped — it was that nothing said why.
+
 ## [0.12.50] - 2026-11-11
 
 A blocked response told the user to wait 24 hours and nothing else. For a login problem

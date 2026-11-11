@@ -10,13 +10,41 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 from .audit import AuditLog
-from .contracts import ActionOutcome, BrowserAdapter, ChannelManifest, Plan
+from .contracts import Action, ActionOutcome, BrowserAdapter, ChannelManifest, Plan
 from .errors import PolicyError
 from .locking import interprocess_lock
 from .policy import NETWORK_VERBS, PolicyEngine
 from .risk import RiskGuard
+
+
+def _risk_reason(signal: object, action: Action, outcome: ActionOutcome) -> str:
+    """Why the guard stopped, with the one fact needed to tell the cases apart.
+
+    The stored reason used to be `login_redirect after goto`, which says nothing about
+    *where* the tab went. A refused navigation to an institutional sign-in, to a
+    publisher's login wall and to `www.webofscience.com` all produce that string, and
+    they need opposite responses: sign in, stop, or nothing wrong at all.
+
+    Only the **host** is recorded — never the path or query. Which host was reached is
+    the whole diagnostic value, and a host is not account data.
+    """
+
+    name = getattr(signal, "value", str(signal))
+    detail = f"{name} after {action.verb}"
+    url = (outcome.url or "").strip()
+    if not url and isinstance(outcome.data, dict):
+        nested = outcome.data.get("url")
+        url = nested.strip() if isinstance(nested, str) else ""
+    if url:
+        host = (urlparse(url).hostname or "").casefold()
+        if host:
+            detail = f"{detail} at {host}"
+    if outcome.error:
+        detail = f"{detail} ({outcome.error})"
+    return detail
 
 
 @dataclass(slots=True)
@@ -71,7 +99,7 @@ class Planner:
 
             signal = self.risk.inspect(outcome)
             if signal is not None:
-                blocked = self.risk.trip(signal, f"{signal.value} after {action.verb}")
+                blocked = self.risk.trip(signal, _risk_reason(signal, action, outcome))
                 self.audit.risk(
                     channel=plan.channel,
                     signal=signal.value,
