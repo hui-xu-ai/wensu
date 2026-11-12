@@ -74,10 +74,20 @@ client ──search(query)──▶ server.search
                        channel.sort_fix(query, html)  排序落成 ASC 时返回纠正计划
                             └─ 最多重跑 2 轮
                             ▼
-                       channel.parse_search(html, query) → SearchPage
+                       解析：两条取数路径之一
+                         ├─ 捕获路径  parse_search(html)        ← 镜像站
+                         └─ 导出路径  parse_export(文件内容)    ← 全球站
                             ▼
                        年份过滤（客户端）→ 截断到 limit → 写缓存 → 返回
 ```
+
+**两条取数路径（[ADR 0016](adr/0016-wos-global-site-bibtex.md)）**。镜像站的结果流可以被
+内容脚本截获，全球站的不行——`data-wensu-seen` 记录了该页面全部 fetch/XHR 路径，其中没有
+任何 `runQuery*` 端点。所以 `.com` 改走站点自带的 BibTeX 导出：计划多四次点击，
+`click` 带 `expect_download` 让扩展回报下载文件路径，内核读文件后解析。
+
+判定在 `plan_search.EXPORT_HOSTS`，调用方无感。**条目键即 UT**，两种路径产出同一种
+`Record`，`detail` / `exclude_ut` / 导出格式都不用知道数据从哪来。
 
 `detail` 的路径更短：校验 URL 域名与路径前缀（`detail_url_prefixes`）→ 计划 → 解析 → 缓存。
 
@@ -132,6 +142,22 @@ channels/cnki/
 新增站点版本 = 复制目录 + 改选择器与解析 + 补 fixture 测试，**不改内核**。
 详见 [知网改版应对](cnki-maintenance.md)。
 
+Web of Science 的 `v2026_11/` 多两个文件，因为两个站点取数方式不同：
+
+```
+channels/webofscience/
+  manifest.json          domains 同时含 webofscience.com 与镜像站
+  v2026_11/
+    selectors.py         入口 URL、捕获选择器、**导出点击链的选择器**
+    plan_search.py       检索计划；uses_export() 决定后半段走哪条路
+    plan_export.py       导出计划（仅全球站）
+    parse_records.py     捕获流解析（镜像站）
+    parse_bibtex.py      导出文件解析（全球站）
+```
+
+`selectors.DETAIL_PREFIX` 与 `ADVANCED_SEARCH` 必须同源：详情链接跟着**计划打开的站点**走，
+否则在一个站点上打开计划、在另一个站点上请求详情。
+
 ## 6. 桥接与信任边界
 
 ```
@@ -159,11 +185,17 @@ server ──TCP 127.0.0.1:<port>──▶ native-host ──stdio──▶ exte
 | `state/plan.lock` | 计划级跨进程互斥 |
 | `audit/audit.jsonl` | 每个动作的渠道/动作/耗时/结果/错误码；风控单独一条 |
 | `cache/cache.sqlite3` | 响应缓存（默认 7 天） |
+| `data/jcr.sqlite` | 影响因子库：`wensu jcr import <JCR 工作簿>` 生成，数据来自用户自备的表，**不随包分发** |
 | `host/bridge.json` | 宿主端点与令牌 |
 | `host/logs/host.log` | 宿主生命周期日志 |
 | `installations/<版本>/` | 部署树（venv + browser 资源） |
 
 审计只记元数据，不记 HTML、不记 Cookie、不记账号。
+
+全球站的 BibTeX 导出文件落在**浏览器的下载目录**（用户可见、可保留），服务只读取，
+不复制、不改名、不删除——那是用户自己的文件。冷却状态见 §8 与
+[ADR 0004](adr/0004-risk-stop.md)；`wensu reset --confirm` 通过写入
+`{"cleared_at": …}` 让**已在运行**的进程也看到清除，而不是只删文件。
 
 ## 8. 错误模型
 
@@ -210,3 +242,5 @@ server ──TCP 127.0.0.1:<port>──▶ native-host ──stdio──▶ exte
 | [0005](adr/0005-quota-300.md) | 每日 300 次与频率下限 |
 | [0006](adr/0006-no-third-party-ingest.md) | 不做第三方题录入库 |
 | [0012](adr/0012-bridge-threat-model.md) | 桥的威胁模型与宿主任信边界 |
+| [0016](adr/0016-wos-global-site-bibtex.md) | 全球站用 BibTeX 导出取数，影响因子改由本地 JCR 库提供 |
+| [0017](adr/0017-bundle-exact-pin.md) | DSH bundle 对插件依赖与 DSH 版本都做精确锁定 |

@@ -40,3 +40,6 @@ Thumbs.db
 
 # Local handoff notes (machine-specific paths; not for public history)
 HANDOFF.md
+
+# 会话记忆：独立 git 仓库，不随代码提交
+.dsh-memory/
