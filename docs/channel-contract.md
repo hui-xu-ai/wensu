@@ -46,11 +46,23 @@ Rules enforced by `ChannelManifest.validate()`:
 ```python
 plan_search(query: SearchQuery) -> Plan
 parse_search(html: str, *, query: SearchQuery) -> SearchPage
+parse_export(text: str, *, query: SearchQuery) -> SearchPage   # 可选
 plan_detail(url: str) -> Plan
 parse_detail(html: str, *, url: str) -> Record
 plan_journal(*, issn: str, year: int, issue: str) -> Plan
 parse_journal(html, *, issn, year, issue) -> SearchPage
 ```
+
+**`parse_export` is optional and changes how the plan's result is read.** A channel that
+defines it must produce a file: its plan ends with a `click` carrying `expect_download`, the
+extension reports the completed download path in `data.download`, and the kernel reads that
+file and passes its text here instead of looking for an `html`/`text` action payload. The
+kernel decides by attribute presence, so a channel without it is unaffected
+([ADR 0016](adr/0016-wos-global-site-bibtex.md)).
+
+When such a channel reports no file, that is a failure (`export.missing`), not an empty
+result — reading an empty page instead would report "no records found" for a run that never
+obtained any.
 
 Plans contain only the nine allowed verbs. `goto` URLs must satisfy the
 manifest's domains; `detail` URLs must additionally match a declared prefix.
