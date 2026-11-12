@@ -4,6 +4,44 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.55] - 2026-11-11
+
+Fixes the DSH bundle against DSH 0.2.2-rc.2, where it had silently stopped working.
+
+### Fixed — the MCP tools disappeared after a DSH update
+
+Reported symptom: after updating DeepSeek Harness, no wensu tools were available. The
+service itself was healthy — `wensu status` reported `bridge_ready: true`, and a direct MCP
+handshake against `wensu serve --transport stdio` answered `wensu 0.12.53` with the `tools`
+capability — but the Host's tool list contained nothing from wensu and the loader entry
+`mcp-scholar-search` was `inactive`.
+
+The cause was an **exact version pin**:
+
+```
+DSH core                         0.2.2-rc.2
+bundle dependency                @deepseek-ai/dsh-mcp-client  0.2.2-rc.1   (exact)
+that plugin's peers              10 core packages, each requiring exactly 0.2.2-rc.1
+```
+
+`@deepseek-ai/dsh-mcp-client` declares its peers at exact versions rather than ranges, so
+the RC bump invalidated all ten. DSH rejects the whole row when a peer is unmet, and the
+bundle's `engines.dsh` was `>=0.2.2-rc.1 <0.3.0` — loose enough to accept rc.2, which is
+why nothing warned and the failure was invisible until someone looked for the tools.
+
+### Changed — the dependency and `engines.dsh` now agree, exactly
+
+Both are pinned to `0.2.2-rc.2`. The loose `engines` range was the actual defect: it
+claimed compatibility the dependency did not have, so DSH's version gate could not do its
+job. With an exact `engines`, a mismatched core is **refused with a message** instead of
+being installed and going quietly inactive.
+
+The consequence is stated in `packages/dsh-wensu/README.md`: **every DSH release needs a
+matching bundle release**. That is what exact peers mean, not an oversight.
+
+Verified after the change: the loader entry became `active` and the four
+`mcp__wensu__*` tools appeared in the Host tool list.
+
 ## [0.12.54] - 2026-11-11
 
 The global Web of Science site now yields records. It does so by asking the site for a

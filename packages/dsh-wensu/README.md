@@ -31,9 +31,22 @@ bundle 提供的工具有哪些，取决于装的那份 `wensu` 认不认渠道�
 
 ## 前置
 
-DSH **0.2.2-rc.1 及以上**（`0.3.0` 前）。DSH 在导入插件行前会把 `@deepseek-ai/dsh-mcp-client`
-声明的 DSH peer 版本与运行时比较，未满足则整行被拒（MCP 静默不上线、工具不出现），所以
-bundle 的依赖版本必须与 DSH 版本对齐。
+DSH **版本必须与本 bundle 的依赖对齐**，且是**精确对应**而非"某版本以上"。
+
+`@deepseek-ai/dsh-mcp-client` 对 DSH 的核心包声明的 peer 是**精确版本**（`dsh-llm`、`dsh-tools`、
+`dsh-scope`、`dsh-timeout`、`dsh-subprocess`、`dsh-attachment`、`dsh-credentials`、
+`dsh-mcp-resources`、`dsh-system-prompt` 各要求同一个完整版本号）。DSH 在导入插件行前会把这组
+peer 与运行时比较，**任何一条不满足，整行就被拒**——表现是 MCP 静默不上线、工具不出现，
+而 `wensu` 命令本身完全正常。
+
+因为 `engines.dsh` 也写成了同一个精确版本，DSH 会在版本不符时**明确拒绝**这个 bundle，
+而不是让它装上去再静默失效。
+
+**实测**（2026-11-11，DSH 0.2.2-rc.2）：bundle 0.12.45 钉的是 `dsh-mcp-client@0.2.2-rc.1`，
+升级 DSH 后 `mcp-scholar-search` 行状态为 `inactive`、宿主工具列表里没有任何 wensu 工具；
+而直接对 `wensu serve --transport stdio` 做 MCP 握手是一切正常的。0.12.55 起改为 rc.2。
+
+**DSH 每次升版，本 bundle 都要跟一个同版本的发行**——这不是疏忽，是精确 peer 的必然结果。
 
 `wensu` 命令必须在 DSH 进程的 PATH 上，浏览器侧也要装一次：
 
