@@ -41,3 +41,6 @@
 - 版本号、CHANGELOG、NOTICE 三者必须同步。
 - 完整流程见 `docs/publishing.md`；版本与契约的关系见 `docs/compatibility.md`。
 
+## 会话记忆（pydev，bootstrap 追加）
+
+- 开局读 `.dsh-memory/HANDOFF.md`（≤80 行，唯一必读）；超限跑 `python tools\bootstrap-project.py . --check`。
