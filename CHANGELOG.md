@@ -4,6 +4,32 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.12.56] - 2026-11-11
+
+### Fixed — `wensu reset --confirm` did nothing to a running service
+
+The block message tells the user to clear the cooldown with `wensu reset --confirm`. Doing
+that left the service locked anyway, for the full 24 hours, with no explanation:
+
+```
+CLI  after reset → cooldown_until: null      (file removed)
+MCP  next call   → still blocked, same deadline
+```
+
+`RiskGuard` keeps the deadline in memory as a second lock, and `cooldown_until()` returned
+the **later** of memory and disk. A one-shot CLI process cannot reach another process's
+memory, so following the documented remedy appeared to do nothing.
+
+That memory lock exists on purpose — deleting a file must not unblock a process that is
+already running — so the fix is not to weaken it but to make the clear **visible**. `clear()`
+now writes `{"cleared_at": …}` instead of deleting the file, and `cooldown_until()` drops
+its memory value when that marker is newer than the moment the value was recorded. A clear
+that happened *before* a later trip cannot undo it, and a state file from an older version
+(no marker) behaves exactly as before.
+
+Verified against the live MCP server: a planted cooldown disappeared from a running process
+after `wensu reset --confirm`, with no restart.
+
 ## [0.12.55] - 2026-11-11
 
 Fixes the DSH bundle against DSH 0.2.2-rc.2, where it had silently stopped working.

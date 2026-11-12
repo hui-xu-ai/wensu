@@ -52,6 +52,23 @@ LOGIN_URL_MARKERS: tuple[str, ...] = (
 )
 
 
+def _timestamp(value: object) -> datetime | None:
+    """A timestamp from the state file, or None when it is absent or unusable.
+
+    Naive values are read as UTC: the file is written by `isoformat()` on an aware
+    datetime, but a hand-edited or older file must not make the comparison in
+    `cooldown_until` raise.
+    """
+
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 def _title_is_gate(title: str) -> bool:
     """True when the document title names a gate page, not an article.
 
@@ -94,6 +111,9 @@ class RiskGuard:
         # Persistence can fail (read-only disk, sandbox); the signal still has
         # to block this process, so the deadline is also held in memory.
         self._memory_until: datetime | None = None
+        # When that in-memory deadline was recorded. A clear from another process is
+        # honoured only if it happened *after* this point — see `cooldown_until`.
+        self._memory_since: datetime | None = None
 
     # -- cooldown ------------------------------------------------------
 
@@ -101,11 +121,26 @@ class RiskGuard:
         until = self._memory_until
         try:
             raw = json.loads(self._state_path.read_text(encoding="utf-8"))
-            stored = datetime.fromisoformat(raw["until"])
-            if until is None or stored > until:
-                until = stored
-        except (OSError, ValueError, KeyError, TypeError):
-            pass
+        except (OSError, ValueError):
+            return until
+        if not isinstance(raw, dict):
+            return until
+
+        cleared_at = _timestamp(raw.get("cleared_at"))
+        if cleared_at is not None and (
+            self._memory_since is None or cleared_at >= self._memory_since
+        ):
+            # Somebody lifted the cooldown after this process recorded its own deadline.
+            # Holding the memory value would keep a long-lived server locked for a cooldown
+            # a human already cleared — and the block message tells them to do exactly that,
+            # so following the advice would appear to do nothing for 24 hours.
+            self._memory_until = None
+            self._memory_since = None
+            until = None
+
+        stored = _timestamp(raw.get("until"))
+        if stored is not None and (until is None or stored > until):
+            until = stored
         return until
 
     def ensure_ready(self) -> None:
@@ -120,8 +155,28 @@ class RiskGuard:
             )
 
     def clear(self) -> None:
+        """Lift the cooldown for every process, including ones already running.
+
+        Deleting the file was not enough. A long-lived process (the MCP server) also keeps
+        the deadline in memory as a second lock, and `cooldown_until` took the later of the
+        two — so `wensu reset --confirm`, the very command the block message recommends, did
+        nothing until that process was restarted. The marker records *when* the clear
+        happened, which is what lets a running guard tell "cleared after my deadline" from
+        "cleared before it".
+        """
+
         self._memory_until = None
-        self._state_path.unlink(missing_ok=True)
+        self._memory_since = None
+        try:
+            self._state_path.parent.mkdir(parents=True, exist_ok=True)
+            self._state_path.write_text(
+                json.dumps({"cleared_at": self._now().isoformat()}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except OSError:
+            # No marker possible; fall back to the old behaviour so a deletable file at
+            # least does not keep a fresh process blocked.
+            self._state_path.unlink(missing_ok=True)
 
     # -- inspection ----------------------------------------------------
 
@@ -170,6 +225,7 @@ class RiskGuard:
     def trip(self, signal: RiskSignal, reason: str = "") -> RiskBlocked:
         until = self._now() + timedelta(hours=self._cooldown_hours)
         self._memory_until = until
+        self._memory_since = self._now()
         try:
             self._state_path.parent.mkdir(parents=True, exist_ok=True)
             self._state_path.write_text(
