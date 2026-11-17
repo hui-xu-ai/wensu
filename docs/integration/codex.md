@@ -156,13 +156,16 @@ if ($cur -notmatch 'cnki\.net') {
 
 ## 5. 技能文件
 
-`skills/` 下三份 `SKILL.md` 可直接复制到客户端的技能目录：
+`skills/` 下四份 `SKILL.md` 可直接复制到客户端的技能目录（或 `wensu setup --skills-dir <目录>` 一次装好）：
 
 - `scholar-search`：检索与专业检索式；
 - `scholar-detail`：单篇详情；
-- `scholar-export`：RIS/EndNote 题录。
+- `scholar-export`：RIS/EndNote 题录；
+- `scholar-install`：安装、升级、桥接排障。
 
 技能中的约束与服务端一致：只读、单次一页、逐年筛选只作用当前页、遇阻即停。
+装了但内容与仓库不同时，`wensu setup --skills-dir <目录>` 会报「N 个技能与本版本不同」
+（不会擅自覆盖；要覆盖用 `--force-skills`）。
 
 ## 6. 自定义 HOME
 

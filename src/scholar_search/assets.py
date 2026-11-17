@@ -57,6 +57,27 @@ def install_skills(target: Path, *, force: bool = False) -> list[Path]:
     return copied
 
 
+def stale_skills(target: Path) -> list[Path]:
+    """Installed skills whose files differ from the bundled copy.
+
+    Not an error: a user who edited a skill should keep it. But it has to be
+    reportable — three copies of these files exist on a working machine, and during
+    one acceptance run eight of twelve disagreed while every command printed success.
+    """
+
+    root = skills_root()
+    if root is None or not target.is_dir():
+        return []
+    stale: list[Path] = []
+    for skill in sorted(root.iterdir()):
+        if not skill.is_dir() or not (skill / "SKILL.md").is_file():
+            continue
+        destination = target / skill.name
+        if destination.exists() and not _same_tree(skill, destination):
+            stale.append(destination)
+    return stale
+
+
 def assets_root() -> Path:
     """Where the browser assets live: the wheel's package data, or the repo."""
 

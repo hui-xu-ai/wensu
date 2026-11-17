@@ -12,7 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .assets import copy_assets, install_skills
+from .assets import copy_assets, install_skills, stale_skills
 from .core import config
 
 # Pinned by the ``key`` field in extension/manifest.json, so an unpacked load
@@ -52,6 +52,15 @@ def setup_browser(
             print(f"  {path.name}")
     elif skills_dir:
         print(f"skills: nothing to install (none bundled, or all present in {skills_dir})")
+    if skills_dir and not replace_skills:
+        drifted = stale_skills(skills_dir)
+        if drifted:
+            names = ", ".join(path.name for path in drifted)
+            print(
+                f"skills: {len(drifted)} differ from this build ({names}); "
+                "pass --force-skills to replace them",
+                file=sys.stderr,
+            )
 
     destination = target if target is not None else config.app_home() / "browser"
     existed = destination.is_dir()
