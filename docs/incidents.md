@@ -2,6 +2,22 @@
 
 只记真实发生的故障：现象 → 根因 → 修复 → 是否可借鉴避免。新故障追加在顶部。
 
+## 2026-11-18 DSH 升到 0.2.2-rc.3 后，bundle 被明确拒绝（这次不再静默）
+
+- **现象**：DSH 升级后插件列表里 `@hui-xu-ai/dsh-wensu@0.12.56` 仍显示 `enabled: true`、
+  `installed: true`，但带 `error.code: incompatible-version`、`rows: []`，宿主工具列表里
+  没有任何 `mcp__wensu__*`；`wensu status` 一切正常（`bridge_ready: true`）。
+- **判据**（这次一眼能看出，不用猜）：`plugin_manager list_bundles` 返回
+  `runtimeVersion: 0.2.2-rc.3` 与 `requirements.engines.dsh: 0.2.2-rc.2` 并列。
+- **根因**：精确 peer 的必然结果——bundle 钉的 `dsh-mcp-client@0.2.2-rc.2` 要求十个核心包
+  都恰好是 rc.2，而运行时是 rc.3；`engines.dsh` 也是精确值，于是 DSH 在激活前就拒绝整行。
+- **修复**：0.12.57 把依赖与 `engines.dsh` 一起改为 `0.2.2-rc.3`；新增
+  `scripts/check-bundle-compat.py`（读本机 asar 里的 DSH 版本，对比 bundle 的引擎声明）与
+  `tests/unit/test_bundle_pin_matches.py`（断言依赖 == `engines.dsh` 且必须是精确版本）。
+- **教训**：**精确 peer 意味着「DSH 每个版本都要有一个 bundle 发行」**，这是流程成本不是缺陷；
+  把它写成可执行的检查（脚本 + 断言），比写在 README 里让人记住更可靠。
+  另：`engines` 一旦写成范围就会让闸门说谎（ADR 0017），本次没有再犯。
+
 ## 2026-11-11 装了第三方"WoS BibTeX 助手"扩展时，导出弹窗里四个选择器全部超时
 
 - **现象**：导出链走到"记录内容"下拉就 `wait_for ... bridge.timeout`；连

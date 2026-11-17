@@ -29,7 +29,9 @@ wensu 命令本身 → 完全正常（bridge_ready: true，stdio 握手成功）
 
 ## 决定
 
-`dependencies` 与 `engines.dsh` 都写成**同一个精确版本**（当前 `0.2.2-rc.2`），并在
+`dependencies` 与 `engines.dsh` 都写成**同一个精确版本**（写这份 ADR 时是 `0.2.2-rc.2`；
+它随每次 DSH 升版前进——0.12.57 是 `0.2.2-rc.3`，由
+`tests/unit/test_bundle_pin_matches.py` 盯着两者相等），并在
 `packages/dsh-wensu/README.md` 写明：**DSH 每升一个版本，本 bundle 必须跟一个同版本发行**。
 
 ## 理由

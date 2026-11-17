@@ -53,6 +53,13 @@ PROTOCOL_VERSION = 1
 bundle 不含检索代码，它只让 DSH 启动 `wensu serve --stdio`。统一版本号之后，
 bundle 与 `wensu` 同号，装的时候看到数字不一致就是装错了。
 
+**bundle 与 DSH 之间不是区间，是一一对应。** `@deepseek-ai/dsh-mcp-client` 对十个核心包
+声明的 peer 是精确版本，因此 `dsh-wensu` 的依赖与 `engines.dsh` 都钉死在同一个 DSH 版本上
+（0.12.57 → `0.2.2-rc.3`，0.12.56 → `0.2.2-rc.2`）。装错配对的后果是
+`plugin_manager` 里的 bundle 带 `error.code: incompatible-version`、`rows: []`、
+`mcp__wensu__*` 一个都不出现，而 `wensu` 命令本身完全正常。占错版本时用
+`python scripts/check-bundle-compat.py` 判断该装哪一版。
+
 ## 自查
 
 ```powershell
@@ -74,7 +81,7 @@ wensu status
 | `bridge_ready: false` | 宿主没连上，或协议版本不匹配 | 先看 `status.bridge.remediation`；再看 `status.bridge.log_path` 指向的日志 |
 | `channels` 少一个 | 渠道目录缺失或 manifest 被拒 | 检查 `channels/*/manifest.json` |
 | `version` 与扩展详情页不一致 | 装的是不同批次 | 重装配套的那一套 |
-| 工具在 DSH 里没出现 | bundle 的 MCP 客户端没连上 | 看 DSH 侧 `dsh-mcp-client` 的启动错误 |
+| 工具在 DSH 里没出现 | bundle 与 DSH 版本不配对，整行被拒 | 看 `plugin_manager` 里该 bundle 的 `error.code`（`incompatible-version` = 钉的 DSH 版本不对）；用 `scripts/check-bundle-compat.py` 查该装哪一版 |
 
 ### 版本号不一致时，哪些情况真有问题
 

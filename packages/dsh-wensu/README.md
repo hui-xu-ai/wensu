@@ -46,7 +46,13 @@ peer 与运行时比较，**任何一条不满足，整行就被拒**——表�
 升级 DSH 后 `mcp-scholar-search` 行状态为 `inactive`、宿主工具列表里没有任何 wensu 工具；
 而直接对 `wensu serve --transport stdio` 做 MCP 握手是一切正常的。0.12.55 起改为 rc.2。
 
+**第二次实测**（2026-11-18，DSH 0.2.2-rc.3）：0.12.56 钉的是 rc.2，`plugin_manager` 里
+bundle 显示 `enabled: true` 但带 `error.code: incompatible-version`、`rows: []`，
+`mcp__wensu__*` 一个都不出现。0.12.57 起改为 rc.3。
+
 **DSH 每次升版，本 bundle 都要跟一个同版本的发行**——这不是疏忽，是精确 peer 的必然结果。
+不确定该装哪一版时，在仓库里跑 `python scripts/check-bundle-compat.py`，它会读出本机 DSH
+版本并告诉你可用的 bundle 版本。
 
 `wensu` 命令必须在 DSH 进程的 PATH 上，浏览器侧也要装一次：
 
@@ -62,14 +68,15 @@ wensu status       # bridge_ready: true 才表示整条链路通了
 ## 安装
 
 在 DSH 的插件管理入口（桌面端 Plugins 页面，或在 Creator 会话里让 agent 调用
-`plugin_manager`）安装这个目录。安装时 DSH 会解析并安装
-`@deepseek-ai/dsh-mcp-client@0.2.2-rc.1`，不需要手工复制 `node_modules`，也不要手工编辑
-profile 的 `cordis.patch.yml`。
+`plugin_manager`）安装这个目录。安装时 DSH 会解析并安装本 bundle 声明的
+`@deepseek-ai/dsh-mcp-client`（0.12.57 = `0.2.2-rc.3`，与 DSH 版本必须一致），不需要手工
+复制 `node_modules`，也不要手工编辑 profile 的 `cordis.patch.yml`。
 
-安装完成后**完全重启 DSH**，新会话中应出现：
+安装完成后**完全重启 DSH**，新会话中应出现五个工具：
 
 - `mcp__wensu__search`
 - `mcp__wensu__detail`
+- `mcp__wensu__detail_many`
 - `mcp__wensu__export`
 - `mcp__wensu__status`
 

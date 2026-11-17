@@ -14,11 +14,18 @@ the package — run `wensu setup`, then reload the extension.
 ## DSH bundle (recommended when the client is DSH)
 
 Install `@hui-xu-ai/dsh-wensu` from the plugin market (or through `plugin_manager`);
-it is a config-only bundle that mounts `@deepseek-ai/dsh-mcp-client` for you. It supports
-DSH **0.2.2-rc.1 up to (not including) 0.3.0** — the pinned MCP client's DSH peer ranges are
-exact, so a mismatched DSH admits the bundle but silently denies the MCP row and no tools appear.
+it is a config-only bundle that mounts `@deepseek-ai/dsh-mcp-client` for you.
+
+**A bundle works on exactly one DSH build.** The MCP client declares its peers at exact
+versions, so the bundle's dependency and `engines.dsh` are pinned to a single release —
+0.12.57 pins `0.2.2-rc.3`, 0.12.56 pins `0.2.2-rc.2`, and so on. The wrong pair is refused at
+install/activation time (`error.code: incompatible-version` in the bundle list), the row never
+mounts, and no tools appear while `wensu` itself keeps working. Run
+`python scripts/check-bundle-compat.py` to see which bundle the installed DSH needs. **Every
+DSH release needs a matching bundle release** — that is the price of exact peers.
+
 `wensu` must still be on the PATH of the DSH process. Tools show up as
-`mcp__wensu__{search,detail,export,status}`.
+`mcp__wensu__{search,detail,detail_many,export,status}`.
 
 ## stdio
 
