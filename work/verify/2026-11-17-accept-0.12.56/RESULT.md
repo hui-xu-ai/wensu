@@ -178,3 +178,21 @@
 2. `%LOCALAPPDATA%\scholar-search` 里的残留：`browser\extension.bak-0.4.2`、
    `installations\0.12.48`（里面装的其实是 0.12.56）、`profiles\edge`（真实 profile 在 `E:\LiteratureEdgeProfile`）。
 3. 扩展文件已刷到 0.12.56，但浏览器里加载的那份要**重载一次**（`edge://extensions` → 重新加载）才会显示新版本号。
+
+## 10. 技能副本已同步（2026-11-18）
+
+两处技能目录的 4 份 `scholar-*` 已用仓库版本覆盖，覆盖前备份在 `work/backup/skills-20261118/`（未入版本控制）。
+覆盖前的旧内容全部**逐字节等于某个历史提交**（可用 `git show <hash>:skills/<name>/SKILL.md` 取回）：
+
+| 位置 | 技能 | 旧内容等于 | 日期 |
+|---|---|---|---|
+| `D:\DSH\.dsh\skills` | scholar-search | `3a616c6` | 2026-11-09 |
+| | scholar-detail / export | `e66480d` | 2026-10-21 |
+| | scholar-install | `f1ca137` | 2026-10-23 |
+| `~/.codex/skills` | scholar-search / export | `5932c16` | 2026-11-10 |
+
+旧副本的 mtime 是 `2020-02-02 00:00`（zip 纪元）⇒ 来自 wheel 解包，不是源码树，也没有手改。
+混世代的原因：`install_skills` 只在目标不存在时才拷贝，已存在的永不更新，于是一代代只补新增的。
+
+复核：`stale_skills()` 对两个目录均返回 **0 stale**；两个目录里其它技能（`pdfdl-ops`、
+`paper-reader`、`acceptance-testing` 等）的 mtime 未变，未被触碰。
