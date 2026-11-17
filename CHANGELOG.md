@@ -4,7 +4,26 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.12.57] - 2026-11-18
+
+### Fixed — the DSH bundle was refused by DSH 0.2.2-rc.3
+
+DSH moved to `0.2.2-rc.3` and the bundle stayed pinned to `0.2.2-rc.2`. The install survived
+it, the plugin still showed `enabled: true`, and the tools were simply absent:
+
+```
+error.code: incompatible-version
+runtimeVersion: 0.2.2-rc.3   requirements.engines.dsh: 0.2.2-rc.2   rows: []
+```
+
+`@deepseek-ai/dsh-mcp-client` declares its ten core peers at **exact** versions, so a bundle
+is usable on one DSH build only. The dependency and `engines.dsh` are now both `0.2.2-rc.3`.
+This is not a one-off: **every DSH release needs a matching bundle release**, which is the
+price of exact peers and the reason `engines.dsh` is exact too (a range would accept a core
+the pinned client cannot run on — that is what made the 0.2.2-rc.2 breakage silent).
+
+Users still on DSH `0.2.2-rc.2` should keep 0.12.56; 0.12.57 is refused there explicitly
+rather than failing later.
 
 ### Fixed — the quoted price of an action was wrong for Web of Science
 
