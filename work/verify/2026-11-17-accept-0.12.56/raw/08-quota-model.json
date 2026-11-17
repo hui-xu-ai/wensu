@@ -1,0 +1,23 @@
+{
+  "_purpose": "配额计量单位的取证：1 配额 = 1 个『网络动词』，不是 1 次检索",
+  "_code": "core/planner.py:74-82 `network = action.verb in NETWORK_VERBS` → policy.wait_turn() → state.used += 1（policy.py:250-293）",
+  "_audit_tally_2026-11-17": {
+    "cnki search (成功的那次)": {"goto": 1, "type": 1, "click": 1, "wait_for": 1, "sleep": 1, "read_html": 1, "network_units": 3},
+    "cnki detail (URL 首次)": {"goto": 1, "wait_for": 1, "read_html": 1, "network_units": 1},
+    "cnki detail (裸 DOI)": {"search: goto/type/click": 3, "detail: goto": 1, "network_units": 4},
+    "webofscience search": {"goto": 1, "type": 1, "click": 6, "wait_for": 6, "sleep": 7, "network_units": 8}
+  },
+  "_charges_observed": {
+    "cnki_search": 3,
+    "cnki_detail_first": 1,
+    "cnki_detail_by_doi": 4,
+    "wos_search": 8,
+    "wos_detail_seeded": 0,
+    "cache_hit_searches": 0
+  },
+  "_conclusion": [
+    "计量单位是网络动词（goto/type/click），sleep/wait_for/read_html 不计费 —— 与 audit.jsonl 逐条可核对",
+    "status.action_cost 与 SKILL 价目表写 WoS 检索=4，实测 8（计划里有 6 次 click，见 07-plan-cost.txt 的 21 个动作）",
+    "裸 DOI 走『检索(3)+详情(1)』= 4，而同一篇用 URL 调只要 1；SKILL L16 把 detail 的花费写成『缓存 0 / 现场 1』，对 DOI 路径低估 4 倍"
+  ]
+}

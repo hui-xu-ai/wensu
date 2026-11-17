@@ -1,0 +1,10 @@
+--- cnki
+  search (default sort, page 1)    = 3  ['goto', 'type', 'click']
+  search page 2                    = 4  ['goto', 'type', 'click', 'click']
+  search + site_sort=date          = 5  ['goto', 'type', 'click', 'click', 'click']
+
+--- webofscience
+  search (default sort, page 1)    = 8  ['goto', 'type', 'click', 'click', 'click', 'click', 'click', 'click']
+  search page 2                    = refused: ChannelError: the export path reads one page per export; going deeper is what `exclude_ut` is for — it reruns the expression without the records you already have instead of paying for a page turn
+  search + site_sort=date          = 10  ['goto', 'type', 'click', 'click', 'click', 'click', 'click', 'click', 'click', 'click']
+

@@ -1,0 +1,12 @@
+{
+  "_call": "mcp__wensu__detail {url:'<同上>', fields:['title','doi']}",
+  "_purpose": "验证『同一 URL 第二次取 free』+『fields 投影后 url/配额对总是保留』",
+  "title": "柔性可穿戴腕关节康复手套构型设计与控制策略研究",
+  "doi": "10.13841/j.cnki.jxsj.2026.11.001",
+  "quota_charged": 0,
+  "quota_remaining": 295,
+  "_observations": [
+    "quota_charged=0，剩余仍是 295 —— 『重复取同一篇不再扣』成立",
+    "fields=['title','doi'] 生效；url 与 quota 对被强制保留，与 tools.json 的承诺一致"
+  ]
+}

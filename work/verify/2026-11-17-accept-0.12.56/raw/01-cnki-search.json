@@ -1,0 +1,22 @@
+{
+  "_call": "mcp__wensu__search {query:'柔性 驱动器', channel:'cnki', limit:5}",
+  "_when": "2026-11-17 21:48 (+08)",
+  "_note": "records trimmed to identity-bearing fields; envelope verbatim",
+  "total": 2141,
+  "page": 1,
+  "page_count": 108,
+  "dropped_year": 0,
+  "dropped_filter": 0,
+  "empty_reason": null,
+  "cache_hit": false,
+  "query_effective": "SU='柔性 驱动器'",
+  "quota_charged": 3,
+  "quota_remaining": 296,
+  "records": [
+    {"title":"柔性可穿戴腕关节康复手套构型设计与控制策略研究","authors":["顾文俊","郑坤明","张秋菊","朱凌飞"],"source":"机械设计","year":2026,"downloads":55,"doi":null,"abstract":null,"keywords":[],"citations":null,"doc_type":"journal","doc_type_unified":"article","url":"https://kns.cnki.net/kcms2/article/abstract?v=zzYz819MWWgX0HGc-NfYDgkynAVio9UdivY_Edw3RMi3IbVY0tVeqrImzuU0OCSV_R__Q7jHV6Q2d5IxvBsZ5l-4-8XkvcJWXPLDKi3rTcrQi7XiSdrIAM-WBHwB25gnIjIsQmmWun0xzyRdzX8OEXLvPyEzihGNt-1_VUFO0PNcppXiPWf-dg=="},
+    {"title":"基于结构拓扑的复合柔性铰链压电驱动器设计","authors":["戴星","戴宁","龙光盼"],"source":"今日制造与升级","year":2026,"downloads":5,"doi":null,"abstract":null,"keywords":[],"citations":null,"doc_type":"journal","doc_type_unified":"article","url":"https://kns.cnki.net/kcms2/article/abstract?v=zzYz819MWWg-du42tMItrY3ZxYCRysVEVPWSKC-hnT3y7TfjSenjnP-i1eWPssNVzFJrs02wylCLovwgxhUi1cqOzBrAUgcipbInXhjZPT9oUUAlsf5LIJcKQqEkVafzG_yxuY6HahjzFlD0APOgKo1ojb0WW_KtYEjj7Ft0vEKv-dDW7PMHhA=="},
+    {"title":"无系留柔性驱动系统：驱动机理与供能控制策略综述","authors":["黄毅","王江新"],"source":"机电工程技术","year":2026,"downloads":16,"doi":null,"abstract":null,"keywords":[],"citations":null,"doc_type":"journal","doc_type_unified":"article","url":"https://kns.cnki.net/kcms2/article/abstract?v=zzYz819MWWgGsquflvcyCB5q5ySe9GUmo4OKWpuKiHqOW27AmOzQrVdBboKlGYAN0WqVwIyqcNAeGX8_iS0SZggCBJ8dgcv291arOIE5aTxkEpj1Cr66ihpMn9yq0z0lRrrDOmYt8T2He5wAmm_0zLU5hzf7psuQqrhe-G3pSBrvKpCmme-T5A=="},
+    {"title":"一种负压驱动的自感知可变刚度软体仿人手","authors":["侯旭东","张道辉","傅昕","许乃佳","赵新刚"],"source":"机器人","year":2026,"downloads":63,"doi":null,"abstract":null,"keywords":[],"citations":null,"doc_type":"journal","doc_type_unified":"article","url":"https://kns.cnki.net/kcms2/article/abstract?v=zzYz819MWWgdhMfAYJI7J06TWiuFjY3vsWvZSH6ooBGY7iPnQ7td1QDgMkDcaxwvPOzDPxTEtdMRq1lh1vZ_ceKLsviYrpK6pkoVN8BVWQt0yV46ZtIp93avxYEx31ew4aNo4yIaNeLUznog3TokT2mzkJWW6bXyFkonEdRSDhqIlbxiVIUeJA=="},
+    {"title":"新一代柔性自适应机翼技术发展现状与趋势","authors":["黄雄","陶丹"],"source":"中国军转民","year":2026,"downloads":39,"doi":null,"abstract":null,"keywords":[],"citations":null,"doc_type":"journal","doc_type_unified":"article","url":"https://kns.cnki.net/kcms2/article/abstract?v=zzYz819MWWiCsM7jPmilQBYa8VpueUwOgmDBLDGwqoHKDuaaird13qeIp5pNAuqheaq7c5cArt_hYN0izDrkXdj9rcewFhvQsnAdZGZHFqJgzF-NV3mgDc60yjwBEZSUxR70lp8eQg_r-UbF4VEl_YUenMhKXlKC0DYCcFkZkbWzG3yT_GDFag=="}
+  ]
+}

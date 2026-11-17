@@ -1,0 +1,12 @@
+cnki: 7 actions -> 7 quota units (1 unit = 1 reserved slot)
+  verbs: ['goto', 'sleep', 'wait_for', 'type', 'click', 'wait_for', 'read_html']
+  query_effective: SU='柔性 驱动器'
+
+webofscience: 21 actions -> 21 quota units (1 unit = 1 reserved slot)
+  verbs: ['goto', 'sleep', 'wait_for', 'type', 'sleep', 'click', 'sleep', 'wait_for', 'sleep', 'click', 'wait_for', 'sleep', 'click', 'wait_for', 'sleep', 'click', 'wait_for', 'click', 'wait_for', 'sleep', 'click']
+  query_effective: (TS=(ionic AND actuator)) AND PY=(2024-2026)
+
+webofscience: 21 actions -> 21 quota units (1 unit = 1 reserved slot)
+  verbs: ['goto', 'sleep', 'wait_for', 'type', 'sleep', 'click', 'sleep', 'wait_for', 'sleep', 'click', 'wait_for', 'sleep', 'click', 'wait_for', 'sleep', 'click', 'wait_for', 'click', 'wait_for', 'sleep', 'click']
+  query_effective: TS=(ionic AND actuator) AND PY=(2024-2026)
+

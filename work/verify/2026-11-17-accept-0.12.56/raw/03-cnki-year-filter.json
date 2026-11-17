@@ -1,0 +1,27 @@
+{
+  "_call": "mcp__wensu__search {query:'柔性 驱动器', channel:'cnki', limit:5, year_from:2025, year_to:2025}",
+  "_purpose": "验证『CNKI 年份只做本地过滤、命中缓存』+『空结果长什么样』+ dropped_* 的分母",
+  "records": [],
+  "total": 2141,
+  "page": 1,
+  "page_count": 108,
+  "dropped_year": 20,
+  "dropped_filter": 0,
+  "empty_reason": "all_dropped_by_year",
+  "cache_hit": true,
+  "query_effective": "SU='柔性 驱动器'",
+  "filters": {
+    "year_from": 2025,
+    "year_to": 2025,
+    "year_scope": "page",
+    "dropped": {"year": 20}
+  },
+  "quota_charged": 0,
+  "quota_remaining": 296,
+  "_observations": [
+    "文档断言成立：CNKI 改年份命中缓存、不重新检索（cache_hit=true, quota_charged=0）",
+    "filters.year_scope='page' 明确标注了年份只作用于当前页 —— 清晰",
+    "空结果不是『没有文献』：total 仍是 2141，empty_reason=all_dropped_by_year，与 SKILL 表格一致",
+    "【缺陷候选 S4】传 limit=5，dropped_year 却是 20：分母是抓到的整页（20 行），不是 limit 截断后的 5 条。page_count=108 ⇒ 2141/20≈107 印证每页 20 行。文档从未说明这一点，调用方会以为统计口径是返回值"
+  ]
+}

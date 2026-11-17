@@ -1,0 +1,22 @@
+{
+  "_call": "mcp__wensu__search {query:'柔性 驱动器', channel:'cnki', limit:5, local_sort:'citations', fields:['title','citations','year']}",
+  "_purpose": "验证『local_sort 免费 / 重复调用命中缓存 / fields 投影』这三条断言",
+  "total": 2141,
+  "cache_hit": true,
+  "quota_charged": 0,
+  "quota_remaining": 296,
+  "filters": {"sort_by": "citations"},
+  "records": [
+    {"title":"柔性可穿戴腕关节康复手套构型设计与控制策略研究","year":2026,"citations":null},
+    {"title":"基于结构拓扑的复合柔性铰链压电驱动器设计","year":2026,"citations":null},
+    {"title":"无系留柔性驱动系统：驱动机理与供能控制策略综述","year":2026,"citations":null},
+    {"title":"一种负压驱动的自感知可变刚度软体仿人手","year":2026,"citations":null},
+    {"title":"新一代柔性自适应机翼技术发展现状与趋势","year":2026,"citations":null}
+  ],
+  "_observations": [
+    "cache_hit=true, quota_charged=0 → 『同一条检索式重复调用免费』成立",
+    "fields 投影生效：记录只剩 title/year/citations + url（url 如文档所说总是保留）",
+    "filters 回显用的是旧键名 sort_by（我传的是 local_sort）——命名不一致，见 RESULT S4",
+    "CNKI 列表行 citations 全为 null → local_sort:'citations' 在本渠道上没有任何排序效果，且不提示"
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "_call": "mcp__wensu__detail {url:'https://kns.cnki.net/kcms2/article/abstract?v=zzYz819MWWgX0HGc-NfYDgkynAVio9UdivY_Edw3RMi3IbVY0tVeqrImzuU0OCSV_R__Q7jHV6Q2d5IxvBsZ5l-4-8XkvcJWXPLDKi3rTcrQi7XiSdrIAM-WBHwB25gnIjIsQmmWun0xzyRdzX8OEXLvPyEzihGNt-1_VUFO0PNcppXiPWf-dg=='}",
+  "_purpose": "验证『知网检索不预热详情缓存，首次 detail 扣 1；同 URL 再取扣 0』",
+  "title": "柔性可穿戴腕关节康复手套构型设计与控制策略研究",
+  "authors": ["顾文俊","郑坤明","张秋菊","朱凌飞"],
+  "institution": "1.江南大学智能制造学院 2.江苏省食品先进制造装备与技术重点实验室 3.江苏佳利达国际物流股份有限公司 4.南京信息工程大学电子与信息工程学院",
+  "source": "机械设计",
+  "year": 2026,
+  "volume": "43",
+  "issue": "11",
+  "pages": "21-26",
+  "doi": "10.13841/j.cnki.jxsj.2026.11.001",
+  "abstract": null,
+  "keywords": ["康复手套","柔性驱动器","模糊PID"],
+  "citations": null,
+  "downloads": null,
+  "doc_type": "journal",
+  "doc_type_unified": "article",
+  "fetched_at": "2026-11-17T13:48:55.698239+00:00",
+  "quota_charged": 1,
+  "quota_remaining": 295,
+  "_observations": [
+    "首次 detail 扣 1（295）—— 与文档『知网列表不播种详情』一致；WoS 的对照见 06",
+    "卷期页码齐全：43(11):21-26；DOI 可复核；institution 4 个单位带序号",
+    "abstract=null（默认关闭）：要摘要必须显式 include_abstract=true",
+    "downloads 在详情页为 null，而列表行是 55 —— 与 SKILL『列表页才有』一致，不是缺陷"
+  ]
+}
