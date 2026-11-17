@@ -48,10 +48,10 @@ $ver = '<版本>'
 $root = "$env:LOCALAPPDATA\scholar-search\installations\$ver"
 python -m venv "$root\venv"          # 或复制现有 venv 再替换 site-packages
 & "$root\venv\Scripts\python.exe" -m pip install .\dist\wensu-$ver-py3-none-any.whl
-& "$root\venv\Scripts\python.exe" -m scholar_search.cli assets --target "$root\browser"
 
-# 2) 注册原生宿主（写清单 + HKCU 注册 + 低完整性标签）
-pwsh "$root\browser\native-host\install.ps1" -Python "$root\venv\Scripts\python.exe"
+# 2) 导出资源 + 注册原生宿主（写清单 + HKCU 注册 + 低完整性标签）
+#    资源与安装包一致时这一步只做宿主部分，不一致才替换；不需要 --force
+& "$root\venv\Scripts\python.exe" -m scholar_search.cli setup --target "$root\browser" --browser none
 
 # 3) 装扩展：edge://extensions → 开发者模式 → 加载解压缩 → $root\browser\extension
 # 4) 验证
@@ -82,11 +82,8 @@ Expand-Archive .\dist\wensu-$new-py3-none-any.whl -DestinationPath .\wheel-new
 Remove-Item "$target\venv\Lib\site-packages\scholar_search*","$target\venv\Lib\site-packages\wensu-*" -Recurse -Force
 Copy-Item .\wheel-new\scholar_search* "$target\venv\Lib\site-packages\" -Recurse -Force
 
-# 3) 刷新浏览器资源并重注册宿主
-Copy-Item .\native-host\* "$target\browser\native-host\" -Force
-Copy-Item .\extension\* "$target\browser\extension\" -Recurse -Force
-Copy-Item .\schemas\* "$target\browser\schemas\" -Recurse -Force
-pwsh "$target\browser\native-host\install.ps1" -Python "$target\venv\Scripts\python.exe"
+# 3) 刷新资源并重注册宿主：内容与安装包一致时只做宿主部分，不一致才替换（无需 --force）
+& "$target\venv\Scripts\python.exe" -m scholar_search.cli setup --target "$target\browser" --browser none
 
 # 4) 更新 MCP 客户端里的解释器路径（Codex / DSH bundle / Claude Desktop …）
 #    扩展一般不用重装：只有 extension/ 的 JS 或 manifest.json 变了才重载
@@ -97,8 +94,11 @@ pwsh "$target\browser\native-host\install.ps1" -Python "$target\venv\Scripts\pyt
 升级后确认三件事：
 
 1. `status` 里 `bridge_ready: true`；
-2. 版本号正确：`python -m scholar_search.cli --version`；
-3. 跑一次真实检索（会花 3 个配额）。
+2. 版本号两处都对：`python -m scholar_search.cli --version` 与 `status.version`；扩展副本看
+   `status.browser_profile.extension_version`（与本版本不同时会带
+   `extension_version_mismatch: true`）——不一致就跑一次 `wensu setup`，再到 `edge://extensions`
+   点「重新加载」；
+3. 跑一次真实检索（知网 3 个配额 / WoS 8 个）。
 
 ## 5. 回滚
 
@@ -114,8 +114,9 @@ pwsh "$target\browser\native-host\install.ps1" -Python "$target\venv\Scripts\pyt
 ## 6. 常用命令
 
 ```powershell
-wensu status                 # 渠道、剩余配额、冷却、桥接是否就绪
-wensu assets --target .\b --force
+wensu status                 # 渠道、剩余配额、冷却、桥接是否就绪、扩展副本版本
+wensu setup                  # 刷新资源副本 + 重写宿主清单（内容一致的部分会跳过）
+wensu assets --target .\b    # 只导出资源（同名目录内容一致时跳过，不同则替换）
 wensu reset --confirm        # 人工完成验证后清除冷却（显式、不可撤销）
 wensu serve --transport stdio
 wensu serve --transport http --host 127.0.0.1 --port 8765

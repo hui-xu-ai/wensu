@@ -1,7 +1,15 @@
 # Connecting to DeepSeek Harness
 
-Two transports are supported. Both expose the same four tools: `search`, `detail`,
-`export`, `status`.
+Two transports are supported. Both expose the same five tools: `search`, `detail`,
+`detail_many`, `export`, `status`.
+
+`status` carries what an integration needs to decide before spending anything: `version`
+(the package), `bridge_protocol`, `channel_capabilities` / `detail_capabilities` (what each
+endpoint can actually fill), `quota_remaining`, `cooldown_until`, `action_cost` (the price
+of each action, per channel — one unit is one network action), and
+`browser_profile.extension_version` / `extension_version_mismatch`: the extension copy the
+browser loads versus this build. A mismatch (`true`) means the copied assets are older than
+the package — run `wensu setup`, then reload the extension.
 
 ## DSH bundle (recommended when the client is DSH)
 

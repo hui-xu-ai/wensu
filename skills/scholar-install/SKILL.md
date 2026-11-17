@@ -53,10 +53,20 @@ python -m venv "$root\venv"
 ### 3. 导出浏览器资源
 
 ```powershell
-& "$root\venv\Scripts\python.exe" -m scholar_search.cli assets --target "$root\browser" --force
+# 一步到位：导出资源（内容一致则跳过、不同则替换）+ 注册原生宿主
+& "$root\venv\Scripts\python.exe" -m scholar_search.cli setup --target "$root\browser" --browser none
+```
+
+只想导出资源（不碰宿主）就用 `assets`：
+
+```powershell
+& "$root\venv\Scripts\python.exe" -m scholar_search.cli assets --target "$root\browser"
 ```
 
 期望 `$root\browser\` 下出现 `native-host\`、`extension\`、`schemas\`。
+
+**升级时不需要 `--force`**：目标目录内容与安装包不同就替换、相同就跳过。`--force-assets` 只在
+「文件可疑、连相同也要重刷」时用；`--force-skills` 会**删掉本地改过的技能**，别乱加。
 
 ### 4. 注册原生宿主
 

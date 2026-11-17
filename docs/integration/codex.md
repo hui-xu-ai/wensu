@@ -26,7 +26,9 @@ wensu assets --target .\browser
 pwsh .\browser\native-host\install.ps1
 ```
 
-`assets` 默认拒绝覆盖已有目录；升级时显式加 `--force`。
+`assets` 只导出资源：目标已存在且内容与发行包一致时**跳过**，不一致时**替换**（这是升级路径，不需要
+任何标志）。要连宿主清单与注册表项一起处理，直接用 `wensu setup`；`--force-assets` 用于「文件可疑、
+连相同也要重刷」。
 
 ## 2. MCP 配置模板
 

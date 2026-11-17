@@ -157,19 +157,24 @@ wensu serve --transport http --host 127.0.0.1 --port 8765
 
 ```powershell
 pip install --upgrade wensu
-wensu setup --force
+wensu setup            # 刷新资源副本 + 重写宿主清单与注册表项
 # 重启 MCP 客户端，让它重新拉起 server 进程
 ```
 
 要点：
 
 - **必须重启 MCP 客户端**。server 是 stdio 子进程，模块在启动时导入，换文件不会热生效。
+- **`wensu setup` 自己判断要不要刷新**：复制出去的资源与 wheel 里的一致时它什么都不做
+  （打印 `already matches this build`），不一致就替换并提示重载扩展——**这一步不需要 `--force`**。
+  过去不带 `--force` 会直接跳过并仍然返回 0，于是副本停在旧版本而没人发现。
 - 扩展**通常不用重装**：Python 侧改动不影响扩展；只有 `extension/` 里的 JS 或
-  `manifest.json` 变了才需要重新加载扩展。
-- 原生宿主在升级后要重跑 `wensu setup --force`（它负责写清单、注册表项和低完整性标签）。
-- **`--force` 只覆盖复制出去的资源，不动已记录的浏览器配置**。如果你用
-  `wensu browser adopt` 指定过专用 profile，升级后它仍然有效。要连浏览器配置一起重置，
-  用 `wensu setup --force --reset-browser`——这会把 `browser.json` 换成默认的
+  `manifest.json` 变了才需要重新加载扩展。重载后 `wensu status` 里
+  `browser_profile.extension_version_mismatch` 应为 `false`。
+- **两个 `--force` 分开了**：`--force-assets` 连「内容相同」的副本也重刷（文件可疑时用）；
+  `--force-skills` 替换已存在的技能目录，**会删掉你对 `SKILL.md` 的本地修改**。不加 `--force-skills` 时，
+  `setup` 只报告「N 个技能与本版本不同」，不擅自覆盖。
+- **`--force` 不再动浏览器配置**。如果你用 `wensu browser adopt` 指定过专用 profile，升级后它仍然有效。
+  要连浏览器配置一起重置，用 `--reset-browser`——这会把 `browser.json` 换成默认的
   `profiles/edge`，原来的窗口和已经装好的扩展不会跟着迁移。
 
 完整流程、目录布局与回滚见 [docs/operations.md](docs/operations.md)。
