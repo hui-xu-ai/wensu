@@ -196,3 +196,20 @@
 
 复核：`stale_skills()` 对两个目录均返回 **0 stale**；两个目录里其它技能（`pdfdl-ops`、
 `paper-reader`、`acceptance-testing` 等）的 mtime 未变，未被触碰。
+
+## 11. 运行时残留清理（2026-11-18）
+
+删前逐项核对引用，删后复核：
+
+| 项 | 大小 / 文件 | 引用情况 | 处理 |
+|---|---|---|---|
+| `browser\extension.bak-0.4.2` | 0 MB / 3 | 无（`browser.json` 指 `browser\extension`；代码里无 `.bak` 逻辑） | **已删** |
+| `profiles\edge` | 93.7 MB / 1181 | 无（profile 记的是 `E:\LiteratureEdgeProfile`；无 msedge 进程使用） | **已删**（`profiles\` 现为空目录） |
+| `installations\0.12.48` | 56.6 MB / 2351 | **活的**：注册表原生宿主 manifest → `...\0.12.48\browser\native-host\scholar-host.exe`；`host.log` 的 cwd 即此；`python-path.txt` → 其 venv（内含包 0.12.56） | **保留** |
+
+删后复核：`browser.json` 两个路径都在（扩展 0.12.56）；注册表 manifest、`scholar-host.exe`、
+`python-path.txt` 指向的 venv 全部存在；`status` 仍 `bridge_ready: true`、配额 283。
+
+遗留观察（未动）：`installations\0.12.48` 目录名与内容不符；`browser\native-host\python-path.txt`
+当前指向仓库 `.venv`（我的 assets 刷新从仓库带过来的），它未被注册，但若从 home 副本重注册宿主
+会指到开发环境 —— 部署时应写入真实 python 路径。
