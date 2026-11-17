@@ -28,6 +28,10 @@ jobs:
         # Four artefacts ship under one version number. A release that bumps only
         # some of them is the failure this catches.
         run: python scripts/check-versions.py
+      - name: Tool schema is current
+        # schemas/tools.json is generated from the server; a stale copy advertises
+        # parameters the server does not have (it had drifted by three).
+        run: python scripts/dump-tools.py --check
       - name: Type check
         run: mypy src
       - name: Tests (no live browser)

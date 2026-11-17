@@ -56,6 +56,14 @@ def check_versions() -> tuple[bool, str]:
     return ok, last
 
 
+def check_tool_schema() -> tuple[bool, str]:
+    """`schemas/tools.json` is generated; a stale copy is a published lie."""
+
+    ok, output = _run([_python(), str(ROOT / "scripts" / "dump-tools.py"), "--check"])
+    last = output.splitlines()[-1] if output else ""
+    return ok, last
+
+
 def check_changelog() -> tuple[bool, str]:
     text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     version = re.search(
@@ -159,6 +167,7 @@ def check_artifacts() -> tuple[bool, str]:
 
 CHECKS = [
     ("versions", "four artefacts share one number", check_versions),
+    ("tool-schema", "schemas/tools.json matches the server", check_tool_schema),
     ("changelog", "the version being released is documented", check_changelog),
     ("tests", "offline suite", check_tests),
     ("lint", "ruff check", check_lint),

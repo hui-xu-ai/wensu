@@ -2,154 +2,421 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/scholar-search/scholar-search/schemas/tools.json",
   "title": "scholar-search MCP tools",
-  "description": "Stable tool surface. Channel upgrades must not change these schemas.",
+  "description": "Generated from the running server by scripts/dump-tools.py; do not edit by hand. scripts/dump-tools.py --check runs in the tests, in release-check and in CI, and fails when this file is stale.",
   "tools": [
     {
       "name": "search",
-      "description": "Search a channel for bibliographic records. Read-only. Returns a shortlist by default: abstracts are omitted unless include_abstract is true, and sort_by / min_citations / sources_only filter the parsed records locally without a browser action. Call detail(url) for the full record — after a search it is served from the cache. With channel=webofscience, query may be a Web of Science expression (e.g. TS=(actuator) AND PY=(2021-2026)); when no year range is given the last five years are used, and the span is applied inside the expression rather than through page filters.",
+      "description": "Search a channel for bibliographic records. Read-only.\n\nchannel: \"cnki\" (default; Chinese literature, Chinese queries) or\n\"webofscience\" (English literature; also accepts a Web of Science expression\nsuch as TS=(ionic AND actuator) AND PY=(2021-2026) — with no year range the\nlast five years are applied inside the expression).\n\nReturns a shortlist by default: abstracts are omitted unless\ninclude_abstract is true, and sort_by / min_citations / sources_only filter\nlocally without any browser action. For the full record call detail(url), which\ninfers the channel from the URL.\n\n**Whether `detail` is free depends on the channel.** A Web of Science search\ncaptures full records, so a following `detail` is served from the cache at no\ncost; a CNKI search captures only the list, so the first `detail` for a record\nstill needs one network action. Asking twice for the same record is always\nfree.\n\nAn empty records list is a normal answer, not a failure: read `total` and\n`dropped_year` before concluding that a topic has no papers.\n\n**To get more records, the channel decides which lever exists.** Web of\nScience has `exclude_ut`: pass back the UT values you already have (the last\nsegment of each record's `url`) and the same query returns the records you\nhave not seen. Do that rather than asking for a deeper `page` — each\nexclusion call is one independent request, while each page turn re-submits the\nquery and keeps a result list open. CNKI has no exclusion field, so `page` is\nhow you go further there.\n\n**`total` is the site's count for the query, before any local filter.** With\na year range applied, `total: 363` alongside nine records does NOT mean\n\"363 papers in that year\" — it means the site matched 363 and this page lost\n11 of its 20 to the year filter. `filters.year_scope: \"page\"` says so\nexplicitly, and `filters.dropped.year` gives the count. To get a year-accurate\ntotal, put the year in the query (`PY=(2026)` on Web of Science,\n`SU='x' and 年='2026'` on CNKI) or use `site_sort=date` and read the newest\npage. `empty_reason: \"all_dropped_by_year\"` is the case where the whole page\nwas filtered away.\n\nmin_impact_factor is honoured by channels that ship journal metrics\n(currently webofscience); records whose journal has no metric are dropped,\nwhich lowers recall by design.\n\nTwo parameters sort and they are not interchangeable:\n\n* `site_sort` (`relevance` / `date` / `citation`) asks the site to re-sort.\n  That is two extra clicks and costs quota.\n* `local_sort` (`none` / `citations` / `year`) re-orders the page already in\n  hand: free, no browser action, no quota.\n\n**Which parameters cost a fetch.** The fetched page is cached as the site\nreturned it, and every local view is derived from it, so these are free even\nwhen they change: `limit`, `include_abstract`, `sort_by` / `local_sort`,\n`min_citations`, `min_impact_factor`, `sources_only`, `fields`. These are a\ndifferent request and cost a fetch: `query`, `channel`, `site_sort`, `page`,\n`year_from` / `year_to`, `exclude_ut`.\n\nThe older names `sort` and `sort_by` still work and mean the same thing; the\nnew names say which one is which.\n\n`fields` projects each record to the listed keys (plus `url`, which `detail`\nneeds). `include_abstract` on 25 rows is tens of kilobytes; most callers want\na title, a year and a DOI.\n\n`count_only` drops `records` entirely and returns the count plus the\ndiagnostics that explain it. Testing whether an expression parses and matches\nanything should not cost a full page of context: the recorded advice was\n`limit: 1, fields: [\"title\"]`, which still returns a record.",
       "inputSchema": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["query"],
         "properties": {
-          "query": { "type": "string", "minLength": 1 },
-          "channel": { "type": "string", "default": "cnki" },
-          "site_sort": {
-            "enum": ["relevance", "date", "citation"],
-            "description": "Ask the SITE to re-sort the whole result set: two extra clicks on top of the search (CNKI 5, Web of Science 10). For ordering the current page only, use `local_sort`, which is free."
+          "query": {
+            "title": "Query",
+            "type": "string"
           },
-          "page": { "type": "integer", "minimum": 1, "maximum": 3, "default": 1 },
-          "year_from": { "type": ["integer", "null"] },
-          "year_to": { "type": ["integer", "null"] },
+          "channel": {
+            "default": "cnki",
+            "title": "Channel",
+            "type": "string"
+          },
+          "sort": {
+            "default": "relevance",
+            "enum": [
+              "relevance",
+              "date",
+              "citation"
+            ],
+            "title": "Sort",
+            "type": "string"
+          },
+          "page": {
+            "default": 1,
+            "description": "Page of the site's own result list. **Reach for `exclude_ut` first on Web of Science** — see below. Use `page` when a channel has no exclusion field (CNKI), or when you need a few more records and the query is already narrow. Each turn re-submits the search and opens the next page, so it is not a way to walk a large result set.",
+            "maximum": 3,
+            "minimum": 1,
+            "title": "Page",
+            "type": "integer"
+          },
+          "year_from": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Year From"
+          },
+          "year_to": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Year To"
+          },
           "source_types": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": ["article", "review", "proceedings", "journal", "thesis", "book"]
-            },
-            "description": "Document types to keep. Values are the normalised vocabulary; a channel that does not implement this rejects the request rather than ignoring it."
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Types"
+          },
+          "limit": {
+            "default": 20,
+            "description": "Records per page, 1..50.",
+            "maximum": 50,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "include_abstract": {
+            "default": false,
+            "title": "Include Abstract",
+            "type": "boolean"
+          },
+          "sort_by": {
+            "default": "none",
+            "enum": [
+              "none",
+              "citations",
+              "year"
+            ],
+            "title": "Sort By",
+            "type": "string"
+          },
+          "min_citations": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Min Citations"
           },
           "sources_only": {
-            "type": "array",
-            "items": { "type": "string" },
-            "description": "Exact source (journal) names to keep, matched case-insensitively."
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sources Only"
           },
-          "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 20 },
-          "include_abstract": { "type": "boolean", "default": false },
+          "min_impact_factor": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Min Impact Factor"
+          },
+          "site_sort": {
+            "anyOf": [
+              {
+                "enum": [
+                  "relevance",
+                  "date",
+                  "citation"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Site Sort"
+          },
           "local_sort": {
-            "enum": ["none", "citations", "year"],
-            "description": "Re-order the page already in hand: free, no browser action, no quota (0). Orders only this page, not the whole result set — use `site_sort` for that."
+            "anyOf": [
+              {
+                "enum": [
+                  "none",
+                  "citations",
+                  "year"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Local Sort"
+          },
+          "exclude_ut": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Records to leave out, by UT identifier (Web of Science only). **This is the way to go deeper on WoS**: pass the UTs you already have and the same query returns the ones you have not seen. Each call is an independent request, and the set shrinks predictably (38 records, exclude 5 → total 33). `page` still exists for channels without an exclusion field.",
+            "title": "Exclude Ut"
           },
           "fields": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": [
-                "channel", "title", "authors", "institution", "source", "year",
-                "volume", "issue", "pages", "doi", "abstract", "keywords",
-                "citations", "downloads", "impact_factor", "url", "fetched_at",
-                "doc_type", "doc_type_unified"
-              ]
-            },
-            "description": "Project each record to these keys. `url` is always kept because `detail` needs it. `institution` and `impact_factor` are usually only populated by `detail`, not by a list row — see `status.detail_capabilities`. Unknown keys are rejected rather than silently ignored."
+            "anyOf": [
+              {
+                "items": {
+                  "description": "A record field to keep. `url` and the quota pair are always kept.",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Keep only these keys. `url` and the quota pair are always kept, so a projected record can still be followed.",
+            "title": "Fields"
           },
           "count_only": {
-            "type": "boolean",
             "default": false,
-            "description": "Drop `records` and return only the count plus the fields that explain it (total, query_effective, empty_reason, dropped_year, filters). Use this to test whether an expression parses and matches anything before paying for a page."
-          },
-          "min_citations": { "type": ["integer", "null"], "minimum": 0 },
-          "min_impact_factor": { "type": ["number", "null"], "minimum": 0 }
-        }
+            "title": "Count Only",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "searchArguments",
+        "type": "object",
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "searchDictOutput",
+        "type": "object"
       }
     },
     {
       "name": "detail",
-      "description": "Fetch full metadata for one record, by detail URL or by DOI. `include_abstract` defaults to false, matching search: an abstract is 60-80% of the response. `fields` projects the rest.",
+      "description": "Fetch full metadata for one record.\n\n`url` may be either the URL `search` returned, or a bare DOI such as\n`10.13841/j.cnki.jxsj.2026.11.001`. CNKI detail URLs are several hundred\ncharacters of encrypted signature — this one has no parameters but `v=` —\nso passing them back verbatim is easy to truncate. A DOI is short, stable and\nalready in every record.\n\n**`include_abstract` defaults to false**, matching `search`: a CNKI abstract\nruns about 1200 characters and a WoS one about 1000, which is most of what a\ndetail response weighs. A caller that wants the volume, issue, pages and DOI\nshould not pay for text it will not read. `fields` projects the rest, and\nalways keeps `url` so the record stays followable.\n\nA DOI costs one extra search to resolve into a URL, because that is the only\nway to reach the detail page. A URL that is already cached costs nothing.\n\n`channel` is optional: it is inferred from the URL's host, or from the DOI\nprefix. Pass it only to override that inference.",
       "inputSchema": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["url"],
         "properties": {
           "url": {
-            "type": "string",
-            "minLength": 1,
-            "description": "Either the URL `search` returned, or a bare DOI such as 10.13841/j.cnki.jxsj.2026.11.001. A DOI is resolved by running a search first, so it costs that search plus the detail fetch (CNKI: 4) — pass the `url` from a result when you have one, which is 1 or 0."
+            "title": "Url",
+            "type": "string"
           },
           "channel": {
-            "type": ["string", "null"],
-            "description": "Usually omit: inferred from the URL host, or from the DOI prefix."
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Channel"
           },
           "include_abstract": {
-            "type": "boolean",
             "default": false,
-            "description": "Return the full abstract. Off by default: about 1200 characters on CNKI, 1000 on WoS."
+            "title": "Include Abstract",
+            "type": "boolean"
           },
           "fields": {
-            "type": "array",
-            "items": { "type": "string" },
-            "description": "Project to these keys. `url`, `quota_charged` and `quota_remaining` are always kept."
+            "anyOf": [
+              {
+                "items": {
+                  "description": "A record field to keep. `url` and the quota pair are always kept.",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Keep only these keys. `url` and the quota pair are always kept, so a projected record can still be followed.",
+            "title": "Fields"
           }
-        }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "detailArguments",
+        "type": "object",
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "detailDictOutput",
+        "type": "object"
       }
     },
     {
       "name": "detail_many",
-      "description": "Fetch several records in one call. Sequential on purpose: the policy layer serialises network actions anyway. A failure on one record does not abandon the rest, so a caller can retry only the ones that failed.",
+      "description": "Fetch several records in one call.\n\nEach lookup costs the same as `detail` and they run in sequence on purpose:\nthe policy layer serialises network actions anyway, so firing them in\nparallel would only queue them while each held a timeout budget.\n\n`include_abstract` and `fields` behave as in `detail`. A batch of twelve\nabstracts is roughly 14 KB, so the default is off here too — this is the call\nthat most needs it, since the cost multiplies by the batch size.\n\nA failure on one record does not abandon the rest — the response is\n`{\"results\": [{\"url\", \"ok\", \"record\"|\"error\"}], \"ok_count\", \"failed_count\"}`,\nso a caller can retry just the ones that failed.\n\n**A risk block is the exception**: it stops the batch. `detail` returns a\n`status: \"blocked\"` payload rather than raising, so this loop used to file it\nunder `ok: true` and carry on — reporting a batch as successful while the\nsite was asking the caller to stop. AGENTS.md requires stopping on a block,\nand a batch that keeps visiting after one is exactly the behaviour that rule\nexists to prevent.",
       "inputSchema": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["urls"],
         "properties": {
           "urls": {
-            "type": "array",
-            "items": { "type": "string" },
-            "minItems": 1,
-            "description": "Detail URLs from `search`, or bare DOIs such as 10.13841/j.cnki.jxsj.2026.11.001. A DOI costs one extra search to resolve."
+            "items": {
+              "type": "string"
+            },
+            "title": "Urls",
+            "type": "array"
           },
           "channel": {
-            "type": ["string", "null"],
-            "description": "Usually omit: inferred per item from the URL host or the DOI prefix."
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Channel"
           },
           "include_abstract": {
-            "type": "boolean",
             "default": false,
-            "description": "Return each abstract. Off by default, and this is where it matters most: twelve abstracts is roughly 14 KB."
+            "title": "Include Abstract",
+            "type": "boolean"
           },
           "fields": {
-            "type": "array",
-            "items": { "type": "string" },
-            "description": "Project each record to these keys, as in `detail`."
+            "anyOf": [
+              {
+                "items": {
+                  "description": "A record field to keep. `url` and the quota pair are always kept.",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Keep only these keys on each record. `url` and the quota pair are always kept.",
+            "title": "Fields"
           }
-        }
+        },
+        "required": [
+          "urls"
+        ],
+        "title": "detail_manyArguments",
+        "type": "object",
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "detail_manyDictOutput",
+        "type": "object"
       }
     },
     {
       "name": "export",
-      "description": "Render records as RIS or EndNote text. With `out_path` the text is written to that file and omitted from the response, which is how a large export should be done; without it the text comes back inline.",
+      "description": "Render records as RIS or EndNote text.\n\nWith `out_path`, the text is written there and **not** returned: a caller\nthat wants 143 records on disk should not have to pull them through its\ncontext to do it. Without it, the text comes back inline as before.\n\n`include_abstract` defaults to false here even though the records may carry\none. An `AB` field roughly quadruples an RIS entry, and an export is usually\nfor a reference manager, which fetches abstracts on its own.",
       "inputSchema": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["records", "format"],
         "properties": {
-          "records": { "type": "array", "items": { "$ref": "record.json" } },
-          "format": { "enum": ["ris", "endnote", "markdown", "csv"] },
+          "records": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Records",
+            "type": "array"
+          },
+          "format": {
+            "default": "ris",
+            "enum": [
+              "ris",
+              "endnote",
+              "markdown",
+              "csv"
+            ],
+            "title": "Format",
+            "type": "string"
+          },
           "out_path": {
-            "type": ["string", "null"],
-            "description": "Write the text here and omit it from the response. Use this for a large export: pulling 143 records through the context just to save them is the expensive way."
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Out Path"
           },
           "include_abstract": {
-            "type": "boolean",
             "default": false,
-            "description": "Keep the abstract in each entry. Off by default: an AB field roughly quadruples an RIS entry, and reference managers fetch abstracts themselves."
+            "title": "Include Abstract",
+            "type": "boolean"
           }
-        }
+        },
+        "required": [
+          "records"
+        ],
+        "title": "exportArguments",
+        "type": "object",
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "exportDictOutput",
+        "type": "object"
       }
     },
     {
       "name": "status",
-      "description": "Session state: channels, risk cooldown, quota remaining, live bridge readiness.",
-      "inputSchema": { "type": "object", "additionalProperties": false, "properties": {} }
+      "description": "Session state: channels, cooldown, quota, bridge readiness.\n\n`brief` returns only `version`, `bridge_ready`, `bridge_last_seen`,\n`quota_remaining` and `cooldown_until`. The full payload is about 500 tokens,\nmore than a search, and three of its blocks — `channel_capabilities`,\n`detail_capabilities`, `action_cost` — are static. Poll `brief` while planning\nand read the full answer once.",
+      "inputSchema": {
+        "properties": {
+          "brief": {
+            "default": false,
+            "title": "Brief",
+            "type": "boolean"
+          }
+        },
+        "title": "statusArguments",
+        "type": "object",
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "statusDictOutput",
+        "type": "object"
+      }
     }
   ]
 }
