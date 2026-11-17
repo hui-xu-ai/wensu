@@ -102,3 +102,16 @@ def test_without_a_lookup_the_metric_is_absent_not_zero() -> None:
     record = _parse().records[0]
     assert record.impact_factor is None
     assert record.impact_factor_year is None
+
+
+def test_the_page_leaves_query_effective_to_the_channel() -> None:
+    """The expression that runs carries `AND PY=(...)`; the caller's text does not.
+
+    Filling this field with `query.text` made `query_effective` disagree with what
+    the site executed: the 0.12.56 acceptance run asked for 2024 onward,
+    `effective_query()` built `(TS=(...)) AND PY=(2024-2026)`, and the response
+    showed the bare text instead. The service fills the field from
+    `effective_query()` only when it is `None`, so the channel must leave it empty.
+    """
+
+    assert _parse().query_effective is None

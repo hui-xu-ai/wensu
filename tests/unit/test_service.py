@@ -244,3 +244,32 @@ def test_list_only_records_do_not_seed_the_detail_cache(tmp_path: Path) -> None:
     # parse_detail returns "A paper", the list row is "Paper A": seeing the
     # latter would mean the row was served from the cache and the abstract lost.
     assert detail.title == "A paper"
+
+
+class ChannelWithEffectiveQuery(FakeChannel):
+    """A channel that can name the expression it actually typed."""
+
+    def effective_query(self, query: SearchQuery) -> str:
+        return "(TS=(x)) AND PY=(2024-2026)"
+
+
+def test_a_missing_query_effective_is_filled_from_the_channel(tmp_path: Path) -> None:
+    """The channel leaves the field empty; the service completes it.
+
+    Web of Science appends `AND PY=(...)` to the expression, so the page it parses
+    reports no `query_effective` (see `parse_bibtex`). If the service stopped
+    filling it, a caller asking "did my year bound land?" would see nothing.
+    """
+
+    channel = ChannelWithEffectiveQuery(manifest=make_manifest(), records=[make_record()])
+    scripts: list[list[dict[str, object]]] = [
+        [
+            {"verb": "goto", "data": {}},
+            {"verb": "read_html", "data": {"html": "<html>results</html>"}},
+        ],
+    ]
+    service = build_service(tmp_path, channel, scripts)
+
+    page = service.search(SearchQuery(text="TS=(x)", channel="fake"))
+
+    assert page.query_effective == "(TS=(x)) AND PY=(2024-2026)"

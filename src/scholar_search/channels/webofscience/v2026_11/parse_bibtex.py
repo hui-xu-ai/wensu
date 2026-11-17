@@ -204,7 +204,12 @@ def parse(
         records=tuple(records),
         total=len(records),
         page=query.page,
-        query_effective=query.text,
+        # Left empty on purpose: the expression that ran is not `query.text`. This
+        # channel appends `AND PY=(...)` (see `query.build`), and the service fills
+        # this field from `effective_query()` when it is None. Setting it here to the
+        # raw text made the response disagree with what the site executed — a caller
+        # checking whether the year bound landed saw a bare `TS=(...)`.
+        query_effective=None,
     )
 
 
