@@ -58,7 +58,10 @@ def _filters_payload(page: Any, query: SearchQuery) -> dict[str, Any] | None:
         # Channels drop journals with no metric, which lowers recall by design.
         applied["impact_factor_drops_unrated"] = True
     if query.sort_by != "none":
-        applied["sort_by"] = query.sort_by
+        # The caller's word for it: `local_sort`. `sort_by` is accepted on input as an
+        # older alias, but echoing the alias left a caller who set `local_sort`
+        # looking at a response that never mentions it.
+        applied["local_sort"] = query.sort_by
     if query.sources_only:
         applied["sources_only"] = list(query.sources_only)
     if page.dropped_filter:
