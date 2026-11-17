@@ -131,6 +131,32 @@ Automation**（Granular 需要同时勾 Packages 与 Organizations，容易漏�
 **本地发布的坑**：凭据走 `~/.npmrc` 的 `_authToken`，**不是** `NODE_AUTH_TOKEN` 环境变量。
 `pnpm whoami` 能返回用户名再去 publish。
 
+**`whoami` 报 401 时，按这三步定位，不要重试原命令**（2026-11-18 实测浪费了三轮）：
+
+1. **换了吗？** 看 `~/.npmrc` 的修改时间 —— 如果还是几天前，那就是**根本没换过 token**，
+   后面的判断都不用做：
+
+   ```powershell
+   (Get-Item $env:USERPROFILE\.npmrc).LastWriteTime
+   ```
+
+2. **token 本身活不活？** 绕过 pnpm，直接问 registry（这一步能区分「token 死了」和
+   「pnpm 没读到」）：
+
+   ```powershell
+   $t = (Select-String -Path $env:USERPROFILE\.npmrc -Pattern '^//registry\.npmjs\.org/:_authToken=(.+)$').Matches[0].Groups[1].Value.Trim()
+   Invoke-RestMethod https://registry.npmjs.org/-/whoami -Headers @{Authorization="Bearer $t"}
+   ```
+
+   401 ⇒ 去 <https://www.npmjs.com/settings/hui-xu-ai/tokens> 重新生成 **Classic → Automation**
+   并覆盖同一行；200 ⇒ token 没问题，进第 3 步。
+
+3. **pnpm 读的是不是同一个文件？** `pnpm config get //registry.npmjs.org/:_authToken`
+   （会回显，注意别贴到公开场合）应当与第 2 步取到的值一致；`npm config get userconfig`
+   应指向同一个 `~/.npmrc`。不一致就先查项目级/`prefix` 级 `.npmrc` 与环境变量。
+
+判据只有一条：**「服务端说你是谁」才算数**，`whoami` 报错本身不说明原因。
+
 ### 市场页面的介绍文字
 
 `docs/market/index.json` 的 `title` / `description` / `metadata.labels` / `metadata.keywords`
