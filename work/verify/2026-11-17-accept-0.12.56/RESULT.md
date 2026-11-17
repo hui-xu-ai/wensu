@@ -213,3 +213,23 @@
 遗留观察（未动）：`installations\0.12.48` 目录名与内容不符；`browser\native-host\python-path.txt`
 当前指向仓库 `.venv`（我的 assets 刷新从仓库带过来的），它未被注册，但若从 home 副本重注册宿主
 会指到开发环境 —— 部署时应写入真实 python 路径。
+
+## 12. 第二轮收尾（2026-11-18，P1→P3）
+
+| 类别 | 内容 | 提交 |
+|---|---|---|
+| P1 文档对齐 | dsh.md 五个工具 + status 字段说明；升级流程收敛成一套（README / operations §1·§3·§4·§6 / codex §1 / scholar-install §3）；ssets --force 帮助与模块说明 | `a1f2e77`、`197fd9c` |
+| P2 包卫生 | copy_assets 不再复制机器本地的 `python-path.txt` / `scholar-host.exe` / `com.scholar.search.json` / `run-host.cmd`；指纹比对也忽略它们，一致时顺手清残留 | `9d94bc4` |
+| P3 发布记录 | CHANGELOG 补 `[Unreleased]`（8 处修复 + 1 处新增行为） | `c29825d` |
+
+**真机复核**：刷新后 `browser\native-host\python-path.txt` 由存在变不存在；
+`schemas` 因内容变化被刷新；注册表指向的宿主文件仍在；`stale_skills` 两个目录仍 0；
+扩展重载已确认生效（`active_permissions` 含 `downloads`、`last_update_time` = 23:04:21）。
+
+**闸门**：`pytest tests` 410 passed；`ruff check` / `format --check` 全绿；
+`release-check.py` 9/11 —— 仍是 `uv` 无法写系统临时目录导致 `assets` / `artifacts` 跑不起来
+（本机无 `hatchling` / `pip` 可替代构建）。`pyproject.toml` 本轮 **0 行改动**，
+唯一内容变化的打包文件是本来就在 force-include 里的 `schemas/tools.json`，打包输入未变。
+
+**未做**：`installations\0.12.48` 正名（要动注册表，建议保持现状，已在第 11 节记录）；
+16 个提交未推送。
