@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from . import __version__
@@ -16,6 +17,20 @@ from .core.policy import PolicyEngine
 from .core.registry import ChannelRegistry
 from .core.risk import RiskGuard
 from .core.service import ScholarService
+
+# What one action costs, in quota units. One unit = one action whose verb is in
+# `NETWORK_VERBS` (see `core/planner.py`), so these numbers are plan properties, not
+# opinions — `tests/unit/test_action_cost_matches_plans.py` derives each one from the
+# plan and fails when they disagree. They did disagree: this table quoted 4 for a Web
+# of Science search while the BibTeX export path billed 8.
+ACTION_COST: dict[str, object] = {
+    "search": {"cnki": 3, "webofscience": 8},
+    "site_sort": {"cnki": 5, "webofscience": 10},
+    "page_turn": {"cnki": 4, "webofscience": None},
+    "local_sort": 0,
+    "detail_cached": 0,
+    "detail_live": {"cnki": 1},
+}
 
 
 def _last_host_activity() -> str | None:
@@ -100,6 +115,23 @@ def _bridge_remediation(last_seen: str | None) -> dict[str, object]:
     }
 
 
+def _extension_version(extension_dir: Path | str) -> str | None:
+    """The `version` in the manifest the browser actually loads, or None.
+
+    The browser loads a *copy* of the extension, made by `wensu setup`; installing a
+    new wheel does not touch it. So "which build is running" has two answers — the
+    package's and this copy's — and until now only the package's was reported, which
+    is why a copy three versions behind went unnoticed.
+    """
+
+    try:
+        manifest = json.loads((Path(extension_dir) / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    version = manifest.get("version")
+    return version if isinstance(version, str) else None
+
+
 def _browser_summary() -> dict[str, object] | None:
     """The recorded browser profile, if setup has run.
 
@@ -113,12 +145,20 @@ def _browser_summary() -> dict[str, object] | None:
     recorded = browser_cfg.load()
     if recorded is None:
         return None
+    extension_version = _extension_version(recorded.extension_dir)
     return {
         "browser": recorded.browser,
         "profile_dir": recorded.profile_dir,
         "profile_exists": Path(recorded.profile_dir).is_dir(),
         "extension_dir": recorded.extension_dir,
         "extension_id": recorded.extension_id,
+        # Two answers to "which version am I running": the package's `version` above,
+        # and this copy's. `extension_version_mismatch: null` means the manifest could
+        # not be read — say "unknown" rather than claiming the copy is current.
+        "extension_version": extension_version,
+        "extension_version_mismatch": (
+            None if extension_version is None else extension_version != __version__
+        ),
         "start_with": "wensu browser start",
     }
 
@@ -186,14 +226,7 @@ def build_service() -> ScholarService:
             "quota_state_path": str(policy.state_path),
             # Rough price of one search per channel, so a caller can budget without
             # discovering the cost by spending it.
-            "action_cost": {
-                "search": {"cnki": 3, "webofscience": 4},
-                "page_turn": 4,
-                "site_sort": 5,
-                "local_sort": 0,
-                "detail_cached": 0,
-                "detail_live": {"cnki": 1},
-            },
+            "action_cost": ACTION_COST,
             "bridge_endpoint": str(endpoint),
             "bridge_ready": bridge_up,
             # `bridge_ready: false` on its own told a caller nothing about *why*,
