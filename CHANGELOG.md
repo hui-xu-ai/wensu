@@ -4,6 +4,74 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed — the quoted price of an action was wrong for Web of Science
+
+`status.action_cost` advertised 4 quota units for a Web of Science search; the plan bills
+8 (the BibTeX export path adds six clicks). `ACTION_COST` is now a module constant that
+`tests/unit/test_action_cost_matches_plans.py` derives from the plan itself, so a change to
+a plan fails the suite instead of making the published price a lie. `site_sort` and
+`page_turn` are quoted per channel (Web of Science has no page turn — it points at
+`exclude_ut` instead).
+
+A bare DOI costs more than the field said: on CNKI it runs a search first, 3 + 1 = 4,
+where the same article by `url` costs 1 (and 0 the second time). Documented in the skill
+and in the tool description.
+
+### Fixed — `query_effective` showed the text the caller sent, not what ran
+
+The Web of Science BibTeX path filled the field with `query.text`, and the service only
+fills it when it is empty — so the appended `AND PY=(…)` never appeared, and a caller
+checking whether the year bound landed saw a bare `TS=(…)`. The channel now leaves the
+field empty and lets `effective_query()` describe the expression.
+
+### Added — `status` reports which extension copy the browser loads
+
+`browser_profile.extension_version` and `extension_version_mismatch` compare the copied
+`manifest.json` with the package. Without them a copy three versions behind was invisible:
+the package said 0.12.56 and nothing said 0.12.53.
+
+### Changed — `wensu setup` refreshes copied assets instead of skipping them
+
+`copy_assets` used to raise `FileExistsError` for any existing destination, and `setup`
+swallowed it and returned 0 — so the upgrade path printed "done" while leaving the browser
+on an old extension. A destination that matches the source is now skipped silently
+(idempotent); one that differs is replaced, and the message says the extension needs a
+reload. `--force` split into `--force-assets` and `--force-skills`: refreshing assets is
+routine, replacing a skills directory deletes local edits.
+
+### Added — an installed skill that differs from the bundled one is reported
+
+`wensu setup --skills-dir` now prints `N differ from this build (…); pass --force-skills to
+replace them` instead of saying nothing. Three copies of these skills exist on a working
+machine, and eight of twelve disagreed while every command reported success.
+
+### Fixed — `schemas/tools.json` is generated, and three gates enforce it
+
+The file called itself the stable tool surface while missing `exclude_ut`, the two sort
+aliases and `status.brief`; nothing read it, so nothing failed. It is now produced by
+`scripts/dump-tools.py` from `list_tools()`, and `--check` runs in the test suite, in
+`release-check.py` and in CI.
+
+### Fixed — `filters` echoes `local_sort` rather than the legacy alias `sort_by`
+
+The skill documented the new name; the response used the old one, so a caller who set
+`local_sort` and looked for it in `filters` found nothing.
+
+### Fixed — copied assets no longer carry machine-local host files
+
+`native-host/python-path.txt`, `scholar-host.exe`, `com.scholar.search.json` and
+`run-host.cmd` are written per machine by `install.ps1` and are ignored by the repository.
+A checkout's copies were being copied into the runtime directory, shipping one machine's
+paths to another.
+
+### Docs
+
+The upgrade flow is one flow again (`wensu setup`, no flag), `docs/integration/dsh.md`
+lists five tools instead of four, and the `status` fields an integration needs are
+documented there.
+
 ## [0.12.56] - 2026-11-11
 
 ### Fixed — `wensu reset --confirm` did nothing to a running service
