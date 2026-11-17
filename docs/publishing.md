@@ -57,6 +57,27 @@ Set-Location packages\dsh-wensu
    registry 返回的秒级 epoch）。**顺序不能反**——先写索引会让市场指向一个装不下来的版本。
 2. 提交并推送。市场从 GitHub raw 拉取，约一分钟生效。
 
+### 发出去 ≠ 立刻能装：两处延迟都要会绕
+
+- **npm 自己也有 CDN 缓存**（2026-11-18 实测）：`pnpm publish` 打印 `✅ Published` 之后，
+  `GET /<包>/0.12.57` 与 `dist-tags` 仍可能返回 404 / 旧值约 1–5 分钟。判断"到底发没发成功"
+  的硬证据有两条：① 再发一次会得到 `403 … cannot publish over the previously published versions`；
+  ② 稍后 `GET` 变 200。别因为前 60 秒 404 就重复发布。
+- **DSH 的插件安装走 `registry.npmmirror.com` 兜底**（`plugin_manager` 返回里的
+  `registries: [null, "https://registry.npmmirror.com/"]`）。镜像同步新版本要几分钟到更久，
+  期间 `plugin_manager install_bundle` 会报 `ERR_PNPM_NO_MATCHING_VERSION`（"latest is 0.12.x"）。
+  两条绕法：`install_bundle` 显式传 `registry=https://registry.npmjs.org/`；或干脆在 profile 里
+  直连安装：
+
+  ```powershell
+  cd D:\DSH\.dsh\profiles\desktop
+  & $node $pnpm add "@hui-xu-ai/dsh-wensu@<新版本>" --save-exact --registry=https://registry.npmjs.org/
+  ```
+
+  装完 `plugin_manager list_bundles` 里该 bundle 应显示新版本、`enabled: true`、
+  `rows: [mcp-scholar-search]`、**没有 `error`**；`remove_bundle` 会把它置为 `enabled: false`，
+  需要 `set_bundle enabled=true` 再启用一次。
+
 ## 3. 发布前检查的细节
 
 `release-check.py` 之外，这几条仍需人看：
@@ -130,6 +151,11 @@ Automation**（Granular 需要同时勾 Packages 与 Organizations，容易漏�
 
 **本地发布的坑**：凭据走 `~/.npmrc` 的 `_authToken`，**不是** `NODE_AUTH_TOKEN` 环境变量。
 `pnpm whoami` 能返回用户名再去 publish。
+
+**改 token 最快的办法（推荐）**：`notepad $env:USERPROFILE\.npmrc`，把
+`//registry.npmjs.org/:_authToken=` 那一行整行替换成新 token（等号后直接跟 `npm_...`，
+不要引号、不要空格），保存即可 —— 与 `npm config set` 完全等价，但不会被引号/转义坑到，
+也不进命令历史。改完先看 mtime 确认真的存了。
 
 **`whoami` 报 401 时，按这三步定位，不要重试原命令**（2026-11-18 实测浪费了三轮）：
 
