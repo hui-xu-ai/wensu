@@ -34,7 +34,14 @@ git push origin v0.12.10
 
 ## 2. bundle 与插件市场
 
-bundle 走另一条流水线，tag 前缀是 **`npm-v`**：
+bundle 走另一条流水线，tag 前缀是 **`npm-v`**，但**这个 tag 只是版本记录，不负责发布**：
+本仓库没有配 `NPM_TOKEN`，`publish-npm.yml` 被 tag 触发后必然失败在
+`Publish with OIDC trusted publisher`。**发布由本机 `pnpm publish` 完成**（下一段命令），
+失败的 run 不影响任何东西。bundle **不产生 GitHub Release** —— Release 只跟 Python 包
+（`v*` tag → `release.yml` → GitHub Release + PyPI）。
+
+> npm token 失效属于**前置条件**问题，不是发布步骤：`pnpm whoami` 报 401 时按 §5
+> 「`whoami` 报 401 时」那三步处理，与本节的发布命令无关。
 
 ```powershell
 git tag -a npm-v0.12.10 -m "dsh-wensu bundle 0.12.10"
