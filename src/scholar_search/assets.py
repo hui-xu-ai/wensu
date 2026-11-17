@@ -10,12 +10,24 @@ behind by an earlier version keeps the extension on that version.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import shutil
 from importlib.resources import files
 from pathlib import Path
 
 ASSET_DIRS = ("native-host", "extension", "schemas")
+
+# Files that exist only in a working checkout: `install.ps1` writes them for the
+# machine it runs on, and the repository ignores them. Copying them into a runtime
+# directory would carry one machine's paths to another — an acceptance run found
+# `browser/native-host/python-path.txt` pointing at the developer's `.venv`.
+LOCAL_ARTEFACTS = (
+    "python-path.txt",
+    "scholar-host.exe",
+    "com.scholar.search.json",
+    "run-host.cmd",
+)
 
 
 def skills_root() -> Path | None:
@@ -95,14 +107,27 @@ def assets_root() -> Path:
 
 
 def _fingerprint(root: Path) -> dict[str, str]:
-    """Relative path → content digest, for every file under ``root``."""
+    """Relative path → content digest, for every file under ``root``.
+
+    ``LOCAL_ARTEFACTS`` are left out on both sides: they describe the machine, not the
+    build, so their presence or absence must not make two otherwise identical trees
+    look different.
+    """
 
     prints: dict[str, str] = {}
     for path in sorted(root.rglob("*")):
-        if path.is_file():
+        if path.is_file() and path.name not in LOCAL_ARTEFACTS:
             relative = path.relative_to(root).as_posix()
             prints[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
     return prints
+
+
+def _drop_local_artefacts(directory: Path) -> None:
+    """Remove records a previous run left behind (see ``LOCAL_ARTEFACTS``)."""
+
+    for name in LOCAL_ARTEFACTS:
+        with contextlib.suppress(OSError):
+            (directory / name).unlink()
 
 
 def _same_tree(source: Path, destination: Path) -> bool:
@@ -136,8 +161,9 @@ def copy_assets(target: Path, *, force: bool = False) -> list[Path]:
         destination = target / name
         if destination.exists():
             if not force and _same_tree(source, destination):
+                _drop_local_artefacts(destination)
                 continue
             shutil.rmtree(destination)
-        shutil.copytree(source, destination)
+        shutil.copytree(source, destination, ignore=shutil.ignore_patterns(*LOCAL_ARTEFACTS))
         copied.append(destination)
     return copied

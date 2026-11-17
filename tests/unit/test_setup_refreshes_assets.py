@@ -105,3 +105,26 @@ def test_refreshing_assets_leaves_edited_skills_alone(tmp_path: Path, monkeypatc
     assert code == 0
     assert _version_of(target) == "0.12.56"
     assert (skill / "SKILL.md").read_text(encoding="utf-8") == "my edits"
+
+
+def test_machine_local_host_files_stay_out_of_the_copy(tmp_path: Path, monkeypatch) -> None:
+    """`install.ps1` writes these per machine, and the repository ignores them.
+
+    Copying a checkout's `python-path.txt` into a runtime directory ships one
+    machine's paths to another: the acceptance run found
+    `browser/native-host/python-path.txt` pointing at the developer's `.venv`.
+    """
+
+    source = _source_tree(tmp_path / "source")
+    (source / "native-host" / "python-path.txt").write_text(
+        r"D:\dev\.venv\Scripts\python.exe", encoding="utf-8"
+    )
+    (source / "native-host" / "scholar-host.exe").write_text("exe", encoding="utf-8")
+    _patch_source(monkeypatch, source)
+    target = tmp_path / "target"
+
+    assets.copy_assets(target)
+
+    assert (target / "native-host" / "install.ps1").is_file()
+    assert not (target / "native-host" / "python-path.txt").exists()
+    assert not (target / "native-host" / "scholar-host.exe").exists()
