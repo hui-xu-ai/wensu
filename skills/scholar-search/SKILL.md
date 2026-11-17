@@ -265,6 +265,8 @@ WoS 记录自带 `impact_factor`（JCR 影响因子，可能为 `null`——该�
 
 **`site_sort` 与 `local_sort` 是两套**：前者让站点重排（多 2 个请求、走配额），后者在本地重排（免费）。旧名 `sort` / `sort_by` 仍能用，但不再推荐——四个名字并存只会让人犹豫。
 想按被引排序又要省配额，用 `local_sort: "citations"`；想要站点的全局排序用 `site_sort`。
+**但知网的列表行没有被引数**（`citations: null`），在那上面按被引排序等于没排 ——
+要按被引筛选/排序请改用 WoS，或先 `detail` 取回来自己排。
 
 ## 返回
 

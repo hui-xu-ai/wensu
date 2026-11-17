@@ -152,3 +152,29 @@
 | `raw/08-quota-model.json` | 计量单位推导 + audit 逐条对账 |
 | `export-ris.ris` | RIS 导出成品（2 条） |
 | `probe-plan-cost.py` | 计划动作探针（复现 F1/F2 用） |
+
+## 8. 修复记录（按本报告的发现顺序落地）
+
+| 发现 | 提交 | 改了什么 | 怎么验的 |
+|---|---|---|---|
+| 基线 | `0c9a5f6` | 本报告的 raw/ 证据入库 | — |
+| F1 + F6① | `a4ff43c` | `ACTION_COST` 抽为模块常量并改成实测值（WoS 检索 8、`site_sort` 分渠道 5/10、`page_turn` WoS=None）；`status.browser_profile` 增加 `extension_version` 与 `extension_version_mismatch` | 新增 10 例；修复前红在 `assert 4 == 8`；真机读到 `extension_version=0.12.53 / mismatch=true` |
+| F2 | `04cdb36` | `parse_bibtex` 不再把 `query.text` 写进 `query_effective`，交给 `service` 用 `effective_query()` 覆写 | 新增 2 例；修复前红在 `query_effective='TS=(ionogel)'` |
+| F1/F3 文档 | `dfb0ee8` | SKILL 价目表/速查表、`year_scope` 取值、`dropped_*` 分母；`tools.json` 的 `site_sort` 与 `detail.url` 描述 | 数字与 `raw/09-action-cost-scenarios.txt` 逐项对应 |
+| F6② | `ccc5e2b` | `copy_assets` 改为按 sha256 树比对：相同跳过、不同自动刷新；`--force` 拆成 `--force-assets` / `--force-skills`；`setup` 不再吞异常 | 新增 5 例；真机 `wensu assets` 把扩展从 0.12.53 刷到 **0.12.56**，第二次运行无输出 |
+| F5 | `9fd981c` | `filters` 回显 `local_sort`（旧键名 `sort_by` 只剩输入别名） | 新增 2 例 |
+| F7 | `efa91f7` | `schemas/tools.json` 由 `scripts/dump-tools.py` 从服务端生成（422 行，补回 `exclude_ut`/`sort`/`sort_by`/`status.brief`）；接入 pytest、`release-check.py`、CI 三道闸门 | 故意改一个字节后 `--check` 报 stale |
+| F8 | `9d9f247` | `assets.stale_skills` + `setup` 报出与本版本不同的已装技能；`codex.md` 三份→四份 | 真机报出 `D:\DSH\.dsh\skills` 4 个、`~/.codex/skills` 2 个 |
+
+**回归证据**：`pytest tests` 409 passed；`ruff check` / `ruff format --check` 全绿；
+`python scripts/release-check.py` 9/11 PASS（`versions` / `tool-schema` / `changelog` / `tests` /
+`lint` / `format` / `types` / `plans` 全过；`assets` 与 `artifacts` 这两个需要 `uv build` 的
+检查在本机沙箱里跑不起来 —— `uv` 无法写 `D:\uv-cache` 与临时目录，`os error 5`，与本次改动无关）。
+
+## 9. 仍未处理（需要人拍板，属运行时目录，未擅自改动）
+
+1. `D:\DSH\.dsh\skills` 下 4 份、`~/.codex/skills` 下 2 份 `SKILL.md` 与仓库不同
+   —— 可能是你的批注，也可能是滞后。要覆盖请说一声（`wensu setup --skills-dir <目录> --force-skills`）。
+2. `%LOCALAPPDATA%\scholar-search` 里的残留：`browser\extension.bak-0.4.2`、
+   `installations\0.12.48`（里面装的其实是 0.12.56）、`profiles\edge`（真实 profile 在 `E:\LiteratureEdgeProfile`）。
+3. 扩展文件已刷到 0.12.56，但浏览器里加载的那份要**重载一次**（`edge://extensions` → 重新加载）才会显示新版本号。
