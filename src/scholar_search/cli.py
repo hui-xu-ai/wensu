@@ -121,7 +121,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     assets = sub.add_parser("assets", help="copy bundled browser assets to a directory")
     assets.add_argument("--target", required=True, help="destination directory")
-    assets.add_argument("--force", action="store_true", help="replace existing asset directories")
+    assets.add_argument(
+        "--force",
+        action="store_true",
+        help="replace asset directories even when they already match this build",
+    )
 
     setup = sub.add_parser("setup", help="copy browser assets and register the native host")
     setup.add_argument(

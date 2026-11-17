@@ -2,7 +2,10 @@
 
 The wheel and sdist carry the native host sources, the extension and the JSON
 schemas so a user who only installed the package can still complete the
-documented setup. ``wensu assets --target DIR`` copies them out.
+documented setup. ``wensu assets --target DIR`` copies them out: a destination that
+already matches the source is left alone, one that differs is replaced. That is the
+upgrade path — the browser loads the copy, not the wheel's files, so a copy left
+behind by an earlier version keeps the extension on that version.
 """
 
 from __future__ import annotations
