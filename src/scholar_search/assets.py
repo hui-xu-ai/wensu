@@ -7,6 +7,7 @@ documented setup. ``wensu assets --target DIR`` copies them out.
 
 from __future__ import annotations
 
+import hashlib
 import shutil
 from importlib.resources import files
 from pathlib import Path
@@ -69,8 +70,33 @@ def assets_root() -> Path:
     return packaged
 
 
+def _fingerprint(root: Path) -> dict[str, str]:
+    """Relative path → content digest, for every file under ``root``."""
+
+    prints: dict[str, str] = {}
+    for path in sorted(root.rglob("*")):
+        if path.is_file():
+            relative = path.relative_to(root).as_posix()
+            prints[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return prints
+
+
+def _same_tree(source: Path, destination: Path) -> bool:
+    return _fingerprint(source) == _fingerprint(destination)
+
+
 def copy_assets(target: Path, *, force: bool = False) -> list[Path]:
-    """Copy the bundled browser assets into ``target`` and return the paths."""
+    """Copy the bundled browser assets into ``target``; return what was written.
+
+    A destination that already matches the source is left alone and not reported, so
+    re-running `setup` is idempotent. A destination that **differs** is replaced
+    without being asked: the browser loads this copy, not the wheel's, so an upgrade
+    that skipped it left the extension a version behind while `setup` still reported
+    success (0.12.56 acceptance run: copy at 0.12.53, exit code 0, no warning).
+
+    ``force`` replaces a destination even when it is identical — for the case where
+    the files are suspect rather than out of date.
+    """
 
     root = assets_root()
     if not root.is_dir():
@@ -85,8 +111,8 @@ def copy_assets(target: Path, *, force: bool = False) -> list[Path]:
             continue
         destination = target / name
         if destination.exists():
-            if not force:
-                raise FileExistsError(f"{destination} already exists; pass --force to replace it")
+            if not force and _same_tree(source, destination):
+                continue
             shutil.rmtree(destination)
         shutil.copytree(source, destination)
         copied.append(destination)

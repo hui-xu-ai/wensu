@@ -24,17 +24,28 @@ def setup_browser(
     target: Path | None = None,
     *,
     force: bool = False,
+    force_assets: bool | None = None,
+    force_skills: bool | None = None,
     python: str | None = None,
     register_host: bool = True,
     skills_dir: Path | None = None,
 ) -> int:
-    """Copy the assets, register the host, and print the remaining steps."""
+    """Copy the assets, register the host, and print the remaining steps.
+
+    `force` still means "both", for the callers and docs that already say it. The two
+    narrower flags exist because they are different intentions: refreshing the asset
+    copy is routine after an upgrade, while replacing a skills directory deletes files
+    the user may have edited. One flag for both made the routine step risky.
+    """
+
+    replace_assets = force if force_assets is None else (force_assets or force)
+    replace_skills = force if force_skills is None else (force_skills or force)
 
     # Skills first, and independently of the assets. They go where the agent reads
     # them, not into the tool's runtime directory, and an already-installed asset
     # tree used to abort this function before the skills were ever touched — the
     # first live test of this feature installed nothing.
-    installed = install_skills(skills_dir, force=force) if skills_dir else []
+    installed = install_skills(skills_dir, force=replace_skills) if skills_dir else []
     if installed:
         print(f"skills: {skills_dir}")
         for path in installed:
@@ -43,16 +54,23 @@ def setup_browser(
         print(f"skills: nothing to install (none bundled, or all present in {skills_dir})")
 
     destination = target if target is not None else config.app_home() / "browser"
+    existed = destination.is_dir()
     try:
-        copied = copy_assets(destination, force=force)
-    except FileExistsError as error:
-        # Not fatal: re-running setup is usually about the profile or the skills.
+        copied = copy_assets(destination, force=replace_assets)
+    except FileNotFoundError as error:
         print(f"assets: {error}", file=sys.stderr)
-        copied = []
-    else:
+        return 1
+    if copied:
         print(f"assets: {destination}")
         for path in copied:
             print(f"  {path.name}")
+        if existed:
+            # The copy changed underneath a running browser, which keeps using what it
+            # loaded until the extension is reloaded. Saying so is the difference
+            # between "upgraded" and "upgraded and actually running".
+            print("assets: refreshed — reload the extension (edge://extensions → 重新加载)")
+    else:
+        print(f"assets: {destination} (already matches this build)")
 
     extension = destination / "extension"
     print()

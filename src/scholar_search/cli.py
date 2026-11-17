@@ -127,7 +127,21 @@ def build_parser() -> argparse.ArgumentParser:
     setup.add_argument(
         "--target", default=None, help="where to copy the assets (default: <home>/browser)"
     )
-    setup.add_argument("--force", action="store_true", help="replace existing asset directories")
+    setup.add_argument(
+        "--force",
+        action="store_true",
+        help="replace both the asset copies and the installed skills",
+    )
+    setup.add_argument(
+        "--force-assets",
+        action="store_true",
+        help="replace the asset copies even when they already match this build",
+    )
+    setup.add_argument(
+        "--force-skills",
+        action="store_true",
+        help="replace skill directories that already exist (this deletes local edits)",
+    )
     setup.add_argument(
         "--reset-browser",
         action="store_true",
@@ -268,23 +282,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "setup":
         from .browser_setup import setup_browser
 
-        try:
-            code = setup_browser(
-                Path(args.target) if args.target else None,
-                force=args.force,
-                python=args.python,
-                register_host=not args.no_host,
-                skills_dir=Path(args.skills_dir) if args.skills_dir else None,
-            )
-        except FileExistsError as error:
-            # Already-installed assets are not a failure to re-run setup: the point
-            # of running it again is usually the browser profile, not the files.
-            print(f"wensu: {error}", file=sys.stderr)
-            print(
-                "wensu: continuing with the browser profile (use --force to replace assets)",
-                file=sys.stderr,
-            )
-            code = 0
+        # No `FileExistsError` fallback here any more: assets that differ are now
+        # refreshed and identical ones are skipped, so "did nothing" and "exited 0"
+        # can no longer describe the same run (that pair is how a copy three versions
+        # behind survived an upgrade).
+        code = setup_browser(
+            Path(args.target) if args.target else None,
+            force=args.force,
+            force_assets=args.force_assets,
+            force_skills=args.force_skills,
+            python=args.python,
+            register_host=not args.no_host,
+            skills_dir=Path(args.skills_dir) if args.skills_dir else None,
+        )
         # The browser profile is what every later session depends on: without it the
         # tool has no idea which window the extension lives in, and a caller is left
         # guessing — which is how one ended up killing the user's browser.
