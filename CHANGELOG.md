@@ -34,6 +34,10 @@ It issues no request, so it spends **no quota** and is exempt from the channel d
 whitelist — the one place that rule bends, and only for a tab that is already open
 ([ADR 0018](docs/adr/0018-page-snapshot.md)).
 
+A verification wall is reported, not read: when the tab is showing a captcha the result carries
+`status: "blocked"` / `code: "RISK_CAPTCHA"` / `retryable: false`, so the caller stops instead of
+summarising the challenge page (ADR 0004; no cooldown, because nothing was automated).
+
 ## [0.12.57] - 2026-11-18
 
 ### Fixed — the DSH bundle was refused by DSH 0.2.2-rc.3
