@@ -43,3 +43,7 @@ HANDOFF.md
 
 # 会话记忆：独立 git 仓库，不随代码提交
 .dsh-memory/
+
+# 页面转换的运行期产物（快照与输出，不进版本库）
+work/tools/out/
+pages/

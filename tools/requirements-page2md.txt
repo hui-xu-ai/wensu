@@ -1,0 +1,13 @@
+# tools/page2md.py 的运行依赖（装在独立 venv 里，别污染主环境）
+#
+#   py -m venv work\tools\.venv
+#   work\tools\.venv\Scripts\python.exe -m pip install -r tools\requirements-page2md.txt
+#
+# 说明：
+# * trafilatura —— 正文抽取主力，必装。
+# * pandoc（系统级，不是 pip 包）—— 公式 MathML→LaTeX 质量最好，装了就用，没装自动回退自研转换器。
+# * markitdown —— 可选兜底（trafilatura 与章节聚合都失败时用）。依赖较重，默认不装：
+#       work\tools\.venv\Scripts\python.exe -m pip install "markitdown[all]"
+
+trafilatura>=2.3,<3
+lxml>=5,<7

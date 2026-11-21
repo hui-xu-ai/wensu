@@ -4,6 +4,25 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added — read an online paper's page as Markdown (`paper-page`)
+
+`tools/page2md.py` turns a saved publisher page into Markdown an agent can read: `##`/`###`
+sections in document order, formulas as LaTeX (`$…$`, `$$…$$`), tables as GFM pipe tables,
+figures inlined at their position with captions copied into `assets/`.
+
+Extraction merges two passes because either alone loses content: section aggregation (walks
+`section[@id]` and `*[class~="section-title"]`, descending into leaf `div`/`span` — a real
+Elsevier article had 13 `<p>` elements and **zero** formulas inside them, with 114 formulas
+sitting in `div`s) and trafilatura for the long prose. MathML goes through pandoc in one batch
+call when pandoc is installed, falling back to a built-in MathML→LaTeX subset converter.
+
+`meta.json.warnings` records where fidelity was lost (no MathML at all, built-in converter,
+failed formulas, tables left inline, missing images) so the skill can tell the user to check
+the PDF before quoting a number. The skill lives in `skills/paper-page/`; MHTML input from
+`chrome.pageCapture` is the next milestone ([ADR 0018](docs/adr/0018-page-snapshot.md)).
+
 ## [0.12.57] - 2026-11-18
 
 ### Fixed — the DSH bundle was refused by DSH 0.2.2-rc.3
