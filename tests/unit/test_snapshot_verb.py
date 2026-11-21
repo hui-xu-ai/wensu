@@ -122,6 +122,31 @@ def test_service_relays_the_path_and_leaves_the_quota_alone(tmp_path: Path) -> N
     assert not (tmp_path / "quota.json").exists()
 
 
+def test_service_reports_a_verification_wall_instead_of_reading_it(tmp_path: Path) -> None:
+    scripts: list[list[dict[str, object]]] = [
+        [
+            {
+                "verb": "snapshot",
+                "data": {
+                    "path": "C:\\Users\\x\\Downloads\\wensu-pages\\verify.mhtml",
+                    "bytes": 40_000,
+                    "url": "https://example.org/verify/home",
+                    "title": "Verification",
+                    "captcha_visible": True,
+                },
+            }
+        ]
+    ]
+    service = build_service(tmp_path, scripts)
+
+    result = service.snapshot()
+
+    assert result["status"] == "blocked"
+    assert result["code"] == "RISK_CAPTCHA"
+    assert result["retryable"] is False
+    assert "solve it in the browser" in result["hint"].lower()
+
+
 def test_service_raises_a_specific_error_when_the_page_cannot_be_saved(tmp_path: Path) -> None:
     scripts: list[list[dict[str, object]]] = [
         [{"verb": "snapshot", "ok": False, "error": "policy.url_scheme"}],

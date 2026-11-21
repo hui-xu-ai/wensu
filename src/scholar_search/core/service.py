@@ -521,12 +521,28 @@ class ScholarService:
                 stage="snapshot",
             )
         data = dict(outcome.data)
-        return {
+        result: dict[str, Any] = {
             "path": str(data.get("path") or ""),
             "bytes": int(data.get("bytes") or 0),
             "url": str(data.get("url") or ""),
             "title": str(data.get("title") or ""),
         }
+        # A human-verification wall is the one page this verb must not hand back as if it
+        # were the article. Nothing was automated here — the user is looking at their own
+        # tab — so the 24 h cooldown in ADR 0004 does not apply and no retry is invited;
+        # the honest answer is "stop, and let the person solve it".
+        if data.get("captcha_visible") is True:
+            result.update(
+                status="blocked",
+                code="RISK_CAPTCHA",
+                retryable=False,
+                hint=(
+                    "the tab is showing a human-verification challenge, so the saved file "
+                    "is the challenge page and nothing was read. Solve it in the browser "
+                    "yourself, then ask again — do not retry automatically."
+                ),
+            )
+        return result
 
     # -- internals ------------------------------------------------------
 

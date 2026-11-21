@@ -256,6 +256,11 @@ async function onHostMessage(message, channel) {
       if (!tab || !tab.id) throw new Error("no_active_tab");
       if (!tab.url || !/^https?:/i.test(tab.url)) throw new Error("policy.url_scheme");
       const blob = await chrome.pageCapture.saveAsMHTML({ tabId: tab.id });
+      // A challenge page is the one thing this verb must not hand back as if it were the
+      // article. Reading the flag costs one message at most (it is best-effort, the
+      // helper returns {} on timeout) and lets the caller say "stop, solve it yourself"
+      // instead of summarising a captcha.
+      const meta = await pageMeta(tab.id);
       const objectUrl = URL.createObjectURL(blob);
       let downloadId;
       try {
@@ -273,7 +278,17 @@ async function onHostMessage(message, channel) {
       if (!Number.isInteger(downloadId)) throw new Error("snapshot.download");
       const path = await waitDownloadPath(downloadId, Date.now() + 20_000);
       if (!path) throw new Error("snapshot.download_incomplete");
-      reply({ ok: true, data: { path, bytes: blob.size, url: tab.url, title: tab.title || "" } });
+      reply({
+        ok: true,
+        data: {
+          path,
+          bytes: blob.size,
+          url: tab.url,
+          title: tab.title || "",
+          captcha_visible: meta.captcha_visible === true,
+          status: Number(meta.status) || 0,
+        },
+      });
       return;
     }
 
