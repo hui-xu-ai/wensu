@@ -1,7 +1,7 @@
 # Connecting to DeepSeek Harness
 
-Two transports are supported. Both expose the same six tools: `search`, `detail`,
-`detail_many`, `export`, `status`.
+Two transports are supported. Both expose the same seven tools: `search`, `detail`,
+`detail_many`, `export`, `page_read`, `snapshot`, `status`.
 
 `status` carries what an integration needs to decide before spending anything: `version`
 (the package), `bridge_protocol`, `channel_capabilities` / `detail_capabilities` (what each

@@ -783,6 +783,30 @@ def build_server(service: ScholarService) -> FastMCP:
             return _payload(error if isinstance(error, Exception) else ValueError("bad record"))
 
     @mcp.tool()
+    def page_read(url: str = "", doi: str = "") -> dict[str, Any]:
+        """Open a publisher article page and say whether it holds the full text.
+
+        Give `doi` (preferred — it also decides the publisher) or an article `url`. The
+        browser visits the publisher's **front page** first and the article second, then
+        saves the page as MHTML; two navigations, so **2 quota units**.
+
+        Read `status` before anything else:
+
+        * `ok` — `mhtml_path` holds the article; run `tools/page2md.py` on it for Markdown;
+        * `no_html` — the page has no full text; `reason` says `paywall`, `abstract_only`,
+          `pdf_only` or `unparsable`, and `pdf_url` may offer the PDF route;
+        * `unsupported_site` — the DOI belongs to a publisher this build does not visit
+          (the curated list is in `core/publishers.py`, ADR 0019), so nothing was opened;
+        * `blocked` — the site challenged the browser; solve it yourself in the browser,
+          then ask again. Do not retry in a loop.
+
+        Nothing is clicked or typed, and a page that only shows a preview is reported as
+        such rather than passed off as the article.
+        """
+
+        return service.read_page(url=url, doi=doi)
+
+    @mcp.tool()
     def snapshot() -> dict[str, Any]:
         """Save the page the user has open as MHTML — one file with its images and CSS.
 

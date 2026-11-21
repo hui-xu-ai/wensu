@@ -24,6 +24,7 @@ from .contracts import (
     ActionOutcome,
     BrowserAdapter,
     Channel,
+    ChannelManifest,
     Plan,
     Record,
     SearchPage,
@@ -32,10 +33,38 @@ from .contracts import (
 from .errors import ActionError, ChannelError, ParseError, PolicyError, ScholarSearchError
 from .export import to_csv, to_endnote, to_markdown, to_ris
 from .locking import interprocess_lock
+from .pageprobe import classify_mhtml
 from .planner import Planner
 from .policy import PolicyEngine
+from .publishers import PUBLISHERS, Publisher, publisher_for_doi, publisher_for_host
 from .registry import ChannelRegistry, ChannelSpec
 from .risk import RiskGuard
+
+# A page read is two navigations (front page, then the article); the snapshot that
+# follows spends nothing, so this is also what `page_read` bills.
+PAGE_READ_QUOTA = 2
+
+
+def _page_spec(publisher: Publisher) -> ChannelSpec:
+    """A manifest-shaped view of one publisher, so the planner can run against it.
+
+    The planner needs a manifest for the domain scope and the verb list; page reading
+    has no channel package, so it borrows both from the curated publisher entry.
+    `doi.org` is in scope because a DOI is resolved there before the publisher is
+    known; the resolver only ever redirects to a domain that is on the same list.
+    """
+
+    manifest = ChannelManifest(
+        channel=f"page:{publisher.name}",
+        site_version="v1",
+        schema_version=1,
+        min_core=__version__,
+        domains=(*publisher.hosts(), "doi.org"),
+        verbs=("goto", "read_html", "wait_for", "sleep"),
+        capabilities=(),
+    )
+    return ChannelSpec(name=manifest.channel, site_version="v1", manifest=manifest, package="")
+
 
 # A page snapshot moves a few megabytes through the browser's own write path. The host
 # rejects any deadline above 15 s (`policy.deadline`), so this is the ceiling too.
@@ -500,6 +529,76 @@ class ScholarService:
             # Providers written before `brief` existed take no argument.
             return dict(provider())
 
+    def read_page(self, *, url: str = "", doi: str = "") -> dict[str, Any]:
+        """Open a publisher page the way a reader would, then say what is on it.
+
+        Three steps, and each one is visible in the answer: the publisher's front page
+        first (a referrer chain, not a deep link), then the article, then a snapshot of
+        it. Nothing is clicked and nothing is typed — only `goto` and `snapshot` — so a
+        page that challenges the browser ends as `blocked` instead of being pushed at.
+
+        Answers with `status: "ok"` and the saved path when the page holds the article,
+        `status: "no_html"` with a `reason` when it holds only a preview, a paywall or a
+        PDF, and `status: "unsupported_site"` when the DOI leads to a publisher this
+        build does not visit (ADR 0019).
+        """
+
+        target = (url or "").strip()
+        identifier = (doi or "").strip()
+        publisher = publisher_for_doi(identifier) if identifier else None
+        if publisher is None and target:
+            host = urlparse(target).hostname or ""
+            publisher = publisher_for_host(host)
+        if publisher is None:
+            return {
+                "status": "unsupported_site",
+                "reason": f"no curated publisher matches {identifier or target!r}",
+                "doi": identifier,
+                "url": target,
+                "publishers": [item.name for item in PUBLISHERS],
+            }
+        if not target:
+            target = f"https://doi.org/{identifier}"
+
+        spec = _page_spec(publisher)
+        plan = Plan(
+            channel=f"page:{publisher.name}",
+            purpose="detail",
+            actions=(
+                Action("goto", {"url": publisher.homepage}),
+                Action("goto", {"url": target}),
+            ),
+        )
+        with self._browser_transaction():
+            outcomes = self._run(plan, spec)
+            final_url = outcomes[-1].url or target
+            saved = self._snapshot_locked()
+
+        if saved.get("status") == "blocked":
+            return {**saved, "doi": identifier, "publisher": publisher.name}
+
+        path = Path(str(saved.get("path") or ""))
+        probe = (
+            classify_mhtml(path)
+            if path.is_file()
+            else {"status": "no_html", "reason": "not_written"}
+        )
+        return {
+            **probe,
+            "doi": identifier,
+            "publisher": publisher.name,
+            "final_url": final_url,
+            "mhtml_path": str(path),
+            "bytes": int(saved.get("bytes") or 0),
+            "title": str(saved.get("title") or probe.get("title") or ""),
+            "quota_charged": PAGE_READ_QUOTA,
+            "next": (
+                "run tools/page2md.py on mhtml_path to get Markdown"
+                if probe.get("status") == "ok"
+                else "no full text on the page: offer the PDF route instead"
+            ),
+        }
+
     def snapshot(self) -> dict[str, Any]:
         """Save the page the user has open as MHTML, next to the other snapshots.
 
@@ -508,11 +607,17 @@ class ScholarService:
         the file, so nothing is charged to the quota and no domain scope applies.
         """
 
+        with self._browser_transaction():
+            return self._snapshot_locked()
+
+    def _snapshot_locked(self) -> dict[str, Any]:
+        """`snapshot` without taking the browser lock — for a caller already holding it."""
+
         self._ensure_ready()
         self._ensure_bridge()
-        with self._browser_transaction():
-            adapter = self._transaction_adapter()
-            outcome = adapter.execute(Action("snapshot"), timeout_ms=SNAPSHOT_TIMEOUT_MS)
+        outcome = self._transaction_adapter().execute(
+            Action("snapshot"), timeout_ms=SNAPSHOT_TIMEOUT_MS
+        )
         if not outcome.ok:
             raise ActionError(
                 f"the page could not be saved ({outcome.error or 'action.failed'})",

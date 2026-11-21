@@ -38,6 +38,19 @@ A verification wall is reported, not read: when the tab is showing a captcha the
 `status: "blocked"` / `code: "RISK_CAPTCHA"` / `retryable: false`, so the caller stops instead of
 summarising the challenge page (ADR 0004; no cooldown, because nothing was automated).
 
+### Added — `page_read`: the browser opens the publisher page itself
+
+The seventh tool, and the one that answers "read this paper" without the user having to
+open it first: give a DOI (preferred) or an article URL and the browser visits the
+publisher's front page, then the article, then saves it as MHTML — two navigations, so
+2 quota units, and nothing else is clicked or typed.
+
+Answers with a status the caller can act on: `ok` (path to convert), `no_html` with
+`reason` = paywall / abstract_only / pdf_only and a `pdf_url` when one exists,
+`unsupported_site` for a DOI outside the curated list (25 publishers, not "any https"),
+and `blocked` when the site challenges the browser. The list lives in
+`core/publishers.py`; see [ADR 0019](docs/adr/0019-publisher-page-read.md).
+
 ## [0.12.57] - 2026-11-18
 
 ### Fixed — the DSH bundle was refused by DSH 0.2.2-rc.3

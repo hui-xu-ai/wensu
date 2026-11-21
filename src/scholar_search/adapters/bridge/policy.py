@@ -16,6 +16,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from ...core.params import validate_params
+from ...core.publishers import publisher_domains
 
 VERBS: frozenset[str] = frozenset(
     {
@@ -37,11 +38,17 @@ MAX_FRAME_BYTES = 2 * 1024 * 1024
 # Trusted default scope used when no channel manifest is supplied. The host
 # keeps its own copy on purpose: a compromised extension cannot widen it, so a
 # new channel has to be added here as well as in its manifest.
+#
+# The curated publishers (ADR 0019) are trusted the same way, and so is `doi.org`:
+# a DOI has to be resolved before its publisher is known, and the resolver only
+# redirects to a site that is on the list.
 TRUSTED_DOMAINS: tuple[str, ...] = (
     "kns.cnki.net",
     "www.cnki.net",
     "webofscience.clarivate.cn",
     "www.webofscience.com",
+    "doi.org",
+    *publisher_domains(),
 )
 
 

@@ -3,7 +3,7 @@
 这是一个**配置型 bundle**：它不包含插件代码，只声明对 `@deepseek-ai/dsh-mcp-client`
 的依赖，并通过 `cordis.patch.yml` 插入一条 MCP 客户端实例。
 
-装好之后 agent 会拿到六个工具：`search` / `detail` / `detail_many` / `export` / `snapshot` / `status`，覆盖**知网**与
+装好之后 agent 会拿到七个工具：`search` / `detail` / `detail_many` / `export` / `page_read` / `snapshot` / `status`，覆盖**知网**与
 **Web of Science** 两个渠道，WoS 记录自带期刊影响因子。不下载全文，只出题录。
 
 ## 版本对照
@@ -72,7 +72,7 @@ wensu status       # bridge_ready: true 才表示整条链路通了
 `@deepseek-ai/dsh-mcp-client`（0.12.57 = `0.2.2-rc.3`，与 DSH 版本必须一致），不需要手工
 复制 `node_modules`，也不要手工编辑 profile 的 `cordis.patch.yml`。
 
-安装完成后**完全重启 DSH**，新会话中应出现六个工具：
+安装完成后**完全重启 DSH**，新会话中应出现七个工具：
 
 - `mcp__wensu__search`
 - `mcp__wensu__detail`

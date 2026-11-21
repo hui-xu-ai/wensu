@@ -130,6 +130,8 @@ wensu serve --transport http --host 127.0.0.1 --port 8765
 | `detail` | `url`（`search` 返回的链接或裸 DOI）、`channel`、`include_abstract`、`fields` | 单条完整题录（含摘要、DOI、卷期页） |
 | `detail_many` | `urls[]`、`include_abstract`、`fields` | `results[]`、`ok_count`、`failed_count`；遇风控整批停止 |
 | `export` | `records`、`format`：`ris`/`endnote`/`markdown`/`csv`、`out_path` | 纯文本；给了 `out_path` 则写盘且不回传正文 |
+| `page_read` | `doi`（优先）或 `url` | **2 单位**：先开出版社首页再开文章，存成 MHTML 后回报 `status`（`ok`/`no_html`/`unsupported_site`/`blocked`）、`mhtml_path`、`reason`、`pdf_url` |
+| `snapshot` | — （只作用于当前标签页） | **0 单位**：把用户正开着的页面存成 MHTML；遇人机验证返回 `blocked`/`RISK_CAPTCHA` |
 | `status` | `brief` | 渠道、剩余配额、冷却状态、桥接是否就绪 |
 
 `include_abstract` 默认 **false**，`fields` 可把响应压到只留需要的键（`url` 与额度字段总是保留）。
