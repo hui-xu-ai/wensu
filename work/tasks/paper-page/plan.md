@@ -1,6 +1,6 @@
 # 计划（草案）· 在线文献网页「自动阅读」能力
 
-> 状态：**M1 已完成**（2026-11-18）；M2（扩展 pageCapture + snapshot 动词）待开工。G0 需求 → 本文件；G1 ADR 待选型确定后写 `docs/adr/0018-*`。
+> 状态：**M1 + M2 已完成**（2026-11-18）；待办只剩发版（0.12.58）与端到端真机验收。G0 需求 → 本文件；G1 ADR 待选型确定后写 `docs/adr/0018-*`。
 
 ## 1. 需求（G0）
 
@@ -59,7 +59,7 @@
 |---|---|---|
 | **M0** ✅ | 依赖装好（trafilatura、markitdown）+ `tools/page2md.py` 骨架 | 三个样本（arXiv abs 页 / 中文期刊页 / ScienceDirect 页）各跑一次，产出 md |
 | **M1** ✅ | 正文抽取调优 + `meta.json` 告警 + 目录布局 + skill `paper-page` + 单测 | `pytest tests/unit/test_page2md.py -q`；断言：`^# ` 标题存在、`$$` 公式块 >0、表格行 >0（有表页）、黑名单词（Cookie/Subscribe/Related）命中 0、正文长度在区间内 |
-| **M2**（下一里程碑） | 扩展加 `pageCapture` + 动词 `snapshot` + host 落盘 + ADR 0018 | 真机：在 Edge 打开一篇 → 点扩展/调工具 → `pages/<slug>/page.mhtml` 与 `page.md` 都生成；`wensu status` 配额不变（快照不发站点请求） |
+| **M2** ✅ | 扩展加 `pageCapture` + 动词 `snapshot` + host 落盘 + ADR 0018 | 真机：在 Edge 打开一篇 → 点扩展/调工具 → `pages/<slug>/page.mhtml` 与 `page.md` 都生成；`wensu status` 配额不变（快照不发站点请求） |
 | M3（可选，暂不做） | 多标签批量、公式图 OCR（pix2tex） | — |
 
 ## 7. 决策（2026-11-18 已定，讨论结论）

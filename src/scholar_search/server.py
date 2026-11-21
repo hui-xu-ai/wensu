@@ -783,6 +783,22 @@ def build_server(service: ScholarService) -> FastMCP:
             return _payload(error if isinstance(error, Exception) else ValueError("bad record"))
 
     @mcp.tool()
+    def snapshot() -> dict[str, Any]:
+        """Save the page the user has open as MHTML — one file with its images and CSS.
+
+        This is the "read this paper" entry point for pages outside the two channels:
+        the user opens the article in the browser, `snapshot` writes
+        `wensu-pages/<title> [<host>] <time>.mhtml` into the download folder, and
+        `tools/page2md.py` turns that file into Markdown an agent can read.
+
+        It issues no request of its own — it reads the tab that is already open — so it
+        spends **no quota** and is not limited to the channel domains. `status` still
+        reports `bridge_ready`; a false value means the extension is not connected.
+        """
+
+        return service.snapshot()
+
+    @mcp.tool()
     def status(brief: bool = False) -> dict[str, Any]:
         """Session state: channels, cooldown, quota, bridge readiness.
 

@@ -14,7 +14,11 @@ from enum import StrEnum
 from typing import Any, Literal, Protocol, runtime_checkable
 
 # --------------------------------------------------------------------------
-# Action vocabulary (closed set, v1)
+# Action vocabulary (closed set)
+#
+# `snapshot` saves the page the user already has open as MHTML (ADR 0018). It is
+# the one verb that needs no domain scope: it issues no request of its own, so it
+# cannot reach a site the whitelist did not allow — the tab is already there.
 # --------------------------------------------------------------------------
 
 Verb = Literal[
@@ -27,6 +31,7 @@ Verb = Literal[
     "read_text",
     "scroll",
     "sleep",
+    "snapshot",
 ]
 
 VERBS: frozenset[str] = frozenset(
@@ -40,6 +45,7 @@ VERBS: frozenset[str] = frozenset(
         "read_text",
         "scroll",
         "sleep",
+        "snapshot",
     }
 )
 

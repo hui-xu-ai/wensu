@@ -23,6 +23,17 @@ failed formulas, tables left inline, missing images) so the skill can tell the u
 the PDF before quoting a number. The skill lives in `skills/paper-page/`; MHTML input from
 `chrome.pageCapture` is the next milestone ([ADR 0018](docs/adr/0018-page-snapshot.md)).
 
+### Added — `snapshot`: save the open tab as one MHTML file
+
+The sixth tool and the tenth verb. `chrome.pageCapture.saveAsMHTML` writes the page the user
+already has open — images and CSS included — through the browser's own download manager into
+`wensu-pages/…mhtml`; the bridge only relays `{path, bytes, url, title}` because a saved
+article is 1–5 MB and the bridge is line-delimited JSON with a 1 MB frame cap.
+
+It issues no request, so it spends **no quota** and is exempt from the channel domain
+whitelist — the one place that rule bends, and only for a tab that is already open
+([ADR 0018](docs/adr/0018-page-snapshot.md)).
+
 ## [0.12.57] - 2026-11-18
 
 ### Fixed — the DSH bundle was refused by DSH 0.2.2-rc.3

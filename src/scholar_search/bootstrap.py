@@ -28,6 +28,8 @@ ACTION_COST: dict[str, object] = {
     "site_sort": {"cnki": 5, "webofscience": 10},
     "page_turn": {"cnki": 4, "webofscience": None},
     "local_sort": 0,
+    # Saving the tab the user already has open sends the site nothing (ADR 0018).
+    "snapshot": 0,
     "detail_cached": 0,
     "detail_live": {"cnki": 1},
 }

@@ -34,8 +34,9 @@ def schemas() -> dict[str, dict[str, Any]]:
     return _schemas()
 
 
-def test_the_five_tools_are_advertised(schemas: dict[str, dict[str, Any]]) -> None:
-    assert set(schemas) == {"search", "detail", "detail_many", "export", "status"}
+def test_the_six_tools_are_advertised(schemas: dict[str, dict[str, Any]]) -> None:
+    # `snapshot` is the sixth: it saves the open tab and spends no quota (ADR 0018).
+    assert set(schemas) == {"search", "detail", "detail_many", "export", "snapshot", "status"}
 
 
 def test_page_and_limit_carry_their_bounds(schemas: dict[str, dict[str, Any]]) -> None:

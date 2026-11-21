@@ -26,7 +26,11 @@ from .locking import interprocess_lock
 from .params import validate_params
 
 NETWORK_VERBS: frozenset[str] = frozenset({"goto", "click", "select", "type"})
-READ_VERBS: frozenset[str] = frozenset({"wait_for", "read_html", "read_text", "scroll", "sleep"})
+# `snapshot` is a read: it touches the tab the user already has open and asks the
+# site for nothing, so it belongs here rather than with the network verbs.
+READ_VERBS: frozenset[str] = frozenset(
+    {"wait_for", "read_html", "read_text", "scroll", "sleep", "snapshot"}
+)
 
 
 @dataclass(slots=True)

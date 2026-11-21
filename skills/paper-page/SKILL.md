@@ -33,9 +33,13 @@ description: 把「已保存的在线论文网页」（浏览器 Ctrl+S 的 .htm
 Get-ChildItem <目录> -Filter *.html     # 或 *.mhtml
 ```
 
-没有文件时，两条路：**请用户 Ctrl+S「网页，全部」**（浏览器会把 CSS/图片一起存下来，保真度最高），
-或者（M2 落地后）用 `wensu snapshot` 对用户当前打开的标签页直接抓 MHTML —— 不要自己去访问
-publisher 站点，也不要扩大扩展的域名白名单。
+没有文件时用 **`mcp__wensu__snapshot`**：用户把论文页在浏览器里打开，你调一次即得 MHTML
+（`pageCapture` 把图片/CSS 一起写进单文件，比手存更整齐；不发任何站点请求，**不扣额度**，
+也不受渠道域名白名单限制，因为它只读用户已经打开的标签页）。返回 `{path, bytes, url, title}`，
+把 `path` 交给下一步。
+
+扩展没装或没连上时（`status.bridge_ready: false`）再退回**请用户 Ctrl+S「网页，全部」**。
+不要自己去访问 publisher 站点，也不要扩大扩展的域名白名单。
 
 ### 2. 转换
 

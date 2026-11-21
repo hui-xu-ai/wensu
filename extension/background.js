@@ -111,6 +111,42 @@ function waitForDownload(tabId, deadline, startedAfter) {
   });
 }
 
+// `pageCapture` writes the page and every resource into one MHTML file. The blob goes
+// to the download manager, not to the bridge: the bridge speaks line-delimited JSON
+// with a 1 MB frame cap, and a saved article is routinely 1–5 MB (ADR 0018).
+function snapshotName(tab) {
+  const raw = `${(tab && tab.title) || "page"}`;
+  const slug =
+    raw
+      .replace(/[\\/:*?"<>|]+/g, "_")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 80) || "page";
+  let host = "page";
+  try {
+    host = new URL((tab && tab.url) || "").hostname.replace(/[^a-z0-9.-]/gi, "") || "page";
+  } catch {
+    host = "page";
+  }
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  return `wensu-pages/${slug} [${host}] ${stamp}.mhtml`;
+}
+
+function waitDownloadPath(downloadId, deadline) {
+  return new Promise((resolve) => {
+    const tick = () => {
+      chrome.downloads.search({ id: downloadId }, (items) => {
+        const item = (items || [])[0];
+        if (item && item.state === "complete" && item.filename) return resolve(item.filename);
+        if (item && item.state === "interrupted") return resolve("");
+        if (Date.now() >= deadline) return resolve(item && item.filename ? item.filename : "");
+        setTimeout(tick, 200);
+      });
+    };
+    tick();
+  });
+}
+
 let port = null;let boundTabId = null;
 let reconnectDelayMs = 3000;
 
@@ -212,6 +248,35 @@ async function onHostMessage(message, channel) {
   const reply = (payload) => channel.postMessage({ type: "action_result", id, ...payload });
 
   try {
+    if (action === "snapshot") {
+      // Deliberately not domain-scoped: the user already has this tab open and the verb
+      // issues no request of its own (ADR 0018). `pageCapture` rejects browser pages, so
+      // the scheme is checked here to return a specific error instead of an API throw.
+      const tab = await activeTab();
+      if (!tab || !tab.id) throw new Error("no_active_tab");
+      if (!tab.url || !/^https?:/i.test(tab.url)) throw new Error("policy.url_scheme");
+      const blob = await chrome.pageCapture.saveAsMHTML({ tabId: tab.id });
+      const objectUrl = URL.createObjectURL(blob);
+      let downloadId;
+      try {
+        downloadId = await chrome.downloads.download({
+          url: objectUrl,
+          filename: snapshotName(tab),
+          saveAs: false,
+          conflictAction: "overwrite",
+        });
+      } finally {
+        // Revoking now would cancel the write; the download manager keeps reading the
+        // blob until the file is complete, so the URL is released later on.
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 120_000);
+      }
+      if (!Number.isInteger(downloadId)) throw new Error("snapshot.download");
+      const path = await waitDownloadPath(downloadId, Date.now() + 20_000);
+      if (!path) throw new Error("snapshot.download_incomplete");
+      reply({ ok: true, data: { path, bytes: blob.size, url: tab.url, title: tab.title || "" } });
+      return;
+    }
+
     if (action === "goto") {
       const tab = await activeTab();
       if (!tab || !tab.id) throw new Error("no_active_tab");

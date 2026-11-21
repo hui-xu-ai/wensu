@@ -1,6 +1,6 @@
 # 0018 · 在线文献网页快照：扩展 pageCapture + MHTML 落盘 + 本地转 Markdown
 
-**状态**：已接受（2026-11-18）
+**状态**：已接受并实现（2026-11-18；动词与扩展在 0.12.58 前落地）
 **相关**：ADR 0003（动作动词封闭）、ADR 0004（遇阻即停）、ADR 0005（配额）、计划 `work/tasks/paper-page/plan.md`
 
 ## 背景
@@ -17,7 +17,7 @@ wensu 只能读知网/WoS 两个渠道（域名白名单由 channel manifest 声
 1. **页面来源**：扩展对**用户当前已打开的那个标签页**调用 `chrome.pageCapture.saveAsMHTML({tabId})`，得到 MHTML Blob（[该 API 把页面与全部资源封进单文件](https://developer.chrome.google.cn/docs/extensions/mv2/reference/pageCapture)），落盘到 `SCHOLAR_SEARCH_HOME/pages/<slug>/page.mhtml`。
 
    **传输不走桥**：桥是「一行一个 JSON」的 TCP/native-messaging 协议，且 `read_html` 本身就有 1 MB 截断 —— 把 1–5 MB 的 MHTML base64 塞进一行会破坏这条设计（`docs/bridge-protocol.md` §Size limits 明确写了"不接受无界行"）。所以：扩展用**已有的** `downloads` 权限把 Blob 直接下载到 `wensu-pages/<slug>.mhtml`，桥上的 `snapshot` 只回报**小消息** `{ok, path, bytes, sha256}`；转换脚本按路径读取，必要时把文件移进 `pages/`。
-2. **不新增任何"打开任意网址"的能力**：`snapshot` 只作用于已存在的标签页，因此域名白名单、风控模型（ADR 0004）、"动作词汇封闭"（ADR 0003）的语义都不变——只是新增一个动词。
+2. **不新增任何「打开任意网址」的能力**：`snapshot` 只作用于已存在的标签页，因此域名白名单、风控模型（ADR 0004）、"动作词汇封闭"（ADR 0003）的语义都不变——只是新增一个动词。
 3. **快照不计配额**：`pageCapture` 不向站点发请求，故 `snapshot` 不进 `NETWORK_VERBS`（ADR 0005 的口径不变）。
 4. **转换在本地**：`tools/page2md.py` 把 MHTML/HTML 转成 `page.md`（trafilatura 抽正文；失败回退 markitdown），并移植自家的公式还原与化学式/单位后处理。
 5. **对外暴露**：M2 增加第 6 个 MCP 工具 `snapshot`（`schemas/tools.json` 由生成器重建，已有闸门），配套新技能 `paper-page`。

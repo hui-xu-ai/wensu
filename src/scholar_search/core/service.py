@@ -37,6 +37,10 @@ from .policy import PolicyEngine
 from .registry import ChannelRegistry, ChannelSpec
 from .risk import RiskGuard
 
+# A page snapshot moves a few megabytes through the browser's own write path. The host
+# rejects any deadline above 15 s (`policy.deadline`), so this is the ceiling too.
+SNAPSHOT_TIMEOUT_MS = 15_000
+
 
 class _BrowserTransaction:
     """The browser lock plus the adapter that lock protects.
@@ -495,6 +499,34 @@ class ScholarService:
         except TypeError:
             # Providers written before `brief` existed take no argument.
             return dict(provider())
+
+    def snapshot(self) -> dict[str, Any]:
+        """Save the page the user has open as MHTML, next to the other snapshots.
+
+        No channel is involved and no request is issued (ADR 0018): `pageCapture` reads
+        the tab the user is already looking at and the browser's download manager writes
+        the file, so nothing is charged to the quota and no domain scope applies.
+        """
+
+        self._ensure_ready()
+        self._ensure_bridge()
+        with self._browser_transaction():
+            adapter = self._transaction_adapter()
+            outcome = adapter.execute(Action("snapshot"), timeout_ms=SNAPSHOT_TIMEOUT_MS)
+        if not outcome.ok:
+            raise ActionError(
+                f"the page could not be saved ({outcome.error or 'action.failed'})",
+                verb="snapshot",
+                code=outcome.error or "action.failed",
+                stage="snapshot",
+            )
+        data = dict(outcome.data)
+        return {
+            "path": str(data.get("path") or ""),
+            "bytes": int(data.get("bytes") or 0),
+            "url": str(data.get("url") or ""),
+            "title": str(data.get("title") or ""),
+        }
 
     # -- internals ------------------------------------------------------
 

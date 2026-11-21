@@ -1,4 +1,4 @@
-"""Closed parameter schemas for the nine browser verbs.
+"""Closed parameter schemas for the ten browser verbs.
 
 Both the kernel and the native host validate with this module, so the accepted
 shape cannot drift between layers.
@@ -40,6 +40,8 @@ ALLOWED_KEYS: dict[str, frozenset[str]] = {
     "read_text": frozenset({"selector", "mode"}),
     "scroll": frozenset({"to", "by"}),
     "sleep": frozenset({"ms"}),
+    # No parameters: it always snapshots the tab the user has open (ADR 0018).
+    "snapshot": frozenset(),
 }
 
 WAIT_STATES = frozenset({"visible", "hidden"})

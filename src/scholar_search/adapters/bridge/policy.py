@@ -1,9 +1,12 @@
 """Validation for messages crossing the native bridge.
 
 The host is the second line of defence: even if the extension is compromised,
-it can only ask for the nine verbs with the closed parameter schema. Domain
+it can only ask for the ten verbs with the closed parameter schema. Domain
 authority comes from the selected channel manifest, but the host always keeps a
 trusted default and a request may only narrow that scope, never replace it.
+
+`snapshot` is the exception to the domain rule, and only because it makes no
+request: it saves the page the user already has open (ADR 0018).
 """
 
 from __future__ import annotations
@@ -25,6 +28,7 @@ VERBS: frozenset[str] = frozenset(
         "read_text",
         "scroll",
         "sleep",
+        "snapshot",
     }
 )
 
