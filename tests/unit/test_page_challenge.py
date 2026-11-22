@@ -137,6 +137,36 @@ def test_no_second_look_is_taken_on_a_challenge_page(tmp_path: Path) -> None:
 # -- guards: the fix must not swallow the legitimate cases --------------------
 
 
+def test_a_nature_style_article_is_not_an_abstract_shell(tmp_path: Path) -> None:
+    """Nature类站点：正文在 `<article>` 里、标题不编号、没有 `<section id>`。
+
+    真实链路（2026-11-22，`10.1038/s41586-020-2649-2`）：0.13.3 的"编号标题 / ≥6 个 section 外壳"
+    两个判据都不成立，整篇正文被判成 `abstract_only`。结构判据补上"`<article>` + 多个 `<h2>`
+    标题"（实测该页 article_tags=4、body_headings=35）。
+    """
+
+    headings = "".join(
+        f"<h2>{name}</h2><p>Text of {name}.</p>"
+        for name in ("Abstract", "Main", "Results", "Discussion", "Methods", "Data availability")
+    )
+    nature = (
+        "From: <Saved by Blink>\n"
+        "MIME-Version: 1.0\n"
+        'Content-Type: multipart/related; boundary="----NAT"\n\n'
+        "------NAT\n"
+        "Content-Type: text/html; charset=utf-8\n"
+        "Content-Transfer-Encoding: 8bit\n\n"
+        "<!DOCTYPE html><html><head><title>Array programming with NumPy</title></head>"
+        f"<body><article>{headings}</article></body></html>\n"
+        "------NAT--\n"
+    )
+    probe = classify_mhtml(_saved(tmp_path, nature, name="nature.mhtml"))
+
+    assert probe["status"] == "ok", probe
+    assert probe["article_tags"] >= 1, probe
+    assert probe["body_headings"] >= 6, probe
+
+
 def test_a_real_article_page_is_still_ok(tmp_path: Path) -> None:
     probe = classify_mhtml(_saved(tmp_path, _ARTICLE))
 

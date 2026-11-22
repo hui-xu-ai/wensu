@@ -55,6 +55,10 @@ SECTION_MARKERS: tuple[str, ...] = ('class="section-title"', "<section id=")
 # Without a numbered heading, only a page that wraps this many sections is still trusted as
 # the article itself; fewer means "abstract shell" (or "still rendering", see service.py).
 FULL_TEXT_SECTIONS = 6
+# The Nature-style shape: an `<article>` element and several unnumbered headings.
+BODY_HEADINGS = 6
+_ARTICLE_TAG = re.compile(r"<article[ >]", re.IGNORECASE)
+_BODY_HEADING = re.compile(r"<h[23][ >]", re.IGNORECASE)
 # `<h2>1. Introduction</h2>` / `<h3><span>2.3</span> Method</h3>`: the article's own numbering.
 _NUMBERED_HEADING = re.compile(
     r"<h[1-3][^>]*>(?:\s|<[^>]+>)*[1-9]\d?\.?(?:&#xA0;|&nbsp;|\s)+[A-Z]",
@@ -101,6 +105,8 @@ def classify_mhtml(path: Path, *, url: str = "") -> dict[str, object]:
     lowered = raw.casefold()
     sections = sum(lowered.count(marker.casefold()) for marker in SECTION_MARKERS)
     headings = len(_NUMBERED_HEADING.findall(raw))
+    article_tags = len(_ARTICLE_TAG.findall(raw))
+    body_headings = len(_BODY_HEADING.findall(raw))
     hits = sum(1 for marker in PAYWALL_MARKERS if marker in _text_of(lowered))
 
     pdf_match = _PDF_LINK.search(raw)
@@ -112,6 +118,8 @@ def classify_mhtml(path: Path, *, url: str = "") -> dict[str, object]:
     counts = {
         "sections": sections,
         "headings": headings,
+        "article_tags": article_tags,
+        "body_headings": body_headings,
         "paywall_hits": hits,
         "pdf_url": pdf_url,
         "title": title,
@@ -129,9 +137,13 @@ def classify_mhtml(path: Path, *, url: str = "") -> dict[str, object]:
         status, reason = "ok", ""
     elif hits:
         status, reason = "no_html", "paywall"
-    elif sections >= FULL_TEXT_SECTIONS:
-        # A publisher that prints unnumbered headings ("Introduction") is still a full
-        # article: plenty of section wrappers and no sign-in prompt.
+    elif sections >= FULL_TEXT_SECTIONS or (article_tags and body_headings >= BODY_HEADINGS):
+        # Two publisher shapes count as the article itself:
+        #   * plenty of `<section id=…>` wrappers (Elsevier style);
+        #   * an `<article>` element with several `<h2>`/`<h3>` headings (Nature style — its
+        #     sections are unnumbered and carry no `section id`, which made a full article
+        #     look like an abstract shell on the 0.13.3 rule; live run on
+        #     `10.1038/s41586-020-2649-2`).
         status, reason = "ok", ""
     else:
         status, reason = "no_html", "abstract_only"

@@ -6,6 +6,20 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.6] - 2026-11-22
+
+### Fixed — the 0.13.3 probe called a whole Nature article "abstract only"
+
+The rule that stopped an abstract page being reported `ok` leaned on numbered headings or
+six `<section id=…>` wrappers. Nature-style pages have neither: the article lives in an
+`<article>` element and its headings are unnumbered ("Abstract", "Main", "Methods"), so
+`page_read` answered `no_html` / `abstract_only` for `10.1038/s41586-020-2649-2` and took a
+second look at a page that was already complete. The probe now also accepts "`<article>`
+element plus at least six `<h2>`/`<h3>` headings"; the counts (`article_tags`,
+`body_headings`) are part of the answer. The abstract-shell case is unaffected: it carries
+no `<article>` element.
+
+
 ## [0.13.5] - 2026-11-22
 
 ### Changed — the referrer hop is not waited for any more
