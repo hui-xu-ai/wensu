@@ -448,7 +448,7 @@ def build_server(service: ScholarService) -> FastMCP:
                 default=None,
                 ge=1,
                 description=(
-                    "First record to read, 1-based (Web of Science only). Use it with "
+                    "First record to read, 1-based. Use it with "
                     "`records_to` to read 500 hits from one export instead of ten "
                     "fifty-record pages: `records_from=1, records_to=500`, then "
                     "`records_from=501`. One export carries at most 500 here — the site "

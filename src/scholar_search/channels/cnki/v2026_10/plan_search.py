@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 import time
 
-from ....core.contracts import Action, Plan, SearchQuery
+from ....core.contracts import MAX_PAGE, Action, Plan, SearchQuery
 from ....core.errors import ChannelError
 from .selectors import EXPERT, SEARCH, SEARCH_READY, SORT
 
@@ -30,6 +30,11 @@ _EXPRESSION = re.compile(
 )
 
 PAGE_TURN_MS = 1800
+# A range read turns pages, and the grid redraws later than a page load: a 2.5 s settle
+# read the previous page (measured 2026-11-22).
+PAGE_SETTLE_MS = 3_000
+# `sleep` is capped at 3 s per action, so the extra wait is a second action.
+PAGE_SETTLE_EXTRA_MS = 1_500
 # Browser timers are aligned to one-second buckets whenever the CNKI window is
 # not the active window, so a 2.5 s pause can answer at 3 s. A pause deadline
 # therefore has to cover the pause itself plus a reply margin; the budget these
@@ -155,6 +160,45 @@ def _page_size(query: SearchQuery) -> tuple[Action, ...]:
 VOLATILE_URL_PARAMS = frozenset({"t"})
 
 
+def _range_reads(query: SearchQuery) -> tuple[Action, ...]:
+    """One `read_html` per page of the requested range.
+
+    CNKI has no export dialog with a record range (its toolbar exports the checked rows of
+    the page on screen), so a range is read the only other way the site offers: turn the
+    page and read again. Fifty rows per page, at most three pages — the interaction rules
+    in AGENTS.md allow no more than three pages per call, so 150 records is the envelope.
+
+    The grid redraws a few seconds after a click, so each turn waits longer than a page
+    load: a 2.5 s settle read the *previous* page (measured 2026-11-22).
+    """
+
+    span = query.records_span
+    if span is None:
+        return (Action("read_html", timeout_ms=READ_TIMEOUT_MS),)
+
+    size = 50 if query.limit > 20 else 20
+    wanted = span[1] - span[0] + 1
+    pages = min(MAX_PAGE, -(-wanted // size))
+    actions: list[Action] = [Action("read_html", timeout_ms=READ_TIMEOUT_MS)]
+    for _ in range(pages - 1):
+        actions += [
+            settle(PAGE_SETTLE_MS),
+            Action("click", {"selector": SEARCH["next_page"]}, timeout_ms=CLICK_TIMEOUT_MS),
+            # The grid redraws a couple of seconds after the click: 2.5 s read the previous
+            # page (measured 2026-11-22), so the wait is 3 s plus 1.5 s (one `sleep` is
+            # capped at 3 s).
+            settle(PAGE_SETTLE_EXTRA_MS),
+            settle(PAGE_TURN_MS),
+            Action(
+                "wait_for",
+                {"selector": SEARCH_READY, "timeout_ms": FILTER_WAIT_MS},
+                timeout_ms=FILTER_WAIT_MS + WAIT_REPLY_MARGIN_MS,
+            ),
+            Action("read_html", timeout_ms=READ_TIMEOUT_MS),
+        ]
+    return tuple(actions)
+
+
 def build(query: SearchQuery) -> Plan:
     if query.source_types:
         raise ChannelError("source-type filters are not implemented for the cnki channel yet")
@@ -201,6 +245,6 @@ def build(query: SearchQuery) -> Plan:
         *_sort(query),
         *_page_size(query),
         *_pagination(query),
-        Action("read_html", timeout_ms=READ_TIMEOUT_MS),
+        *_range_reads(query),
     )
     return Plan(channel="cnki", purpose="search", actions=actions)

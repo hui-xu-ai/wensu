@@ -80,6 +80,9 @@ class _CaptureState:
 
 @dataclass
 class WebOfScienceChannel:
+    # The export dialog carries up to 1000 records; ours stops at 500 because the
+    # download has to arrive inside one action's 15 s budget (measured).
+    record_range_max = 500
     manifest: ChannelManifest
 
     def plan_search(self, query: SearchQuery) -> Plan:

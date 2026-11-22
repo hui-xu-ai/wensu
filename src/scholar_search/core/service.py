@@ -259,14 +259,24 @@ class ScholarService:
                 f"channel {query.channel!r} does not report journal metrics, "
                 "so min_impact_factor cannot be applied"
             )
-        # A record range is read out of the site's export file, so only a channel that
-        # reads that way can honour it. Saying so is better than quietly returning the
-        # fifty-record page the caller explicitly asked to go past.
-        if query.records_span is not None and getattr(channel, "parse_export", None) is None:
-            raise ScholarSearchError(
-                f"channel {query.channel!r} cannot read a record range: it reads the result "
-                "page, not an export file. Use page/limit there, or ask webofscience."
-            )
+        # A record range is read out of the site's export file (Web of Science) or by
+        # turning its result pages (CNKI), so only a channel that declares an envelope can
+        # honour it. Saying so is better than quietly returning the fifty-record page the
+        # caller explicitly asked to go past.
+        span = query.records_span
+        cap = int(getattr(channel, "record_range_max", 0) or 0)
+        if span is not None:
+            if cap <= 0:
+                raise ScholarSearchError(
+                    f"channel {query.channel!r} cannot read a record range: it reads the "
+                    "result page, not an export file. Use page/limit there, or ask "
+                    "webofscience."
+                )
+            if span[1] - span[0] + 1 > cap:
+                raise ScholarSearchError(
+                    f"channel {query.channel!r} reads at most {cap} records per call "
+                    f"(asked for {span[1] - span[0] + 1}); read the next range instead"
+                )
         key = _key("search", spec, _site_signature(channel, query))
 
         cached = self._cache.get(key)
@@ -378,7 +388,7 @@ class ScholarService:
                 break
             outcomes = self._run(fix_plan, spec)
             html = _html(outcomes)
-        page = self._read_result(channel, outcomes, html, query)
+        page = self._read_result(channel, outcomes, query)
 
         # Seed the detail cache before any filtering happens. A caller that wants
         # five records now may want the abstract of the twelfth one later, and
@@ -423,7 +433,6 @@ class ScholarService:
         self,
         channel: Channel,
         outcomes: Sequence[ActionOutcome],
-        html: str,
         query: SearchQuery,
     ) -> SearchPage:
         """Turn what the plan produced into records, whichever way the channel reads.
@@ -437,7 +446,10 @@ class ScholarService:
 
         parse_export = getattr(channel, "parse_export", None)
         if parse_export is None:
-            return channel.parse_search(html, query=query)
+            pages = [channel.parse_search(item, query=query) for item in _payloads(outcomes)]
+            if not pages:
+                raise ParseError("plan produced no page payload")
+            return pages[0] if len(pages) == 1 else _merge_pages(pages)
 
         download = next(
             (
@@ -1506,6 +1518,51 @@ def _click_landing(outcomes: Sequence[ActionOutcome]) -> tuple[str | None, bool]
         settled = bool(data.get("settled"))
         return (url if isinstance(url, str) and url else None), settled
     return None, False
+
+
+def _payloads(outcomes: Sequence[ActionOutcome]) -> list[str]:
+    """Every page payload the plan produced, oldest first.
+
+    A plan normally reads once. A record range on a channel without an export file reads
+    per page instead (CNKI: turn, read, turn, read), and the pages have to be merged
+    rather than silently keeping only the last one.
+    """
+
+    found: list[str] = []
+    for outcome in outcomes:
+        for key in ("html", "text"):
+            value = outcome.data.get(key)
+            if isinstance(value, str) and value:
+                found.append(value)
+                break
+    return found
+
+
+def _merge_pages(pages: Sequence[SearchPage]) -> SearchPage:
+    """Join several pages of one range read into a single answer.
+
+    A record that appears on two pages (the grid re-ordered between turns) is kept once, by
+    `url` — the identifier both channels carry. `total` and `page_count` come from the first
+    page that reports them: every page carries the same site-wide numbers, and the first one
+    is as good as any.
+    """
+
+    records: list[Record] = []
+    seen: set[str] = set()
+    for page in pages:
+        for record in page.records:
+            marker = record.url or f"{record.title}|{record.year}"
+            if marker in seen:
+                continue
+            seen.add(marker)
+            records.append(record)
+    first = pages[0]
+    return replace(
+        first,
+        records=tuple(records),
+        dropped_year=sum(page.dropped_year for page in pages),
+        empty_reason=first.empty_reason if not records else None,
+    )
 
 
 def _html(outcomes: Sequence[ActionOutcome]) -> str:

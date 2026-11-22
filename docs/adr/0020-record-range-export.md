@@ -56,6 +56,15 @@ Web of Science 渠道在 `www.webofscience.com` 上不通过页面 `fetch` 拿�
 5. **响应体变大**：500 条完整记录是 MB 级。`include_abstract` 默认 false，`fields` 可进一步投影；
    调用方要正文时用 `detail(url)`，命中缓存不花额度。
 
+## 修订 2026-11-22 · 知网用同一组参数（翻页机制，上限 150）
+
+知网没有"记录 1 至 N"的导出入参：`#batchOpsBox` 里全是格式链接（GB/T 7714、EndNote、
+NoteExpress…），`#selectCheckAll1` 只勾当前页，每页最多 50 条。所以同一组参数在知网走
+**翻页**：`records_from=1, records_to=150` 一次调用翻三页、读三次、合并去重（AGENTS.md 允许
+单次 ≤3 页，因此上限 150 而不是 500）。实测 2026-11-22：150 条、44.7 s、150 个唯一 URL。
+
+每翻一页的等待是 4.5 s（3 s + 1.5 s，单次 `sleep` 上限 3 s）：2.5 s 会读到**上一页**的网格。
+
 ## 被否的替代方案
 
 - **提高 `limit` 到 1000**：`limit` 是"一页最多取几条"的语义，CNKI 也用它（20/50）。

@@ -6,6 +6,21 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-11-22
+
+### Added — the same record range on CNKI (three pages, 150 records)
+
+CNKI has no export dialog with a record range: `#batchOpsBox` holds format links only and
+`#selectCheckAll1` checks just the page on screen. The same parameters therefore read by
+**turning pages**: `records_from=1, records_to=150` reads three pages in one call and
+merges them, deduplicating by `url`. The cap is 150 rather than 500 because the
+interaction rules allow at most three pages per call, at fifty rows a page.
+
+Each turn waits 3 s + 1.5 s: a 2.5 s settle read the *previous* grid (measured), and one
+`sleep` may not exceed 3 s. Real run 2026-11-22: 150 records, 44.7 s, 150 distinct
+URLs, `total: 6304`.
+
+
 ## [0.14.0] - 2026-11-22
 
 ### Added — read a record range from one export (up to 500 a call)

@@ -45,6 +45,11 @@ class CnkiChannel:
     # cache-buster and not a search term.
     volatile_url_params = plan_search.VOLATILE_URL_PARAMS
 
+    # A record range is read by turning pages: the site has no export range, and its
+    # grid holds at most 50 rows, so 150 (three pages) is the whole envelope the
+    # interaction rules allow in one call.
+    record_range_max = 150
+
     def plan_search(self, query: SearchQuery) -> Plan:
         return plan_search.build(query)
 
