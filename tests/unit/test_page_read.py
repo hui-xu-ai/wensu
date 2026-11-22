@@ -162,7 +162,6 @@ def test_page_read_takes_a_second_look_when_the_body_is_still_rendering(tmp_path
     full = write_mhtml(tmp_path / "full.mhtml", ARTICLE_HTML).read_bytes()
     scripts: list[list[dict[str, object]]] = [
         [
-            {"verb": "goto", "data": {"url": "https://www.sciencedirect.com/"}},
             {
                 "verb": "goto",
                 "data": {"url": "https://www.sciencedirect.com/science/article/pii/X"},
@@ -201,30 +200,29 @@ def test_page_read_takes_a_second_look_when_the_body_is_still_rendering(tmp_path
     assert result["headings"] >= 1
 
 
-def test_page_read_touches_the_home_page_in_a_throwaway_tab(tmp_path: Path) -> None:
-    """首页只"碰一下"：新开的临时标签页由下一次 goto 关掉，最后只留文章页那一张。"""
+def test_page_read_deep_links_without_a_front_page_warm_up(tmp_path: Path) -> None:
+    """发布版**不**先访问出版社首页：那是"看起来像站内跳转"的抓取手法（0.13.7 移除）。
+
+    私有版要恢复时只需把两行 Action 补回去；`goto` 的 `open`/`close`/`wait` 参数仍在，
+    所以恢复不需要改扩展。
+    """
 
     service = build_service(tmp_path, [[]])  # 事务会先钉一个 adapter
     seen: list[object] = []
 
     def fake_run(plan: object, spec: object) -> tuple[object, ...]:
         seen.append(plan)
-        raise RuntimeError("stop here")  # 只看计划，不真的跑
+        raise RuntimeError("stop here")
 
     service._run = fake_run  # type: ignore[method-assign]
     with pytest.raises(RuntimeError):
         service.read_page(doi="10.1016/j.cej.2023.145123")
 
     actions = seen[0].actions  # type: ignore[attr-defined]
-    assert actions[0].verb == "goto"
-    assert actions[0].params["open"] == "new"
-    assert actions[0].params["url"] == "https://www.sciencedirect.com/"
-    assert actions[0].params["wait"] == "none", "首页不等加载（肉眼不该看见它）"
-    assert actions[0].params["dwell_ms"] <= 200, "首页与空白页之间的指令间隔要极短"
-    assert actions[1].verb == "goto"
-    assert actions[1].params["close"] == "disposable"
-    assert actions[1].params["dwell_ms"] == 0, "论文页的加载等待已足够，不再额外停顿"
-    assert actions[1].params["url"] == "https://doi.org/10.1016/j.cej.2023.145123"
+    assert [action.verb for action in actions] == ["goto", "sleep"]
+    assert actions[0].params["url"] == "https://doi.org/10.1016/j.cej.2023.145123"
+    assert "open" not in actions[0].params, "首页参照页不得出现在发布版里"
+    assert "https://www.sciencedirect.com/" not in str(actions)
 
 
 def test_goto_accepts_the_transient_tab_parameters() -> None:
@@ -246,11 +244,10 @@ def test_page_read_refuses_an_unsupported_doi_without_opening_anything(tmp_path:
     assert "publishers" in result
 
 
-def test_page_read_navigates_home_then_article_and_classifies(tmp_path: Path) -> None:
+def test_page_read_deep_links_then_classifies(tmp_path: Path) -> None:
     payload = write_mhtml(tmp_path / "source.mhtml", ARTICLE_HTML).read_bytes()
     scripts: list[list[dict[str, object]]] = [
         [
-            {"verb": "goto", "data": {"url": "https://www.sciencedirect.com/"}},
             {
                 "verb": "goto",
                 "data": {"url": "https://www.sciencedirect.com/science/article/pii/X"},

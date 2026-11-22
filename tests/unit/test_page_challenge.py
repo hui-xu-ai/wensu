@@ -233,7 +233,6 @@ def test_the_service_takes_one_snapshot_and_reports_the_wall(tmp_path: Path) -> 
     wall = write_mhtml(tmp_path / "wall.mhtml", _WALL).read_bytes()
     scripts = [
         [
-            {"verb": "goto", "data": {"url": "https://onlinelibrary.wiley.com/"}},
             {
                 "verb": "goto",
                 "data": {"url": "https://onlinelibrary.wiley.com/doi/10.1002/adma.75384"},

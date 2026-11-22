@@ -613,12 +613,20 @@ class ScholarService:
             return dict(provider())
 
     def read_page(self, *, url: str = "", doi: str = "") -> dict[str, Any]:
-        """Open a publisher page the way a reader would, then say what is on it.
+        """Open the article a reader asked for, then say what is on it.
 
-        Three steps, and each one is visible in the answer: the publisher's front page
-        first (a referrer chain, not a deep link), then the article, then a snapshot of
-        it. Nothing is clicked and nothing is typed — only `goto` and `snapshot` — so a
-        page that challenges the browser ends as `blocked` instead of being pushed at.
+        **No front-page warm-up.** Earlier builds visited the publisher's home page first
+        and then the article, i.e. they imitated a reader arriving from the site's own
+        navigation. That is a technique for getting past bot heuristics, and shipped in a
+        public package it is a scraping ramp: one call per DOI, with the site's own
+        navigation pattern reproduced. It has been removed from the released build
+        (0.13.7). `page_read` now navigates straight to the article — a deep link, exactly
+        what a reader who copied the URL would do — and if the publisher challenges it the
+        answer is `blocked` / `challenge` and the human solves it themselves (ADR 0004).
+
+        Two steps, both visible in the answer: the article, then a snapshot of it. Nothing
+        is clicked and nothing is typed — only `goto` and `sleep` — so a page that
+        challenges the browser ends as `blocked` instead of being pushed at.
 
         Answers with `status: "ok"` and the saved path when the page holds the article,
         `status: "no_html"` with a `reason` when it holds only a preview, a paywall or a
@@ -648,20 +656,8 @@ class ScholarService:
             channel=f"page:{publisher.name}",
             purpose="detail",
             actions=(
-                # The home page is a referrer hop the user must not see: issue the request,
-                # do not wait for it to load, and blank the tab ~150 ms later. Waiting for
-                # the load event and then pausing made the front page visible for ~1.5 s
-                # (user report, 2026-11-22: "肉眼看不出来你跳转了期刊首页").
-                Action(
-                    "goto",
-                    {
-                        "url": publisher.homepage,
-                        "open": "new",
-                        "wait": "none",
-                        "dwell_ms": 150,
-                    },
-                ),
-                Action("goto", {"url": target, "close": "disposable", "dwell_ms": 0}),
+                # Deep link, not a warm-up: no publisher front page is visited first.
+                Action("goto", {"url": target}),
                 # Publisher article bodies render after the load event: capturing straight
                 # after `goto` returned 1.8 KB of "Highlights" from a ScienceDirect article
                 # page that was fully accessible (0.12.59, real run after signing in).

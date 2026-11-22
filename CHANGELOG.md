@@ -6,6 +6,23 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.7] - 2026-11-22
+
+### Removed — the front-page warm-up (abuse risk)
+
+`page_read` used to visit the publisher's front page before the article. That is not a reading
+aid: it reproduces the navigation pattern of a reader arriving from the site itself, which is
+a technique for getting past bot heuristics — and in a public package it is a scraping ramp,
+one call per DOI. It is removed. The released build deep-links to the article (what a reader
+who copied the URL does) and, when the publisher challenges it, answers `blocked` /
+`challenge` so the human solves it in the browser (ADR 0004).
+
+The `goto` parameters that made the hop possible (`open`, `close`, `wait`, `dwell_ms`) stay:
+they are tab semantics, covered by tests, and carry no publisher-specific logic. A private
+build that wants the hop back needs one two-line edit in `read_page()`; that edit is kept out
+of this repository on purpose.
+
+
 ## [0.13.6] - 2026-11-22
 
 ### Fixed — the 0.13.3 probe called a whole Nature article "abstract only"
