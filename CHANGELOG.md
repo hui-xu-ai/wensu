@@ -6,6 +6,8 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.12.58] - 2026-11-22
+
 ### Added — read an online paper's page as Markdown (`paper-page`)
 
 `tools/page2md.py` turns a saved publisher page into Markdown an agent can read: `##`/`###`
@@ -50,6 +52,50 @@ Answers with a status the caller can act on: `ok` (path to convert), `no_html` w
 `unsupported_site` for a DOI outside the curated list (25 publishers, not "any https"),
 and `blocked` when the site challenges the browser. The list lives in
 `core/publishers.py`; see [ADR 0019](docs/adr/0019-publisher-page-read.md).
+
+### Fixed — `page.md` kept 37 % of the publisher's tail
+
+`_cut_tail` only knew the literal headings (`Recommended articles`, `Cited by`). ScienceDirect
+prints no such heading: it re-exports the introduction, every section title and every figure
+caption again, then the declarations and a wall of other papers' abstracts. On the acceptance
+article that tail was 21 401 of 58 470 characters, and it carried other papers' numbers into
+`page.md`. The cut is now structural: blocks that start a piece of backmatter end the document
+(declarations, acknowledgements, funding, data availability, CRediT, recommendation cards),
+and so does a *replay* — a block that repeats earlier text while a second block in the next
+four repeats too. A single repetition is left alone, because quoting an earlier paragraph is
+normal prose. `page.md` went from 14 617 to 9 636 estimated tokens on that article.
+
+### Changed — `index.json` is a map a reader can answer from
+
+`numbers` used to be bare strings (`"15.5%"`). A reader that got the value could not tell what
+it measured, and the acceptance run dropped the whole pool — four of ten questions were lost
+that way. Each entry is now `{"value": …, "ctx": …}`, where `ctx` is the sentence the value
+came from, copied verbatim; a value inside a table row takes its table's caption. Percentages
+and unit-bearing quantities are kept before bare decimals, so a six-slot section no longer
+spends its budget on geometry and loses its claim.
+
+`key_sentences` keeps two sentences per section (four for core or value-dense sections), cut at
+a word boundary with `…`, and a sentence that repeats a figure caption is dropped. Sentences
+that state a *direction* (`gradient`, `uniform`, `tends to`, `shift`, `evolve`) now score, so
+"the distribution tends to a radial gradient when α = 0" stops disappearing.
+
+The bookkeeping fields (`index`, `chars`, `level`, `core`, `paragraphs`, `keywords`,
+`core_hint`) are gone and the JSON is written with `indent=1`: the map now costs 4 302 tokens
+against 9 636 for the article (44.6 %), and four rounds of blind acceptance (10 questions, a
+full-text arm and a map-only arm, an independent judge) ended at **9/10 with no contradiction
+and no fabricated number** (`work/tasks/paper-digest/verify/round7/RESULTS.md`).
+
+Also fixed in the same pass: `_gist` split sentences on the decimal point ("…is 0.5" became
+"…is 0."), and `numbers` missed `0.70`, `58.86°` and `1 × 10⁻³` because a unit was required.
+
+### Known limitations
+
+- A value inside a table keeps the table's caption, not its row and column labels: the map
+  gives `17.94 mm`, not "high-porosity thickness".
+- A key sentence cut with `…` loses whatever qualified it (`works well for the present SMMR
+  model`, `1 × 10⁻³`).
+- Formulas are still images when the page carries no MathML; anything formula-level needs the
+  PDF. `meta.json` says so in `warnings`.
 
 ## [0.12.57] - 2026-11-18
 
