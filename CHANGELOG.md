@@ -6,6 +6,24 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.2] - 2026-11-22
+
+### Fixed — the extension asked for `chrome.storage` without the permission
+
+`goto` remembers its working tab in `chrome.storage.session`. The manifest never declared
+`storage`, so `chrome.storage` is `undefined` and every navigation failed with
+`Cannot read properties of undefined (reading 'session')`. It stayed hidden because the copy
+loaded in the browser was an older build (0.12.48) that kept the tab id in a variable; the
+first time the refreshed copy was loaded, `page_read` broke on step 1.
+
+The permission is now declared. A probe that runs one plain `goto` and one
+`goto open:"new"` against the live bridge is in `work/scratch/probe-goto.py`.
+
+Also learned the hard way: `wensu assets --target <live dir> --force` replaces the whole asset
+tree and **deletes the generated files** next to it (`com.scholar.search.json`, `scholar-host.exe`,
+`python-path.txt`), which breaks the native host registration until `wensu setup` runs again.
+Refresh assets first, then run `setup` — never the other way round.
+
 ## [0.13.1] - 2026-11-22
 
 ### Changed — the publisher front page is a throwaway tab now
