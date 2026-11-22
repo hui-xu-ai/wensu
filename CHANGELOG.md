@@ -6,6 +6,18 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.5] - 2026-11-22
+
+### Changed — the referrer hop is not waited for any more
+
+The front-page hop is meant to be invisible: the request has to go out, and the tab is
+blanked by the very next action. Waiting for its load event and then pausing made the
+front page visible for about 1.5 s (user: "肉眼看不出来你跳转了期刊首页"). `goto` now takes
+`wait: "none"` for that hop — the navigation is issued and the command returns — with a
+150 ms pause before the blanking; the article navigation takes `dwell_ms: 0` because its
+own load wait is the only thing worth waiting for.
+
+
 ## [0.13.4] - 2026-11-22
 
 ### Changed — the referrer hop pauses a fixed 0.6 s before the tab is blanked

@@ -648,12 +648,20 @@ class ScholarService:
             channel=f"page:{publisher.name}",
             purpose="detail",
             actions=(
-                # The home page is only a referrer hop: the extension waits for its load
-                # event, then this fixed pause, and only then is the tab blanked and the
-                # article loaded in it. 600 ms is the interval the user asked for on
-                # 2026-11-22 ("期刊网页跳转和空白页之间的延时改成 0.6s").
-                Action("goto", {"url": publisher.homepage, "open": "new", "dwell_ms": 600}),
-                Action("goto", {"url": target, "close": "disposable"}),
+                # The home page is a referrer hop the user must not see: issue the request,
+                # do not wait for it to load, and blank the tab ~150 ms later. Waiting for
+                # the load event and then pausing made the front page visible for ~1.5 s
+                # (user report, 2026-11-22: "肉眼看不出来你跳转了期刊首页").
+                Action(
+                    "goto",
+                    {
+                        "url": publisher.homepage,
+                        "open": "new",
+                        "wait": "none",
+                        "dwell_ms": 150,
+                    },
+                ),
+                Action("goto", {"url": target, "close": "disposable", "dwell_ms": 0}),
                 # Publisher article bodies render after the load event: capturing straight
                 # after `goto` returned 1.8 KB of "Highlights" from a ScienceDirect article
                 # page that was fully accessible (0.12.59, real run after signing in).

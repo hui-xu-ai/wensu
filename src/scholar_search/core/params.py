@@ -25,7 +25,7 @@ MAX_TEXT_CHARS = 16_000
 MAX_SLEEP_MS = 3_000
 
 ALLOWED_KEYS: dict[str, frozenset[str]] = {
-    "goto": frozenset({"url", "reload", "open", "close", "dwell_ms"}),
+    "goto": frozenset({"url", "reload", "open", "close", "wait", "dwell_ms"}),
     "wait_for": frozenset({"selector", "timeout_ms", "state"}),
     "type": frozenset({"selector", "text", "clear"}),
     # `wait_until` lets a click report when the site finished the work it started.
@@ -50,6 +50,9 @@ WAIT_STATES = frozenset({"visible", "hidden"})
 # home page that exists only to be "touched" before the article), and `close: "disposable"`
 # closes those tabs on the next navigation. Parameters of an existing verb, not new verbs.
 GOTO_OPEN = frozenset({"work", "new"})
+# `wait: "none"` returns as soon as the navigation is issued (referrer hop: the tab is
+# blanked by the next action, so waiting for the load event only delays the caller).
+GOTO_WAIT = frozenset({"load", "none"})
 GOTO_CLOSE = frozenset({"disposable"})
 READ_TEXT_MODES = frozenset({"inner", "text"})
 # Which tab a capture reads: the dedicated work tab, or whatever the user is looking at.
@@ -76,6 +79,8 @@ def validate_params(verb: str, params: Any) -> str | None:
         if "open" in params and params["open"] not in GOTO_OPEN:
             return "policy.params"
         if "close" in params and params["close"] not in GOTO_CLOSE:
+            return "policy.params"
+        if "wait" in params and params["wait"] not in GOTO_WAIT:
             return "policy.params"
         if "dwell_ms" in params:
             dwell = params["dwell_ms"]

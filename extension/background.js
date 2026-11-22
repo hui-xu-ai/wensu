@@ -421,8 +421,14 @@ async function onHostMessage(message, channel) {
         const began = Date.now();
         const created = await chrome.tabs.create({ url: params.url, active: true });
         await rememberDisposable(created && created.id);
-        await waitNavigated(created.id, "", domains).catch(() => null);
-        await waitComplete(created.id).catch(() => null);
+        // `wait: "none"` is the referrer hop: the request must go out, but the tab is
+        // blanked by the very next action, so waiting for the page to finish loading only
+        // delays the caller (measured: 0.9 s of load before a 0.6 s pause, for a page the
+        // user is never meant to see).
+        if (params.wait !== "none") {
+          await waitNavigated(created.id, "", domains).catch(() => null);
+          await waitComplete(created.id).catch(() => null);
+        }
         await new Promise((resolve) => setTimeout(resolve, dwellFor(params)));
         const updated = await chrome.tabs.get(created.id).catch(() => null);
         const where = (updated && updated.url) || params.url;

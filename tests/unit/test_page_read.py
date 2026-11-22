@@ -219,9 +219,11 @@ def test_page_read_touches_the_home_page_in_a_throwaway_tab(tmp_path: Path) -> N
     assert actions[0].verb == "goto"
     assert actions[0].params["open"] == "new"
     assert actions[0].params["url"] == "https://www.sciencedirect.com/"
-    assert actions[0].params["dwell_ms"] == 600, "首页与空白页之间固定 0.6s"
+    assert actions[0].params["wait"] == "none", "首页不等加载（肉眼不该看见它）"
+    assert actions[0].params["dwell_ms"] <= 200, "首页与空白页之间的指令间隔要极短"
     assert actions[1].verb == "goto"
     assert actions[1].params["close"] == "disposable"
+    assert actions[1].params["dwell_ms"] == 0, "论文页的加载等待已足够，不再额外停顿"
     assert actions[1].params["url"] == "https://doi.org/10.1016/j.cej.2023.145123"
 
 
