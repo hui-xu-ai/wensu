@@ -634,7 +634,7 @@ def _collect_sections(doc) -> list[tuple[str, int, list[str]]]:
             ):
                 continue
             fingerprints.append(key)
-            kept.append(text)
+            kept.extend(_split_long(_fix_decimals(text)))
         if kept:
             collected.append((title, level, kept))
     return collected
@@ -922,11 +922,64 @@ _STOPWORD_TEXT = (
 _STOPWORDS = frozenset(_STOPWORD_TEXT.split())
 
 
-def _gist(paragraphs: list[str], limit: int = 160) -> str:
+_BROKEN_DECIMAL = re.compile(r"(?<=\d)\.\s+(?=\d)")
+_NUMBER_FACT = re.compile(
+    r"(?:[A-Za-z]{1,3}\s*=\s*)?\d+(?:\.\d+)?(?:\s*[×x]\s*10[-−]?\d+)?\s*"
+    r"(?:%|J·mol⁻¹|J/mol|K|MPa|kPa|Pa|mm|μm|nm|µm|h|min|s|mol|kg|mg|g/L|mL)",
+)
+_MAX_PARAGRAPH_CHARS = 1200
+
+
+def _fix_decimals(text: str) -> str:
+    """`30. 9%` → `30.9%`: publishers split a number across spans, and a gist that keeps the
+    space both reads wrong and hides the value from a later search."""
+
+    return _BROKEN_DECIMAL.sub(".", text)
+
+
+def _split_long(text: str, limit: int = _MAX_PARAGRAPH_CHARS) -> list[str]:
+    """Break a very long block at sentence ends so no reader truncates it silently.
+
+    One paragraph in the acceptance article ran 2 443 characters; a reader capped at 2 000
+    lost the two percentages at its end. Splitting keeps every number addressable.
+    """
+
+    if len(text) <= limit:
+        return [text]
+    pieces: list[str] = []
+    current = ""
+    for sentence in _SENTENCE.findall(text):
+        candidate = (current + " " + sentence).strip()
+        if len(candidate) > limit and current:
+            pieces.append(current)
+            current = sentence.strip()
+        else:
+            current = candidate
+    if current:
+        pieces.append(current)
+    return pieces or [text]
+
+
+def _numbers(paragraphs: list[str], limit: int = 10) -> list[str]:
+    """Verbatim numeric facts of a section, so a map can carry the constants a reader needs."""
+
+    found: list[str] = []
+    for text in paragraphs:
+        for match in _NUMBER_FACT.findall(text):
+            value = match.strip()
+            if value and value not in found:
+                found.append(value)
+            if len(found) >= limit:
+                return found
+    return found
+
+
+def _gist(paragraphs: list[str], limit: int = 200) -> str:
     """One-line "what is this section about", built only from sentences that exist.
 
     No rewriting: the first sentence, any sentence carrying a number, and the last one.
-    A reader can decide from this whether the section is worth its tokens.
+    A reader can decide from this whether the section is worth its tokens. Truncation only
+    happens at a sentence end, so a value is never cut in half.
     """
 
     if not paragraphs:
@@ -941,7 +994,17 @@ def _gist(paragraphs: list[str], limit: int = 160) -> str:
             break
     if len(sentences) > 1:
         picked.append(sentences[-1])
-    gist = " ".join(dict.fromkeys(picked))
+    gist = " ".join(dict.fromkeys(picked)).strip()
+    if len(gist) <= limit:
+        return gist
+    cut = gist.rfind(". ", 0, limit)
+    if cut > 0:
+        return gist[: cut + 1].strip()
+    # No sentence ends before the limit: take the next one instead of cutting mid-word,
+    # otherwise a gist ends with "…synergistically enha".
+    following = gist.find(". ", limit)
+    if 0 < following < limit * 2:
+        return gist[: following + 1].strip()
     return gist[:limit].strip()
 
 
@@ -976,6 +1039,9 @@ def _write_brief(out: Path, sections: list[tuple[str, int, list[str]]], title: s
         lines.append(marks)
         if gist:
             lines.append(f"  {gist}")
+        numbers = _numbers(paragraphs)
+        if numbers:
+            lines.append("  values: " + " | ".join(numbers))
     (out / "page.brief.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -1042,6 +1108,7 @@ def _write_chunks(out: Path, sections: list[tuple[str, int, list[str]]]) -> dict
                 "core": core,
                 "paragraphs": len(paragraphs),
                 "gist": _gist(paragraphs),
+                "numbers": _numbers(paragraphs),
                 "keywords": _keywords(paragraphs),
             }
         )
