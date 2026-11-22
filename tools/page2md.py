@@ -640,6 +640,25 @@ def _collect_sections(doc) -> list[tuple[str, int, list[str]]]:
     return collected
 
 
+def _cut_tail(markdown: str) -> str:
+    """Drop a trailing "Recommended articles" block that the extractor merged in.
+
+    The section walk stops at the backmatter, but trafilatura's own body still carried the
+    publisher's recommendation widgets: the acceptance run found ~60 lines of another
+    paper's abstract at the end of `page.md`.
+    """
+
+    lowered = markdown.casefold()
+    cut = len(markdown)
+    for marker in _TAIL_MARKERS:
+        position = lowered.find("## " + marker)
+        if position < 0:
+            position = lowered.find(marker)
+        if 0 <= position < cut:
+            cut = position
+    return markdown[:cut].rstrip() + "\n" if cut < len(markdown) else markdown
+
+
 def _dedupe_blocks(markdown: str) -> str:
     """Drop paragraphs that repeat one already kept.
 
@@ -790,7 +809,7 @@ def _extract_body(html: str) -> tuple[str | None, dict[str, object]]:
     info["bytes_sections"] = len(sections.encode("utf-8"))
     info.update(counters)
 
-    body = _dedupe_blocks(_merge_markdown(sections, main_body))
+    body = _cut_tail(_dedupe_blocks(_merge_markdown(sections, main_body)))
     info["engine"] = (
         "sections+trafilatura"
         if sections and main_body
@@ -914,6 +933,13 @@ def _estimate_tokens(text: str) -> int:
 
 
 _SENTENCE = re.compile(r"[^.!?。！？]+[.!?。！？]?")
+# Sentence ends that are safe to split on: not after Fig./Eq./Ref./et al./e.g., and not
+# immediately before a digit ("Fig. 9b" must not become "Fig." + "9b, the performance…").
+_SENTENCE_END = re.compile(
+    r"(?<!\bFig)(?<!\bEq)(?<!\bRef)(?<!\bal)(?<!\be\.g)(?<!\bi\.e)(?<!\bvs)(?<!\bNo)"
+    r"(?<=[.!?。！？])\s+(?![\d‥])",
+)
+_TAIL_MARKERS = ("recommended articles", "cited by", "related articles", "further reading")
 _STOPWORD_TEXT = (
     "the and for with that this from were was are has have not but its their which these those "
     "into than then also such can may using used use between under over more most only both each "
@@ -948,7 +974,7 @@ def _split_long(text: str, limit: int = _MAX_PARAGRAPH_CHARS) -> list[str]:
         return [text]
     pieces: list[str] = []
     current = ""
-    for sentence in _SENTENCE.findall(text):
+    for sentence in _SENTENCE_END.split(text):
         candidate = (current + " " + sentence).strip()
         if len(candidate) > limit and current:
             pieces.append(current)
@@ -972,6 +998,40 @@ def _numbers(paragraphs: list[str], limit: int = 10) -> list[str]:
             if len(found) >= limit:
                 return found
     return found
+
+
+def _key_sentences(paragraphs: list[str], limit: int = 3) -> list[str]:
+    """2–3 sentences that carry the section: numbers, domain words, and the last sentence.
+
+    The first gist was "the first sentence", which for a methods section says nothing
+    (Q6/Q10 of the acceptance were lost exactly there). Scoring the sentences keeps the
+    verbatim text and still fits a map.
+    """
+
+    joined = " ".join(paragraphs)
+    sentences = [s.strip() for s in _SENTENCE_END.split(joined) if len(s.strip()) > 30]
+    if not sentences:
+        return []
+    keywords = set(_keywords(paragraphs, limit=12))
+    scored: list[tuple[float, int, str]] = []
+    for index, sentence in enumerate(sentences):
+        score = 0.0
+        if re.search(r"\d", sentence):
+            score += 2.0
+        lowered = sentence.casefold()
+        score += sum(0.5 for word in keywords if word in lowered)
+        if any(
+            word in lowered
+            for word in ("assum", "neglect", "model", "constant", "we ", "this study")
+        ):
+            score += 1.0
+        if index == 0:
+            score += 0.5
+        if index == len(sentences) - 1:
+            score += 0.3
+        scored.append((score, index, sentence))
+    top = sorted(scored, key=lambda item: (-item[0], item[1]))[:limit]
+    return [sentence for _score, _index, sentence in sorted(top, key=lambda item: item[1])]
 
 
 def _gist(paragraphs: list[str], limit: int = 200) -> str:
@@ -1039,6 +1099,8 @@ def _write_brief(out: Path, sections: list[tuple[str, int, list[str]]], title: s
         lines.append(marks)
         if gist:
             lines.append(f"  {gist}")
+        for sentence in _key_sentences(paragraphs, limit=2):
+            lines.append(f"  · {sentence}")
         numbers = _numbers(paragraphs)
         if numbers:
             lines.append("  values: " + " | ".join(numbers))
@@ -1108,6 +1170,7 @@ def _write_chunks(out: Path, sections: list[tuple[str, int, list[str]]]) -> dict
                 "core": core,
                 "paragraphs": len(paragraphs),
                 "gist": _gist(paragraphs),
+                "key_sentences": _key_sentences(paragraphs),
                 "numbers": _numbers(paragraphs),
                 "keywords": _keywords(paragraphs),
             }
