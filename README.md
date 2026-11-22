@@ -3,10 +3,13 @@
 ！！！  注意不要用机构或大学的IP自动化访问这些网站，可能面临来自他们的处罚  ！！！
 
 
-只读的文献题录检索服务，以 MCP 工具或按需 CLI 的形式提供给 AI 客户端。微内核 + 渠道插件：
+只读的文献**检索 + 通读**服务，以 MCP 工具或按需 CLI 的形式提供给 AI 客户端。微内核 + 渠道插件：
 
-- **知网（CNKI）** — 中文文献，中文检索式，17 个官方字段
-- **Web of Science** — 英文文献，`TS=` / `ALL=` 检索式，**自带期刊影响因子**（JCR），可筛选、可排序
+- **检索**：知网（中文文献，中文检索式，17 个官方字段）与 Web of Science（英文文献，`TS=`/`ALL=`
+  检索式，**自带期刊影响因子**），一次调用可读一整段（知网 150 条、WoS 500 条）
+- **通读**：给一个 DOI，AI 在你已登录的浏览器里打开出版社页面，存成 MHTML，再转成 Markdown 全文
+  与**文献地图**（`index.json`：每节要点、关键句、带原句的数值），约原文体积的 45%
+- 25 家出版社白名单、遇人机验证立即停机等你处理、日上限 300 次由内核强制
 
 万方、维普等以后按同一契约接入。
 
@@ -19,13 +22,24 @@
 
 ## 它能做什么
 
+**检索题录**
+
 - **关键词检索**：标题、作者、刊名、年份、被引、下载、详情链接
 - **专业检索式**：知网官方 17 个字段（`SU/TKA/KY/TI/FT/AU/FI/RP/AF/FU/AB/CO/RF/CLC/LY/DOI/CF`），
   支持 `and/*`、`or/+`、`not/-`、`%` 与括号
-- **翻页**：每次 1 页，页码 1–3；每页 20 或 50 条
-- **排序**：相关度 / 发表时间降序 / 被引降序
+- **记录范围**：`records_from` / `records_to` 一次读一整段（知网翻页 150 条、WoS 导出 500 条），
+  不再靠"排除已读"反复重检
+- **排序**：相关度 / 发表时间降序 / 被引降序；WoS 还带影响因子，可在本地筛选排序
 - **单篇详情**：摘要、关键词、作者单位、卷期页、DOI
 - **导出**：RIS / EndNote 纯文本，保留页面给出的文献类型（期刊 / 学位论文 / 会议 / 图书 / 报纸…）
+
+**通读全文**（`page_read` + `tools/page2md.py`）
+
+- **打开页面**：`page_read(doi=…)` 在浏览器里直接打开文章地址，存成 `<home>/pages/<slug>/page.mhtml`，
+  并给出 `status`（`ok` / `no_html` / `unsupported_site` / `blocked`）与原因
+- **全文 Markdown**：`page2md` 产出 `page.md`，公式、上下标、表格、图注按章节保留
+- **文献地图**：`index.json` 给每节的要点、关键句、带原句上下文的数值，先看地图再决定读哪一节
+- **按需切片**：`--slice 3`、`--query "μ"`、`--mode core`，只取需要的部分，省上下文
 
 ## 它不做什么
 
@@ -128,7 +142,7 @@ wensu serve --transport http --host 127.0.0.1 --port 8765
 
 | 工具 | 参数 | 返回 |
 |---|---|---|
-| `search` | `query`（关键词或专业检索式）、`channel`、`page` 1–3、`limit` 1–50、`sort`、`year_from`/`year_to`、`fields`、`count_only` | `total`、`page`、`page_count`、`records[]`、`quota_charged` |
+| `search` | `query`（关键词或专业检索式）、`channel`、`page` 1–3、`limit` 1–50、`records_from`/`records_to`、`sort`、`year_from`/`year_to`、`fields`、`count_only` | `total`、`page`、`page_count`、`records[]`、`quota_charged` |
 | `detail` | `url`（`search` 返回的链接或裸 DOI）、`channel`、`include_abstract`、`fields` | 单条完整题录（含摘要、DOI、卷期页） |
 | `detail_many` | `urls[]`、`include_abstract`、`fields` | `results[]`、`ok_count`、`failed_count`；遇风控整批停止 |
 | `export` | `records`、`format`：`ris`/`endnote`/`markdown`/`csv`、`out_path` | 纯文本；给了 `out_path` 则写盘且不回传正文 |
@@ -159,6 +173,8 @@ search(query="钙钛矿太阳能电池", channel="cnki", records_from=151, recor
 - 一次调用读一整段：WoS **500 条**（以前 500 条要 10 次检索）、知网 **150 条**（以前 3 次检索）；
 - 上限来自站点与交互纪律：WoS 站点允许 1000，但更大的导出赶不上单动作 15 秒的下载等待（实测）；
   知网每页 50 条、单次最多 3 页，所以 150；
+- **知网的范围必须从第 1 条开始**（它是翻页，不跳到第 11 页）：`records_from` 只能是 1；
+- 范围**超过实际结果集**时返回实际条数（例如只有 9 条命中就回 9 条），不报错；
 - `records_from/records_to` 与 `page` 互斥；
 - WoS 的范围读 `total` 是 `null`（导出文件只说带了多少条）；知网的 `total` 仍是站点命中数；
 - `exclude_ut` 仍然可用，但用途已经收窄成“隐藏我手上已有的记录”，不再用来深入。
@@ -292,6 +308,7 @@ src/scholar_search/adapters/   浏览器适配器（bridge 生产 / fixture 测�
 src/scholar_search/transports/ stdio 与 HTTP
 native-host/                   原生消息宿主（纯通讯层，Windows）
 extension/                     浏览器扩展（九个动作，零站点知识）
+tools/                         文献通读：page2md.py（MHTML → Markdown + 文献地图）
 schemas/                       记录与工具 JSON Schema
 skills/                        给 agent 的技能说明
 docs/                          架构、ADR、协议、运维、接入说明
@@ -309,6 +326,8 @@ tests/                         单元 + 契约 + fixture 回放
 | [Zotero 接入](docs/integration/zotero.md) | 手动导入 RIS 的步骤（不做自动化） |
 | [发布到 GitHub](docs/publishing.md) | 推送、tag、CI 与发布 |
 | [渠道契约](docs/channel-contract.md) | 新增渠道要实现的接口 |
+| [WoS 渠道](docs/wos-channel.md) | 字段映射、导出、记录范围 |
+| [记录范围（ADR 0020）](docs/adr/0020-record-range-export.md) | 一次读一整段：导出区间与翻页两种机制 |
 | [桥接协议](docs/bridge-protocol.md) | 宿主与扩展的帧格式与校验 |
 | [ADR 索引](docs/adr/) | 关键决策记录 |
 | [故障台账](docs/incidents.md) | 线上踩过的坑与结论 |
