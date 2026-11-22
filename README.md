@@ -144,6 +144,20 @@ wensu serve --transport http --host 127.0.0.1 --port 8765
 `search` 的年份筛选是**客户端筛选**：只对本次抓到的那一页生效，`total` 仍是站点总数。
 筛选后为空说明目标年份不在这一页，换页或换检索式，不要连续翻页扫库。
 
+**想多读几条，用记录范围，不要用排除法**（[ADR 0020](docs/adr/0020-record-range-export.md)）：
+WoS 全球站的记录来自站点导出文件，一次可以带走一大段，所以
+
+```text
+search(query="TS=(ionic actuator*)", channel="webofscience", records_from=1,   records_to=500)
+search(query="TS=(ionic actuator*)", channel="webofscience", records_from=501, records_to=1000)
+```
+
+- 一次导出 = **1 个网络动作**（1 额度），带走 500 条；以前 500 条要 10 次检索；
+- **单次上限 500 条**：站点允许 1000，但更大的文件赶不上单动作 15 秒的下载等待（实测）；
+- `records_from/records_to` 与 `page` 互斥；
+- 范围读的 `total` 是 `null` —— 导出文件里只有"带了多少条"，没有"命中多少条"；
+- `exclude_ut` 仍然可用，但它的用途已经收窄成"隐藏我手上已有的记录"，不再用来深入。
+
 ## 并发
 
 **一个浏览器 profile 同一时间只应服务一个 agent。**

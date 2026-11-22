@@ -85,4 +85,11 @@ EXPORT_DIALOG = "app-export-out-details form"
 EXPORT_CONTENT_COMBO = f"{EXPORT_DIALOG} wos-select button[role='combobox']"
 EXPORT_CONTENT_MENU = "#global-select[role='dialog']"
 EXPORT_CONTENT_FULL = "#option-fullRecord[role='option']"
+# Record range. The dialog opens on "页面上的所有记录" (`fromWholePage`); the range radio
+# reveals two number inputs that stay `disabled` until it is picked. Observed live
+# 2026-11-22 (work/scratch/wos-export-dialog.html): labels "记录:" / "至", inputs
+# `name="markFrom"` (min=1) and `name="markTo"`, aria-label "输入开始记录范围".
+EXPORT_RANGE_RADIO = "#radio3-input"
+EXPORT_RANGE_FROM = f"{EXPORT_DIALOG} input[name='markFrom']"
+EXPORT_RANGE_TO = f"{EXPORT_DIALOG} input[name='markTo']"
 EXPORT_CONFIRM = "#exportButton"

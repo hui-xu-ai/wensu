@@ -109,6 +109,11 @@ MAX_LIMIT = 50
 # 500+ DOIs through the site, so length is not the constraint; this cap exists so a
 # single request cannot grow without bound as a caller accumulates pages.
 MAX_EXCLUDE_UT = 500
+# The site exports up to 1000 records for a full record (Clarivate support centre, "Limit
+# on exporting"). Ours stops at 500 because a bigger file does not arrive inside the 15 s
+# one action may wait for its download: measured 2026-11-22 — 500 records arrived, the
+# same query asking for 1000 produced no file at all. Going deeper is the next range.
+MAX_RECORDS = 500
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,6 +154,26 @@ class SearchQuery:
     # is the field that can be excluded; a channel without one simply does not offer
     # it.
     exclude_ut: tuple[str, ...] = ()
+    # A 1-based, inclusive record range to read in one export: `records_from=1,
+    # records_to=1000` asks for the first thousand hits instead of one 50-record page.
+    #
+    # Only a channel that reads through the site's own export file can honour it, and the
+    # cap is the site's, not ours: Web of Science exports up to 1000 records for a full
+    # record and 500 when cited references are included (supportcenter.clarivate.com,
+    # "Limit on exporting"). Reaching record 1001 means the next range, not a new search —
+    # which is why `exclude_ut` is no longer the way to go deeper.
+    records_from: int | None = None
+    records_to: int | None = None
+
+    @property
+    def records_span(self) -> tuple[int, int] | None:
+        """The requested range, or None when the caller wants a normal page."""
+
+        if self.records_from is None and self.records_to is None:
+            return None
+        start = self.records_from if self.records_from is not None else 1
+        end = self.records_to if self.records_to is not None else start
+        return (start, end)
 
     def validate(self) -> None:
         if not self.text.strip():
@@ -170,6 +195,23 @@ class SearchQuery:
                 f"exclude_ut accepts at most {MAX_EXCLUDE_UT} identifiers per call; "
                 "batch them across calls instead"
             )
+        span = self.records_span
+        if span is not None:
+            start, end = span
+            if start < 1:
+                raise ValueError("records_from must be >= 1")
+            if end < start:
+                raise ValueError("records_to must be >= records_from")
+            if end - start + 1 > MAX_RECORDS:
+                raise ValueError(
+                    f"one export carries at most {MAX_RECORDS} records "
+                    f"(asked for {end - start + 1}); read the next range instead"
+                )
+            if self.page != 1:
+                raise ValueError(
+                    "page and records_from/records_to are alternatives: a range already "
+                    "says which records to read"
+                )
 
 
 # One vocabulary for document type, shared by every channel.

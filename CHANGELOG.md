@@ -6,6 +6,36 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-22
+
+### Added — read a record range from one export (up to 500 a call)
+
+`search` takes `records_from` / `records_to` (Web of Science):
+`records_from=1, records_to=500` reads the first five hundred hits out of one BibTeX
+export instead of ten fifty-record pages, and `records_from=501` reads the next batch.
+Before this, going deeper meant `exclude_ut` — re-running the whole search with the
+identifiers already in hand — so a thousand records cost twenty searches with their
+navigations. One export is the lighter path for the site as well as for the caller.
+
+The dialog's range control was observed live before being used (radio `#radio3-input`,
+then `input[name=markFrom]` / `name=markTo`, which stay disabled until the radio is
+picked); ADR 0020 records the decision and the rejected alternatives. Three limits are
+deliberate:
+
+* one export carries at most **500** records here. The site allows 1000, but a bigger
+  file does not arrive inside the 15 s one action may wait for its download (measured:
+  500 arrived, 1000 produced no file at all);
+* `records_from/records_to` are mutually exclusive with `page`, and a span over the cap
+  is refused with a message that says what to do instead;
+* `total` is `null` for a range read. An export says how many records it carries, not
+  how many the query matched — reporting the file size as `total` would have said
+  "1000 hits" for a query with tens of thousands.
+
+`exclude_ut` keeps working but its documented purpose narrows to hiding records
+already at hand; the skill, README and tool description say so. Channels that read the
+result page (CNKI) refuse a range instead of quietly returning fifty records.
+
+
 ## [0.13.8] - 2026-11-22
 
 ### Changed — the reader opens the article directly, and the docs say so

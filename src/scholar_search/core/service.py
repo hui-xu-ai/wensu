@@ -259,6 +259,14 @@ class ScholarService:
                 f"channel {query.channel!r} does not report journal metrics, "
                 "so min_impact_factor cannot be applied"
             )
+        # A record range is read out of the site's export file, so only a channel that
+        # reads that way can honour it. Saying so is better than quietly returning the
+        # fifty-record page the caller explicitly asked to go past.
+        if query.records_span is not None and getattr(channel, "parse_export", None) is None:
+            raise ScholarSearchError(
+                f"channel {query.channel!r} cannot read a record range: it reads the result "
+                "page, not an export file. Use page/limit there, or ask webofscience."
+            )
         key = _key("search", spec, _site_signature(channel, query))
 
         cached = self._cache.get(key)
@@ -1454,7 +1462,10 @@ def _present(page: SearchPage, query: SearchQuery) -> SearchPage:
         )
         dropped_year = len(before) - len(records)
     records, dropped_filter = _narrow(records, query)
-    if len(records) > query.limit:
+    if query.records_span is None and len(records) > query.limit:
+        # A record range is its own size control: the caller asked for records 1–1000 in
+        # one export, so slicing to `limit` (which defaults to 20) would answer with
+        # twenty of them and no sign that the rest were dropped on the floor.
         records = records[: query.limit]
     if not query.include_abstract:
         # An abstract is roughly 85% of a record's context cost. Dropping it

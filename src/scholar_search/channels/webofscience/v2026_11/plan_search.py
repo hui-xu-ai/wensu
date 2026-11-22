@@ -369,6 +369,11 @@ def build(query: SearchQuery, *, today: dt.date | None = None) -> Plan:
     # Kept in one place: `build_after_click` enforces the same cap, and two copies of
     # this check meant raising the limit in one spot left the other refusing.
     _reject_too_many_pages(query)
+    if query.records_span is not None and not uses_export():
+        raise ChannelError(
+            "records_from/records_to read the site's export file, which only the global "
+            "site needs; this host streams the results into the page, so use page/limit"
+        )
 
     head = build_until_click(query, today=today)
     tail = build_after_click(query)

@@ -34,6 +34,35 @@ from .plan_search import (
 EXPORT_TIMEOUT_MS = 15_000
 
 
+def _range_actions(query: SearchQuery) -> tuple[Action, ...]:
+    """Ask for a record range instead of "everything on this page" (up to 1000 records).
+
+    The dialog defaults to `fromWholePage` (页面上的所有记录), i.e. the fifty records the
+    list happens to be showing. Picking 记录: reveals two number inputs that stay
+    `disabled` until the radio is chosen, so the order below is not cosmetic.
+
+    This is what makes `exclude_ut` unnecessary for reading past the first page: the site
+    will hand over records 1–1000 in one export, and 1001–2000 in the next.
+    """
+
+    span = query.records_span
+    if span is None:
+        return ()
+    start, end = span
+    return (
+        Action("click", {"selector": selectors.EXPORT_RANGE_RADIO}, timeout_ms=CLICK_TIMEOUT_MS),
+        Action(
+            "wait_for",
+            {"selector": selectors.EXPORT_RANGE_FROM, "state": "visible"},
+            timeout_ms=WAIT_TIMEOUT_MS,
+        ),
+        settle(jitter(200, 400)),
+        Action("type", {"selector": selectors.EXPORT_RANGE_FROM, "text": str(start)}),
+        Action("type", {"selector": selectors.EXPORT_RANGE_TO, "text": str(end)}),
+        settle(jitter(200, 400)),
+    )
+
+
 def build_after_click(query: SearchQuery, *, today: dt.date | None = None) -> Plan:
     """Everything from "the result list is on screen" to "a .bib file exists"."""
 
@@ -77,6 +106,7 @@ def build_after_click(query: SearchQuery, *, today: dt.date | None = None) -> Pl
             {"selector": selectors.EXPORT_CONTENT_FULL},
             timeout_ms=CLICK_TIMEOUT_MS,
         ),
+        *_range_actions(query),
         Action(
             "wait_for",
             {"selector": selectors.EXPORT_CONFIRM, "state": "visible"},

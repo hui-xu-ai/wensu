@@ -433,12 +433,40 @@ def build_server(service: ScholarService) -> FastMCP:
             Field(
                 default=None,
                 description=(
-                    "Records to leave out, by UT identifier (Web of Science only). "
-                    "**This is the way to go deeper on WoS**: pass the UTs you already "
-                    "have and the same query returns the ones you have not seen. Each "
-                    "call is an independent request, and the set shrinks predictably "
-                    "(38 records, exclude 5 → total 33). `page` still exists for "
-                    "channels without an exclusion field."
+                    "Records to leave out, by UT identifier (Web of Science only). Use it "
+                    "to hide records you already have, not to go deeper: `records_from`/"
+                    "`records_to` read a range straight out of one export. Each call is an "
+                    "independent request and the set shrinks predictably (38 records, "
+                    "exclude 5 → total 33). `page` still exists for channels without an "
+                    "exclusion field."
+                ),
+            ),
+        ] = None,
+        records_from: Annotated[
+            int | None,
+            Field(
+                default=None,
+                ge=1,
+                description=(
+                    "First record to read, 1-based (Web of Science only). Use it with "
+                    "`records_to` to read 500 hits from one export instead of ten "
+                    "fifty-record pages: `records_from=1, records_to=500`, then "
+                    "`records_from=501`. One export carries at most 500 here — the site "
+                    "allows 1000, but a bigger file misses the 15 s a single action may "
+                    "wait for its download (measured 2026-11-22). `total` stays null for "
+                    "a range read: an export says how many records it carries, not how "
+                    "many the query matched. Mutually exclusive with `page`."
+                ),
+            ),
+        ] = None,
+        records_to: Annotated[
+            int | None,
+            Field(
+                default=None,
+                ge=1,
+                description=(
+                    "Last record to read, inclusive. Defaults to `records_from` when only "
+                    "the start is given."
                 ),
             ),
         ] = None,
@@ -550,6 +578,8 @@ def build_server(service: ScholarService) -> FastMCP:
             sources_only=tuple(sources_only or ()),
             min_impact_factor=min_impact_factor,
             exclude_ut=tuple(exclude_ut or ()),
+            records_from=records_from,
+            records_to=records_to,
         )
         try:
             result_page = service.search(request)
