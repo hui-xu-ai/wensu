@@ -242,17 +242,28 @@ async function rememberDisposable(tabId) {
 }
 
 async function closeDisposableTabs() {
+  // Blank them, do not close them. The front-page hop exists so the article request looks
+  // like a visit from that publisher, but the tab itself is the only controlled tab this
+  // extension has: closing it left a search with nowhere to run, and the run that reported
+  // this defect ended with the article in a brand-new tab id.
   const stored = (await chrome.storage.session.get(DISPOSABLE_KEY))[DISPOSABLE_KEY];
   const ids = Array.isArray(stored) ? stored.filter((id) => Number.isInteger(id)) : [];
   await chrome.storage.session.set({ [DISPOSABLE_KEY]: [] });
-  const closed = [];
+  const blanked = [];
   for (const id of ids) {
-    // Only ids this extension created are ever in this list, and a failure is not worth
-    // a plan step: the tab may already be gone, or the user closed it himself.
-    const done = await chrome.tabs.remove(id).then(() => true).catch(() => false);
-    if (done) closed.push(id);
+    // Only ids this extension created are ever in this list; a failure means the user
+    // closed it himself, which is not worth failing a plan over.
+    const done = await chrome.tabs
+      .update(id, { url: "about:blank" })
+      .then(() => true)
+      .catch(() => false);
+    if (done) blanked.push(id);
   }
-  return closed;
+  // The newest one becomes *the* work tab, so the article and every later search land in
+  // the tab we already own instead of a fresh one.
+  const newest = blanked[blanked.length - 1];
+  if (Number.isInteger(newest)) await chrome.storage.session.set({ [WORK_TAB_KEY]: newest });
+  return blanked;
 }
 
 async function workTab(domains) {
@@ -261,21 +272,14 @@ async function workTab(domains) {
     const tab = await chrome.tabs.get(stored).catch(() => null);
     if (tab && tab.id) return tab;
   }
-  const tabs = await chrome.tabs.query({});
-  const reusable = tabs.find((tab) => {
-    if (!tab.url) return false;
-    try {
-      const url = new URL(tab.url);
-      return url.protocol === "https:" && allowedHost(url.hostname, domains);
-    } catch {
-      return false;
-    }
-  });
-  if (reusable && reusable.id) {
-    await chrome.storage.session.set({ [WORK_TAB_KEY]: reusable.id });
-    return reusable;
-  }
-  const created = await chrome.tabs.create({ url: "https://www.sciencedirect.com/", active: false });
+  // Never adopt a tab the user opened himself. The previous version picked any tab whose
+  // host was in scope and remembered it as the work tab, so the next `goto` navigated the
+  // page the user was reading — the opposite of what the comment above promises
+  // (2026-11-22, reproduced with tests/js/tab_lifecycle_probe.js).
+  //
+  // The new tab starts blank on purpose: creating it at a hard-coded publisher address
+  // sent a request to Elsevier even when the article was a Wiley DOI.
+  const created = await chrome.tabs.create({ url: "about:blank", active: false });
   await chrome.storage.session.set({ [WORK_TAB_KEY]: created.id });
   return created;
 }
@@ -433,7 +437,8 @@ async function onHostMessage(message, channel) {
           url: where,
         });
       }
-      if (params.close === "disposable") await closeDisposableTabs();
+      let blanked = [];
+      if (params.close === "disposable") blanked = await closeDisposableTabs();
       const tab = await workTab(domains);
       if (!tab || !tab.id) throw new Error("no_active_tab");
       if (params.reload === true) {
@@ -477,6 +482,9 @@ async function onHostMessage(message, channel) {
         url: finalUrl,
         title: updated.title || "",
         status: status || undefined,
+        // Reported so a caller can prove the front-page tab was blanked and kept, rather
+        // than closed and replaced by a new one.
+        blanked,
       };
       if (outOfScope || status >= 400) {
         // Refuse the navigation, but keep the final URL so the kernel can see

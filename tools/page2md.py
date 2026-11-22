@@ -835,27 +835,41 @@ def _merge_markdown(sections: str, main_body: str | None, *, min_chars: int = 60
 
 
 def _extract_body(html: str) -> tuple[str | None, dict[str, object]]:
-    import trafilatura
+    """Sections first, trafilatura as the supplement, markitdown as the last resort.
 
-    metadata = trafilatura.extract_metadata(html)
-    info: dict[str, object] = {
-        "title": getattr(metadata, "title", None),
-        "authors": getattr(metadata, "author", None),
-        "date": getattr(metadata, "date", None),
-        "sitename": getattr(metadata, "sitename", None),
-        "url": getattr(metadata, "url", None),
-    }
+    `trafilatura` is optional: it is a heavy dependency and nothing the tool guarantees
+    needs it (the section walk is its own code). Importing it unguarded made a missing
+    package surface as `ModuleNotFoundError` before the documented markitdown fallback
+    could ever run (reported 2026-11-22, E2).
+    """
 
-    main_body = trafilatura.extract(
-        html,
-        output_format="markdown",
-        include_tables=True,
-        include_images=True,
-        include_links=True,
-        include_formatting=True,
-        favor_precision=True,
-    )
-    info["bytes_trafilatura"] = len(main_body.encode("utf-8")) if main_body else 0
+    info: dict[str, object] = {}
+    main_body: str | None = None
+    try:
+        import trafilatura
+    except ImportError:
+        info["trafilatura_missing"] = True
+    else:
+        metadata = trafilatura.extract_metadata(html)
+        info.update(
+            {
+                "title": getattr(metadata, "title", None),
+                "authors": getattr(metadata, "author", None),
+                "date": getattr(metadata, "date", None),
+                "sitename": getattr(metadata, "sitename", None),
+                "url": getattr(metadata, "url", None),
+            }
+        )
+        main_body = trafilatura.extract(
+            html,
+            output_format="markdown",
+            include_tables=True,
+            include_images=True,
+            include_links=True,
+            include_formatting=True,
+            favor_precision=True,
+        )
+        info["bytes_trafilatura"] = len(main_body.encode("utf-8")) if main_body else 0
 
     sections, counters = "", {}
     try:
@@ -866,11 +880,10 @@ def _extract_body(html: str) -> tuple[str | None, dict[str, object]]:
     info.update(counters)
 
     body = _cut_tail(_dedupe_blocks(_merge_markdown(sections, main_body)))
-    info["engine"] = (
-        "sections+trafilatura"
-        if sections and main_body
-        else ("sections" if sections else "trafilatura")
-    )
+    if sections and main_body:
+        info["engine"] = "sections+trafilatura"
+    else:
+        info["engine"] = "sections" if sections else ("trafilatura" if main_body else "none")
 
     figures = ""
     try:
@@ -888,7 +901,7 @@ def _extract_body(html: str) -> tuple[str | None, dict[str, object]]:
             info["engine"] = "markitdown"
         except ImportError:
             info["engine"] = "none"
-            info["warning"] = "章节聚合与 trafilatura 都没取到正文，且未安装 markitdown"
+            info["warning"] = "章节聚合没取到正文，且未安装 markitdown（trafilatura 可装可不装）"
     return body, info
 
 

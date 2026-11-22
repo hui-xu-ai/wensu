@@ -6,6 +6,55 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.3] - 2026-11-22
+
+Fixes from `wensu-风险与缺陷测试报告-2026-11-22.md` (D1–D5, E2, E4). The report's 13
+`xfail(strict=True)` cases now pass with the markers removed.
+
+### Fixed — a human-verification wall was read as "an abstract shell" (D1, safety)
+
+Wiley answered a plain article URL with a Cloudflare interstitial; `page_read` classified it
+`no_html` / `abstract_only`, which did two wrong things: it told the caller to "sign in to the
+publisher" (a dead end — the site wanted a person, not a session) and it matched
+`_still_rendering()`, so the service slept and took a **second snapshot of the wall**. ADR 0004
+says stop at the first challenge, so the probe now names it before anything else:
+`status="blocked"`, `reason="challenge"`, `signal="url:…"` or `"body:…"`. URL features
+(`__cf_chl_rt_tk`, `/cdn-cgi/challenge-platform/`) are checked first because a redirect leaves
+them in the address bar, then body markers (`Ray ID`, `challenge-platform`, `__cf_chl_opt`,
+`请稍候`, …) — the run's `final_url` was clean, so a URL-only rule would have missed exactly
+the case that exposed this. `_page_next()` now says: finish the challenge in the browser, then
+call again — never "sign in", never a retry.
+
+### Fixed — every date-sorted Web of Science search failed on the global site (D2)
+
+`sort_actions()` ended with `capture_wait()`, which waits for `#wensu-wos-capture[data-ready]`.
+That node is raised on the Clarivate mirror, where the kernel reads the NDJSON stream; the
+global site streams the same data without `window.fetch`, so the marker never appears. Every
+`site_sort=date|citation` search on `www.webofscience.com` died at step 7/19 at the cost of 5
+quota. The export path now builds its sort actions with `capture=False`; the mirror keeps its
+wait (it is the only readiness signal there).
+
+### Fixed — the extension closed its own tab, adopted the user's, and pinged a third publisher (D3–D5)
+
+* the front-page hop used to open a throwaway tab and **close** it on the next navigation,
+  leaving no controlled tab for a search; the tab is now **blanked** (`about:blank`) and kept,
+  and the article plus every later search land in it (same id). The hop itself no longer waits
+  (`dwell_ms: 0`): publisher front pages answer in well under a second and the extension
+  already waits for their load event, so the front page only flashes;
+* `workTab()` adopted any in-scope tab — including a page the user was reading — and then
+  navigated it. It now only ever drives the tab it recorded, and creates `about:blank` when
+  there is none;
+* creating that tab at `https://www.sciencedirect.com/` sent a request to Elsevier even when
+  reading a Wiley DOI; it now starts blank and the next `goto` (domain-checked) takes it to the
+  right publisher.
+
+### Fixed — `page2md` required `trafilatura` (E2) and `blocked` hid its cost (E4)
+
+`trafilatura` is an optional source: the section walk works without it and the documented
+markitdown fallback could never run. It is now imported in a `try`, and the engine reports
+`sections` with `trafilatura_missing: true`. A `blocked` answer now carries `quota_charged`
+like every other answer (the two navigations are what the quota paid for).
+
 ## [0.13.2] - 2026-11-22
 
 ### Fixed — the extension asked for `chrome.storage` without the permission

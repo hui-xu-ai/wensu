@@ -23,6 +23,34 @@ PAYWALL_MARKERS: tuple[str, ...] = (
     "institutional access",
 )
 
+# A human-verification wall is neither a paywall nor an "abstract shell": it is the site
+# asking for a person. Measured 2026-11-22 on Wiley (`10.1002/adma.75384`): Cloudflare
+# answered the plain article URL, so the URL check below sees nothing — only these body
+# markers identify it, and the tool must stop there (ADR 0004: 遇风控即停). Before this
+# list existed, such a page fell through to `abstract_only`, which (a) sent the caller off
+# to "sign in to the publisher" and (b) matched `_still_rendering()`, so the service took a
+# *second snapshot of the wall*.
+CHALLENGE_MARKERS: tuple[str, ...] = (
+    "challenge-platform",
+    "__cf_chl_opt",
+    "__cf_chl_rt_tk",
+    "cf-challenge",
+    "ray id",
+    "performance &amp; security by cloudflare",
+    "just a moment",
+    "verifying you are human",
+    "checking your browser",
+    "enable javascript and cookies to continue",
+    "请稍候",
+    "正在进行安全验证",
+)
+# URL features, checked first: a wall that redirects leaves them in the address bar.
+CHALLENGE_URL_MARKERS: tuple[str, ...] = (
+    "__cf_chl_rt_tk",
+    "/cdn-cgi/challenge-platform/",
+    "/challenge-platform/",
+)
+
 SECTION_MARKERS: tuple[str, ...] = ('class="section-title"', "<section id=")
 # Without a numbered heading, only a page that wraps this many sections is still trusted as
 # the article itself; fewer means "abstract shell" (or "still rendering", see service.py).
@@ -53,8 +81,12 @@ def _text_of(markup: str) -> str:
     return " ".join(_TAGS.sub(" ", markup).split())
 
 
-def classify_mhtml(path: Path) -> dict[str, object]:
-    """`{status, reason, sections, headings, paywall_hits, pdf_url, title}` for one saved page."""
+def classify_mhtml(path: Path, *, url: str = "") -> dict[str, object]:
+    """`{status, reason, signal, sections, headings, paywall_hits, pdf_url, title}`.
+
+    A challenge wall is reported before anything else is considered: it is not a paywall,
+    not an abstract shell and not a page that is still painting.
+    """
 
     raw = _html_of(path)
     if not raw.strip():
@@ -77,6 +109,17 @@ def classify_mhtml(path: Path) -> dict[str, object]:
     heading = _H1.search(raw)
     title = _text_of(heading.group(1))[:300] if heading else ""
 
+    counts = {
+        "sections": sections,
+        "headings": headings,
+        "paywall_hits": hits,
+        "pdf_url": pdf_url,
+        "title": title,
+    }
+    signal = _challenge_signal(lowered, url)
+    if signal:
+        return {"status": "blocked", "reason": "challenge", "signal": signal, **counts}
+
     # An abstract page still carries `<section id=` wrappers (highlights, related work), so
     # counting them called a ScienceDirect abstract page `ok` while holding no article body
     # (0.12.58, real run). A numbered article heading ("1. Introduction") is the honest
@@ -92,12 +135,17 @@ def classify_mhtml(path: Path) -> dict[str, object]:
         status, reason = "ok", ""
     else:
         status, reason = "no_html", "abstract_only"
-    return {
-        "status": status,
-        "reason": reason,
-        "sections": sections,
-        "headings": headings,
-        "paywall_hits": hits,
-        "pdf_url": pdf_url,
-        "title": title,
-    }
+    return {"status": status, "reason": reason, **counts}
+
+
+def _challenge_signal(lowered_html: str, url: str) -> str:
+    """Name the marker that identified a wall, or "" when the page is not one."""
+
+    lowered_url = (url or "").casefold()
+    for marker in CHALLENGE_URL_MARKERS:
+        if marker in lowered_url:
+            return f"url:{marker}"
+    for marker in CHALLENGE_MARKERS:
+        if marker in lowered_html:
+            return f"body:{marker}"
+    return ""

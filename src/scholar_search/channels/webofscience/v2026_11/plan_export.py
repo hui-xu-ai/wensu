@@ -45,7 +45,7 @@ def build_after_click(query: SearchQuery, *, today: dt.date | None = None) -> Pl
             timeout_ms=RESULT_TIMEOUT_MS,
         ),
         settle(jitter(1_200, 1_800)),
-        *sort_actions(query.sort),
+        *sort_actions(query.sort, capture=False),
         Action("click", {"selector": selectors.EXPORT_TRIGGER}, timeout_ms=CLICK_TIMEOUT_MS),
         Action(
             "wait_for",

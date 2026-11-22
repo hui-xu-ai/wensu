@@ -150,19 +150,26 @@ def scroll_round() -> tuple[Action, ...]:
     )
 
 
-def sort_actions(order: str) -> tuple[Action, ...]:
-    """Open the sort menu and pick a descending order, or nothing at all."""
+def sort_actions(order: str, *, capture: bool = True) -> tuple[Action, ...]:
+    """Open the sort menu and pick a descending order, or nothing at all.
+
+    `capture=False` is for the **export** host. There the result payload never passes
+    through `window.fetch` (the site streams it), so `capture.js` never raises the ready
+    marker and the wait can only time out — measured 2026-11-22 on `www.webofscience.com`:
+    every `site_sort=date|citation` search died at step 7/19 after burning 5 quota, while
+    the default `relevance` order worked because it takes no sort actions at all.
+    """
 
     selector = SORT.get(order)
     if selector is None:
         return ()
-    return (
+    actions: tuple[Action, ...] = (
         Action("click", {"selector": SORT_OPEN}, timeout_ms=CLICK_TIMEOUT_MS),
         settle(jitter(700, 1_300)),
         Action("click", {"selector": selector}, timeout_ms=CLICK_TIMEOUT_MS),
         settle(jitter(1_000, 1_600)),
-        *capture_wait(),
     )
+    return (*actions, *capture_wait()) if capture else actions
 
 
 def reload_and_wait(

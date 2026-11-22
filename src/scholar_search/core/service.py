@@ -51,12 +51,12 @@ _ARTICLE_SETTLE_MS = 1_200
 _SECOND_LOOK_MS = 1_500
 
 
-def _classify_saved(saved: dict[str, Any]) -> dict[str, Any]:
+def _classify_saved(saved: dict[str, Any], *, url: str = "") -> dict[str, Any]:
     """Probe whatever the capture wrote; a missing file is `not_written`, never `ok`."""
 
     path = Path(str(saved.get("path") or ""))
     if path.is_file():
-        return classify_mhtml(path)
+        return classify_mhtml(path, url=url)
     return {
         "status": "no_html",
         "reason": "not_written",
@@ -67,7 +67,11 @@ def _classify_saved(saved: dict[str, Any]) -> dict[str, Any]:
 
 
 def _still_rendering(probe: dict[str, Any]) -> bool:
-    """No article body **and** no sign-in prompt: the page is late, not closed."""
+    """No article body **and** no sign-in prompt: the page is late, not closed.
+
+    A challenge wall (`blocked` / `challenge`) is never a late page: the second snapshot
+    would be a second fetch of the wall, which ADR 0004 forbids.
+    """
 
     return (
         probe.get("status") == "no_html"
@@ -83,13 +87,21 @@ def _page_next(probe: dict[str, Any]) -> str:
     A paywall or an abstract-only page is almost always a *session* problem: the page was
     opened without the reader's institutional access. Telling the caller to "offer the PDF
     route" hides the one action that fixes it — ask the user to sign in, then read again.
-    The tool never retries by itself (ADR 0004).
+    A challenge wall is different: it is the *site* asking for a person, so the user has to
+    finish it in the browser, and nothing may be fetched until then. The tool never retries
+    by itself (ADR 0004).
     """
 
     status = probe.get("status")
     reason = probe.get("reason")
     if status == "ok":
         return "run tools/page2md.py on mhtml_path to get Markdown"
+    if status == "blocked":
+        return (
+            "the publisher answered with a human-verification challenge: ask the user to "
+            "finish it in that browser window, then call page_read again. Do not retry by "
+            "yourself."
+        )
     if status == "no_html" and reason in {"paywall", "abstract_only"}:
         return (
             "the page showed no article body, usually because this browser is not signed in "
@@ -636,9 +648,10 @@ class ScholarService:
             channel=f"page:{publisher.name}",
             purpose="detail",
             actions=(
-                # The home page is touched, not read: a throwaway tab that the next
-                # navigation closes, so the browser is left with one tab — the article.
-                Action("goto", {"url": publisher.homepage, "open": "new", "dwell_ms": 250}),
+                # The home page is only a referrer hop, and publisher front pages answer in
+                # well under a second: the extension already waits for the load event, so
+                # no extra dwell is needed before the tab is blanked.
+                Action("goto", {"url": publisher.homepage, "open": "new", "dwell_ms": 0}),
                 Action("goto", {"url": target, "close": "disposable"}),
                 # Publisher article bodies render after the load event: capturing straight
                 # after `goto` returned 1.8 KB of "Highlights" from a ScienceDirect article
@@ -650,7 +663,7 @@ class ScholarService:
             outcomes = self._run(plan, spec)
             final_url = outcomes[-1].url or target
             saved = self._snapshot_locked(tab="work")
-            probe = _classify_saved(saved)
+            probe = _classify_saved(saved, url=final_url)
             if _still_rendering(probe):
                 # No article body, but also no sign-in prompt: the page is still painting,
                 # not paywalled. One bounded second look, same page, same quota.
@@ -663,13 +676,25 @@ class ScholarService:
                     spec,
                 )
                 retry = self._snapshot_locked(tab="work")
-                retry_probe = _classify_saved(retry)
+                retry_probe = _classify_saved(retry, url=final_url)
                 if retry_probe.get("status") == "ok":
                     saved, probe = retry, retry_probe
-            if saved.get("status") == "blocked":
-                return {**saved, "doi": identifier, "publisher": publisher.name}
-
             readable = Path(str(saved.get("path") or ""))
+            if saved.get("status") == "blocked" or probe.get("status") == "blocked":
+                # The site asked for a person (extension-level challenge or the probe's own
+                # marker match). Nothing more may be fetched; the two navigations are what
+                # the quota paid for, so report that honestly rather than 0.
+                return {
+                    **(probe if probe.get("status") == "blocked" else {}),
+                    **saved,
+                    "doi": identifier,
+                    "publisher": publisher.name,
+                    "final_url": final_url,
+                    "mhtml_path": str(readable),
+                    "quota_charged": PAGE_READ_QUOTA,
+                    "next": _page_next({"status": "blocked", "reason": "challenge"}),
+                }
+
             return {
                 **probe,
                 "doi": identifier,

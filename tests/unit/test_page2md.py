@@ -148,6 +148,18 @@ def test_pandoc_path_converts_math(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "frac" in latex or "1" in latex
 
 
+def test_extract_body_works_without_trafilatura(monkeypatch: pytest.MonkeyPatch) -> None:
+    """trafilatura 是可选的：少了它只该少一路来源，不该让整篇文章读不了（E2）。"""
+
+    monkeypatch.setitem(sys.modules, "trafilatura", None)  # `import trafilatura` → ImportError
+
+    body, info = page2md._extract_body(SECTION_HTML)
+
+    assert body and "1. Introduction" in body
+    assert info["trafilatura_missing"] is True
+    assert info["engine"] == "sections"
+
+
 def test_convert_writes_page_and_meta(
     sample_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

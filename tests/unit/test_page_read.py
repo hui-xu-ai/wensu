@@ -219,7 +219,7 @@ def test_page_read_touches_the_home_page_in_a_throwaway_tab(tmp_path: Path) -> N
     assert actions[0].verb == "goto"
     assert actions[0].params["open"] == "new"
     assert actions[0].params["url"] == "https://www.sciencedirect.com/"
-    assert actions[0].params["dwell_ms"] <= 300
+    assert actions[0].params["dwell_ms"] == 0, "首页加载很快，不该在它上面停留"
     assert actions[1].verb == "goto"
     assert actions[1].params["close"] == "disposable"
     assert actions[1].params["url"] == "https://doi.org/10.1016/j.cej.2023.145123"
