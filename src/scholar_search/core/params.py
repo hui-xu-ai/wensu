@@ -40,8 +40,9 @@ ALLOWED_KEYS: dict[str, frozenset[str]] = {
     "read_text": frozenset({"selector", "mode"}),
     "scroll": frozenset({"to", "by"}),
     "sleep": frozenset({"ms"}),
-    # No parameters: it always snapshots the tab the user has open (ADR 0018).
-    "snapshot": frozenset(),
+    # No parameters for a capture; `token`/`offset` read the bytes back in chunks, because
+    # the browser's download manager blocks every `.mhtml` it writes (ADR 0018).
+    "snapshot": frozenset({"token", "offset"}),
 }
 
 WAIT_STATES = frozenset({"visible", "hidden"})

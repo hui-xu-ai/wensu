@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import email.mime.multipart
 import email.mime.text
 from pathlib import Path
@@ -119,7 +120,7 @@ def test_page_read_refuses_an_unsupported_doi_without_opening_anything(tmp_path:
 
 
 def test_page_read_navigates_home_then_article_and_classifies(tmp_path: Path) -> None:
-    saved = write_mhtml(tmp_path / "saved.mhtml", ARTICLE_HTML)
+    payload = write_mhtml(tmp_path / "source.mhtml", ARTICLE_HTML).read_bytes()
     scripts: list[list[dict[str, object]]] = [
         [
             {"verb": "goto", "data": {"url": "https://www.sciencedirect.com/"}},
@@ -130,10 +131,12 @@ def test_page_read_navigates_home_then_article_and_classifies(tmp_path: Path) ->
             {
                 "verb": "snapshot",
                 "data": {
-                    "path": str(saved),
-                    "bytes": 1234,
+                    "token": "t1",
+                    "total": len(payload),
+                    "base64": base64.b64encode(payload).decode("ascii"),
                     "url": "https://www.sciencedirect.com/science/article/pii/X",
                     "title": "A paper",
+                    "captcha_visible": False,
                 },
             },
         ]
@@ -144,6 +147,8 @@ def test_page_read_navigates_home_then_article_and_classifies(tmp_path: Path) ->
 
     assert result["status"] == "ok"
     assert result["publisher"] == "elsevier"
-    assert result["mhtml_path"] == str(saved)
+    # The kernel writes the page itself; there is no download folder in the way.
+    assert str(result["mhtml_path"]).endswith("page.mhtml")
+    assert Path(str(result["mhtml_path"])).is_file()
     assert result["quota_charged"] == 2
     assert "page2md" in str(result["next"])

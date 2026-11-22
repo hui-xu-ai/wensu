@@ -667,15 +667,52 @@ def _extract_body(html: str) -> tuple[str | None, dict[str, object]]:
 # ------------------------------------------------------------------ 图片落盘
 
 
-def _localise_images(markdown: str, source: Path, out: Path) -> tuple[str, int, int]:
+def _mhtml_parts(path: Path) -> dict[str, tuple[bytes, str]]:
+    """MHTML 里内联的资源：`Content-Location` → (bytes, 文件名)。
+
+    `pageCapture` 打出的 MHTML 把图片存成独立 part，而 `<img src>` 仍保留原始绝对 URL。
+    要保住图片，就得按 `Content-Location` 建索引，再把 markdown 里的同 URL 换成 `assets/`。
+    """
+
+    if path.suffix.lower() not in {".mhtml", ".mht"}:
+        return {}
+    message = email.message_from_bytes(path.read_bytes(), policy=policy.default)
+    parts: dict[str, tuple[bytes, str]] = {}
+    for part in message.walk():
+        if part.get_content_maintype() == "text" and part.get_content_subtype() == "html":
+            continue
+        location = (part.get("Content-Location") or "").strip()
+        payload = part.get_payload(decode=True)
+        if not location or not isinstance(payload, bytes):
+            continue
+        name = location.rsplit("/", 1)[-1].split("?")[0] or "asset"
+        parts[location] = (payload, name)
+    return parts
+
+
+def _localise_images(
+    markdown: str,
+    source: Path,
+    out: Path,
+    parts: dict[str, tuple[bytes, str]] | None = None,
+) -> tuple[str, int, int]:
     assets = out / "assets"
     copied = missing = 0
+    inline = parts or {}
 
     def rewrite(match: re.Match[str]) -> str:
         nonlocal copied, missing
         alt, target = match.group(1), match.group(2).strip()
         if target.startswith("<") and target.endswith(">"):
             target = target[1:-1].strip()
+        if target in inline:
+            payload, name = inline[target]
+            assets.mkdir(parents=True, exist_ok=True)
+            destination = assets / name
+            if not destination.exists():
+                destination.write_bytes(payload)
+            copied += 1
+            return f"![{alt}](assets/{name})"
         if re.match(r"^(https?:|data:)", target):
             return match.group(0)
         candidate = (source.parent / target).resolve()
@@ -723,7 +760,7 @@ def convert(source: Path, out: Path) -> dict[str, object]:
 
     markdown = ""
     if body:
-        markdown, copied, missing = _localise_images(body, source, out)
+        markdown, copied, missing = _localise_images(body, source, out, _mhtml_parts(source))
         info["images_copied"] = copied
         info["images_missing"] = missing
     title = info.get("title") or source.stem

@@ -114,37 +114,64 @@ function waitForDownload(tabId, deadline, startedAfter) {
 // `pageCapture` writes the page and every resource into one MHTML file. The blob goes
 // to the download manager, not to the bridge: the bridge speaks line-delimited JSON
 // with a 1 MB frame cap, and a saved article is routinely 1–5 MB (ADR 0018).
-function snapshotName(tab) {
-  const raw = `${(tab && tab.title) || "page"}`;
-  const slug =
-    raw
-      .replace(/[\\/:*?"<>|]+/g, "_")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 80) || "page";
-  let host = "page";
-  try {
-    host = new URL((tab && tab.url) || "").hostname.replace(/[^a-z0-9.-]/gi, "") || "page";
-  } catch {
-    host = "page";
-  }
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-  return `wensu-pages/${slug} [${host}] ${stamp}.mhtml`;
-}
-
-function waitDownloadPath(downloadId, deadline) {
+// Base64 for a blob inside a service worker: `FileReader` is available there, and it
+// avoids shipping the bytes through the bridge (which is a one-line-JSON channel).
+// `chrome.tabs.get` right after `tabs.update` can still report the *previous* URL: the
+// navigation has been requested but not committed. Reading it too early made a plan look
+// like it had been redirected out of scope (`policy.domain` while the tab was in fact on
+// its way to the right host). Wait until the tab reports the new document.
+function waitNavigated(tabId, fromUrl, domains, timeoutMs = 10_000) {
   return new Promise((resolve) => {
-    const tick = () => {
-      chrome.downloads.search({ id: downloadId }, (items) => {
-        const item = (items || [])[0];
-        if (item && item.state === "complete" && item.filename) return resolve(item.filename);
-        if (item && item.state === "interrupted") return resolve("");
-        if (Date.now() >= deadline) return resolve(item && item.filename ? item.filename : "");
-        setTimeout(tick, 200);
-      });
+    const deadline = Date.now() + timeoutMs;
+    const tick = async () => {
+      let tab = null;
+      try {
+        tab = await chrome.tabs.get(tabId);
+      } catch {
+        return resolve(null);
+      }
+      const url = String((tab && tab.url) || "");
+      let inScope = false;
+      try {
+        inScope = allowedHost(new URL(url).hostname, domains);
+      } catch {
+        inScope = false;
+      }
+      // Any allowed host counts, not one hostname: a DOI hop starts at doi.org and ends
+      // on the publisher, so waiting for `doi.org` to appear would always time out.
+      const moved = url && url !== fromUrl && inScope;
+      const settled = tab && tab.status === "complete" && inScope;
+      if (moved || settled) return resolve(tab);
+      if (Date.now() >= deadline) return resolve(tab);
+      setTimeout(tick, 150);
     };
     tick();
   });
+}
+
+// One capture, handed out in chunks.
+//
+// The download manager is not usable for this: Edge holds every `.mhtml` download behind
+// its file-reputation prompt, which shows up as a `未确认 NNNN.crdownload` that never
+// completes. A service worker also cannot mint a `blob:` URL (MV3). So the page bytes are
+// cached here and read back by the kernel over the bridge, a chunk per round trip.
+const CHUNK_BYTES = 192 * 1024;
+const captures = new Map();
+
+function bytesToBase64(bytes) {
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(index, index + 0x8000));
+  }
+  return btoa(binary);
+}
+
+function sliceChunk(capture, offset) {
+  const start = Math.max(0, Math.min(offset, capture.bytes.length));
+  const end = Math.min(start + CHUNK_BYTES, capture.bytes.length);
+  const slice = capture.bytes.subarray(start, end);
+  if (end >= capture.bytes.length) captures.delete(capture.token);
+  return bytesToBase64(slice);
 }
 
 let port = null;let boundTabId = null;
@@ -249,6 +276,26 @@ async function onHostMessage(message, channel) {
 
   try {
     if (action === "snapshot") {
+      // Two shapes of the same verb: no `token` starts a capture, `token`+`offset` reads
+      // the next chunk of it. The bytes never touch the download manager.
+      const token = params && typeof params.token === "string" ? params.token : "";
+      if (token) {
+        const capture = captures.get(token);
+        if (!capture) throw new Error("snapshot.expired");
+        reply({
+          ok: true,
+          data: {
+            token,
+            total: capture.bytes.length,
+            base64: sliceChunk(capture, Number(params.offset) || 0),
+            url: capture.url,
+            title: capture.title,
+            captcha_visible: capture.captchaVisible,
+          },
+        });
+        return;
+      }
+
       // Deliberately not domain-scoped: the user already has this tab open and the verb
       // issues no request of its own (ADR 0018). `pageCapture` rejects browser pages, so
       // the scheme is checked here to return a specific error instead of an API throw.
@@ -256,36 +303,30 @@ async function onHostMessage(message, channel) {
       if (!tab || !tab.id) throw new Error("no_active_tab");
       if (!tab.url || !/^https?:/i.test(tab.url)) throw new Error("policy.url_scheme");
       const blob = await chrome.pageCapture.saveAsMHTML({ tabId: tab.id });
+      const bytes = new Uint8Array(await blob.arrayBuffer());
       // A challenge page is the one thing this verb must not hand back as if it were the
-      // article. Reading the flag costs one message at most (it is best-effort, the
-      // helper returns {} on timeout) and lets the caller say "stop, solve it yourself"
-      // instead of summarising a captcha.
+      // article. Reading the flag costs one message at most and lets the caller say
+      // "stop, solve it yourself" instead of summarising a captcha.
       const meta = await pageMeta(tab.id);
-      const objectUrl = URL.createObjectURL(blob);
-      let downloadId;
-      try {
-        downloadId = await chrome.downloads.download({
-          url: objectUrl,
-          filename: snapshotName(tab),
-          saveAs: false,
-          conflictAction: "overwrite",
-        });
-      } finally {
-        // Revoking now would cancel the write; the download manager keeps reading the
-        // blob until the file is complete, so the URL is released later on.
-        setTimeout(() => URL.revokeObjectURL(objectUrl), 120_000);
-      }
-      if (!Number.isInteger(downloadId)) throw new Error("snapshot.download");
-      const path = await waitDownloadPath(downloadId, Date.now() + 20_000);
-      if (!path) throw new Error("snapshot.download_incomplete");
+      const fresh = {
+        token: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`,
+        bytes,
+        url: tab.url,
+        title: tab.title || "",
+        captchaVisible: meta.captcha_visible === true,
+      };
+      captures.set(fresh.token, fresh);
+      // A capture nobody reads must not sit in memory forever.
+      setTimeout(() => captures.delete(fresh.token), 120_000);
       reply({
         ok: true,
         data: {
-          path,
-          bytes: blob.size,
-          url: tab.url,
-          title: tab.title || "",
-          captcha_visible: meta.captcha_visible === true,
+          token: fresh.token,
+          total: bytes.length,
+          base64: sliceChunk(fresh, 0),
+          url: fresh.url,
+          title: fresh.title,
+          captcha_visible: fresh.captchaVisible,
           status: Number(meta.status) || 0,
         },
       });
@@ -317,7 +358,11 @@ async function onHostMessage(message, channel) {
         if (url.protocol !== "https:" || !allowedHost(url.hostname, domains)) {
           throw new Error("policy.domain");
         }
+        const before = tab.url || "";
         await chrome.tabs.update(tab.id, { url: params.url });
+        // Read the tab back only once it has moved: `tabs.get` immediately after
+        // `update` can return the previous URL, which looked like a redirect out of scope.
+        await waitNavigated(tab.id, before, domains);
       }
       await waitComplete(tab.id);
       await new Promise((resolve) => setTimeout(resolve, 500 + Math.random() * 1000));

@@ -6,8 +6,10 @@ never exposes browser details to callers.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
+import re
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, suppress
 from dataclasses import replace
@@ -69,6 +71,23 @@ def _page_spec(publisher: Publisher) -> ChannelSpec:
 # A page snapshot moves a few megabytes through the browser's own write path. The host
 # rejects any deadline above 15 s (`policy.deadline`), so this is the ceiling too.
 SNAPSHOT_TIMEOUT_MS = 15_000
+# One chunk per round trip; the extension sends at most this many bytes per reply.
+MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024
+
+_SCRIPT_BLOCK = re.compile(rb"<script\b[^>]*>.*?</script\s*>", re.IGNORECASE | re.DOTALL)
+_SCRIPT_TAG = re.compile(rb"<script\b[^>]*/?>", re.IGNORECASE)
+
+
+def _strip_scripts(payload: bytes) -> bytes:
+    """Remove script blocks from the stored capture.
+
+    An MHTML file is rendered by whatever opens it, and a publisher page is full of
+    third-party script. The reader only needs the markup, so the stored copy carries none —
+    that also makes the file safe to hand to another tool.
+    """
+
+    without_blocks = _SCRIPT_BLOCK.sub(b"", payload)
+    return _SCRIPT_TAG.sub(b"", without_blocks)
 
 
 class _BrowserTransaction:
@@ -578,9 +597,11 @@ class ScholarService:
             return {**saved, "doi": identifier, "publisher": publisher.name}
 
         path = Path(str(saved.get("path") or ""))
+        stored = self._store_snapshot(path) if path.is_file() else None
+        readable = stored or path
         probe = (
-            classify_mhtml(path)
-            if path.is_file()
+            classify_mhtml(readable)
+            if readable.is_file()
             else {"status": "no_html", "reason": "not_written"}
         )
         return {
@@ -588,7 +609,8 @@ class ScholarService:
             "doi": identifier,
             "publisher": publisher.name,
             "final_url": final_url,
-            "mhtml_path": str(path),
+            "mhtml_path": str(readable),
+            "download_path": str(path),
             "bytes": int(saved.get("bytes") or 0),
             "title": str(saved.get("title") or probe.get("title") or ""),
             "quota_charged": PAGE_READ_QUOTA,
@@ -598,6 +620,86 @@ class ScholarService:
                 else "no full text on the page: offer the PDF route instead"
             ),
         }
+
+    def _collect_chunks(self, adapter: Any, first: dict[str, Any]) -> bytes:
+        """Assemble the capture from base64 chunks the extension hands out on request."""
+
+        token = str(first.get("token") or "")
+        total = int(first.get("total") or 0)
+        if not token or total <= 0:
+            raise ActionError(
+                "the extension sent no page data",
+                verb="snapshot",
+                code="snapshot.empty",
+                stage="snapshot",
+            )
+        if total > MAX_SNAPSHOT_BYTES:
+            raise ActionError(
+                f"the page is {total} bytes, larger than the {MAX_SNAPSHOT_BYTES}-byte cap",
+                verb="snapshot",
+                code="snapshot.too_large",
+                stage="snapshot",
+            )
+
+        buffer = bytearray()
+        chunk = str(first.get("base64") or "")
+        while True:
+            if chunk:
+                buffer.extend(base64.b64decode(chunk))
+            if len(buffer) >= total:
+                break
+            follow_up = adapter.execute(
+                Action("snapshot", {"token": token, "offset": len(buffer)}),
+                timeout_ms=SNAPSHOT_TIMEOUT_MS,
+            )
+            if not follow_up.ok:
+                raise ActionError(
+                    f"the page could not be read back ({follow_up.error or 'action.failed'})",
+                    verb="snapshot",
+                    code=follow_up.error or "snapshot.chunk",
+                    stage="snapshot",
+                )
+            chunk = str(dict(follow_up.data).get("base64") or "")
+            if not chunk:
+                raise ActionError(
+                    "the extension stopped sending data mid-page",
+                    verb="snapshot",
+                    code="snapshot.chunk",
+                    stage="snapshot",
+                )
+        return bytes(buffer[:total])
+
+    def _write_page(self, payload: bytes, meta: dict[str, str]) -> Path:
+        """Store the capture under `<home>/pages/<slug>/page.mhtml`, scripts removed."""
+
+        title = meta.get("title") or "page"
+        slug = re.sub(r"[^A-Za-z0-9._-]+", "-", title)[:80].strip("-") or "page"
+        home = Path(self._policy.state_dir).parent if self._policy else Path.cwd()
+        target = home / "pages" / slug / "page.mhtml"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(_strip_scripts(payload))
+        return target
+
+    def _store_snapshot(self, path: Path) -> Path | None:
+        """Copy the browser's download into `<home>/pages/<slug>/page.mhtml`.
+
+        The download folder belongs to the user and they may clean it out; the copy that
+        gets read lives with the other run-time data. Returns None when the copy is not
+        possible (a restricted process, a full disk) — the download itself still works.
+        """
+
+        import shutil
+
+        try:
+            home = Path(self._policy.state_dir).parent if self._policy else path.parent
+            slug = re.sub(r"[^A-Za-z0-9._-]+", "-", path.stem)[:80].strip("-") or "page"
+            target = home / "pages" / slug / "page.mhtml"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if not target.exists() or target.stat().st_size != path.stat().st_size:
+                shutil.copy2(path, target)
+            return target
+        except OSError:
+            return None
 
     def snapshot(self) -> dict[str, Any]:
         """Save the page the user has open as MHTML, next to the other snapshots.
@@ -611,26 +713,38 @@ class ScholarService:
             return self._snapshot_locked()
 
     def _snapshot_locked(self) -> dict[str, Any]:
-        """`snapshot` without taking the browser lock — for a caller already holding it."""
+        """`snapshot` without taking the browser lock — for a caller already holding it.
+
+        The bytes travel as base64 chunks over the bridge and the *kernel* writes the file.
+        Going through the browser's download manager was the first design and it does not
+        work: Edge's file-reputation check holds every `.mhtml` download behind a
+        "may harm your device" prompt, which surfaces as a `未确认 NNNN.crdownload` that
+        never completes (ADR 0018, amendment 2).
+        """
 
         self._ensure_ready()
         self._ensure_bridge()
-        outcome = self._transaction_adapter().execute(
-            Action("snapshot"), timeout_ms=SNAPSHOT_TIMEOUT_MS
-        )
-        if not outcome.ok:
+        adapter = self._transaction_adapter()
+        first = adapter.execute(Action("snapshot"), timeout_ms=SNAPSHOT_TIMEOUT_MS)
+        if not first.ok:
             raise ActionError(
-                f"the page could not be saved ({outcome.error or 'action.failed'})",
+                f"the page could not be saved ({first.error or 'action.failed'})",
                 verb="snapshot",
-                code=outcome.error or "action.failed",
+                code=first.error or "action.failed",
                 stage="snapshot",
             )
-        data = dict(outcome.data)
-        result: dict[str, Any] = {
-            "path": str(data.get("path") or ""),
-            "bytes": int(data.get("bytes") or 0),
+        data = dict(first.data)
+        meta = {
             "url": str(data.get("url") or ""),
             "title": str(data.get("title") or ""),
+        }
+        payload = self._collect_chunks(adapter, data)
+        stored = self._write_page(payload, meta)
+
+        result: dict[str, Any] = {
+            "path": str(stored),
+            "bytes": len(payload),
+            **meta,
         }
         # A human-verification wall is the one page this verb must not hand back as if it
         # were the article. Nothing was automated here — the user is looking at their own

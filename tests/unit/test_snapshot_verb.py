@@ -7,6 +7,7 @@ spent because no request is issued.
 
 from __future__ import annotations
 
+import base64
 import json
 from pathlib import Path
 
@@ -97,15 +98,18 @@ def test_extension_manifest_declares_page_capture() -> None:
 
 
 def test_service_relays_the_path_and_leaves_the_quota_alone(tmp_path: Path) -> None:
+    payload = b"<html><body><p>hello</p></body></html>"
     scripts: list[list[dict[str, object]]] = [
         [
             {
                 "verb": "snapshot",
                 "data": {
-                    "path": "C:\\Users\\x\\Downloads\\wensu-pages\\paper [example.org] 1.mhtml",
-                    "bytes": 2_345_678,
+                    "token": "t1",
+                    "total": len(payload),
+                    "base64": base64.b64encode(payload).decode("ascii"),
                     "url": "https://example.org/article",
                     "title": "A paper",
+                    "captcha_visible": False,
                 },
             }
         ]
@@ -114,8 +118,9 @@ def test_service_relays_the_path_and_leaves_the_quota_alone(tmp_path: Path) -> N
 
     result = service.snapshot()
 
-    assert result["path"].endswith(".mhtml")
-    assert result["bytes"] == 2_345_678
+    assert str(result["path"]).endswith("page.mhtml")
+    assert Path(str(result["path"])).is_file()
+    assert result["bytes"] == len(payload)
     assert result["url"] == "https://example.org/article"
     assert result["title"] == "A paper"
     # No reservation was taken: the quota file was never touched.
@@ -123,13 +128,15 @@ def test_service_relays_the_path_and_leaves_the_quota_alone(tmp_path: Path) -> N
 
 
 def test_service_reports_a_verification_wall_instead_of_reading_it(tmp_path: Path) -> None:
+    payload = b"<html><body><p>verify</p></body></html>"
     scripts: list[list[dict[str, object]]] = [
         [
             {
                 "verb": "snapshot",
                 "data": {
-                    "path": "C:\\Users\\x\\Downloads\\wensu-pages\\verify.mhtml",
-                    "bytes": 40_000,
+                    "token": "t1",
+                    "total": len(payload),
+                    "base64": base64.b64encode(payload).decode("ascii"),
                     "url": "https://example.org/verify/home",
                     "title": "Verification",
                     "captcha_visible": True,
@@ -160,3 +167,57 @@ def test_service_raises_a_specific_error_when_the_page_cannot_be_saved(tmp_path:
         assert getattr(error, "verb", "") == "snapshot"
     else:  # pragma: no cover - the raise above is the expected path
         raise AssertionError("snapshot should have raised")
+
+
+def test_snapshot_assembles_chunks_and_strips_scripts(tmp_path: Path) -> None:
+    payload = b"<html><body><p>hi</p><script>alert(1)</script>" + b"x" * 400_000 + b"</body></html>"
+    encoded = base64.b64encode(payload).decode("ascii")
+    middle = len(encoded) // 2
+    scripts: list[list[dict[str, object]]] = [
+        [
+            {
+                "verb": "snapshot",
+                "data": {
+                    "token": "t1",
+                    "total": len(payload),
+                    "base64": encoded[:middle],
+                    "url": "https://example.org/a",
+                    "title": "A page",
+                    "captcha_visible": False,
+                },
+            },
+            {
+                "verb": "snapshot",
+                "data": {"token": "t1", "total": len(payload), "base64": encoded[middle:]},
+            },
+        ]
+    ]
+    service = build_service(tmp_path, scripts)
+
+    result = service.snapshot()
+
+    stored = Path(str(result["path"])).read_bytes()
+    assert result["bytes"] == len(payload)
+    # The stored copy must be inert: no script survives, and the text is intact.
+    assert b"<script" not in stored
+    assert b"<p>hi</p>" in stored
+    assert len(stored) < len(payload)
+
+
+def test_snapshot_refuses_an_absurd_page_size(tmp_path: Path) -> None:
+    scripts: list[list[dict[str, object]]] = [
+        [
+            {
+                "verb": "snapshot",
+                "data": {"token": "t1", "total": 10**9, "base64": "", "title": "huge"},
+            }
+        ]
+    ]
+    service = build_service(tmp_path, scripts)
+
+    try:
+        service.snapshot()
+    except Exception as error:  # ActionError
+        assert getattr(error, "code", "") == "snapshot.too_large"
+    else:  # pragma: no cover
+        raise AssertionError("an oversized capture should have been refused")

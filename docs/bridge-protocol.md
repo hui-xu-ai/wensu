@@ -58,7 +58,7 @@ each action frame carries `id`, `action`, `params`; the reply is
 | `read_text` | `selector`, `mode` (`inner`/`text`) | `{text}` |
 | `scroll` | `to` (`top`/`bottom`) 或 `by` (1..10000 px) | `{}` |
 | `sleep` | `ms` (≤3000) | `{}` |
-| `snapshot` | — （永远针对用户当前打开的标签页） | `{path, bytes, url, title}` |
+| `snapshot` | 无参数＝开始抓取；`token` + `offset` ＝继续读下一块 | `{token, total, base64, url, title, captcha_visible}` |
 
 `snapshot` 是唯一不受域名白名单约束的动词，因为**它自己不发任何请求**：`chrome.pageCapture`
 把已经打开的页面连同图片/CSS 写成单个 MHTML，由浏览器下载管理器落盘，桥只回报路径
