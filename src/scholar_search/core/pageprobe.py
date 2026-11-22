@@ -24,6 +24,11 @@ PAYWALL_MARKERS: tuple[str, ...] = (
 )
 
 SECTION_MARKERS: tuple[str, ...] = ('class="section-title"', "<section id=")
+# `<h2>1. Introduction</h2>` / `<h3><span>2.3</span> Method</h3>`: the article's own numbering.
+_NUMBERED_HEADING = re.compile(
+    r"<h[1-3][^>]*>(?:\s|<[^>]+>)*[1-9]\d?\.?(?:&#xA0;|&nbsp;|\s)+[A-Z]",
+    re.IGNORECASE,
+)
 _PDF_LINK = re.compile(r'href="(https?://[^"]+?\.pdf[^"]*)"', re.IGNORECASE)
 _H1 = re.compile(r"<h1[^>]*>(.*?)</h1>", re.IGNORECASE | re.DOTALL)
 _TAGS = re.compile(r"<[^>]+>")
@@ -46,14 +51,21 @@ def _text_of(markup: str) -> str:
 
 
 def classify_mhtml(path: Path) -> dict[str, object]:
-    """`{status, reason, sections, paywall_hits, pdf_url, title}` for one saved page."""
+    """`{status, reason, sections, headings, paywall_hits, pdf_url, title}` for one saved page."""
 
     raw = _html_of(path)
     if not raw.strip():
-        return {"status": "no_html", "reason": "no_html_part", "sections": 0, "paywall_hits": 0}
+        return {
+            "status": "no_html",
+            "reason": "no_html_part",
+            "sections": 0,
+            "headings": 0,
+            "paywall_hits": 0,
+        }
 
     lowered = raw.casefold()
     sections = sum(lowered.count(marker.casefold()) for marker in SECTION_MARKERS)
+    headings = len(_NUMBERED_HEADING.findall(raw))
     hits = sum(1 for marker in PAYWALL_MARKERS if marker in _text_of(lowered))
 
     pdf_match = _PDF_LINK.search(raw)
@@ -62,7 +74,14 @@ def classify_mhtml(path: Path) -> dict[str, object]:
     heading = _H1.search(raw)
     title = _text_of(heading.group(1))[:300] if heading else ""
 
-    if hits and sections < 3:
+    # An abstract page still carries `<section id=` wrappers (highlights, related work), so
+    # counting them called a ScienceDirect abstract page `ok` while holding no article body
+    # (0.12.58, real run). A numbered article heading ("1. Introduction") is the honest
+    # signal: an abstract page has none. When the page is the article, keep `ok` even if a
+    # publisher prints a price somewhere.
+    if headings:
+        status, reason = "ok", ""
+    elif hits:
         status, reason = "no_html", "paywall"
     elif sections < 2:
         status, reason = "no_html", "abstract_only"
@@ -72,6 +91,7 @@ def classify_mhtml(path: Path) -> dict[str, object]:
         "status": status,
         "reason": reason,
         "sections": sections,
+        "headings": headings,
         "paywall_hits": hits,
         "pdf_url": pdf_url,
         "title": title,

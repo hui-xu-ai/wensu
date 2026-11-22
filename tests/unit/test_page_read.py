@@ -20,7 +20,7 @@ from scholar_search.core.publishers import (
     publisher_for_host,
 )
 from scholar_search.core.risk import RiskGuard
-from scholar_search.core.service import ScholarService
+from scholar_search.core.service import ScholarService, _page_next
 from support import FakeChannel, StubRegistry, make_manifest
 
 ARTICLE_HTML = """<!DOCTYPE html><html><body>
@@ -32,6 +32,19 @@ ARTICLE_HTML = """<!DOCTYPE html><html><body>
 
 PAYWALL_HTML = """<!DOCTYPE html><html><body><h1>A paper</h1>
 <p>Purchase PDF</p><p>Get access</p></body></html>"""
+
+# A publisher's abstract page: it still wraps highlights and recommended work in
+# `<section id=…>`, so counting those wrappers called it a full article (0.12.58, real run).
+# What it does not have is the article's own numbering.
+ABSTRACT_HTML = """<!DOCTYPE html><html><body>
+<h1>A paper</h1>
+<section id="a1"><h2>Highlights</h2><p>Short teaser.</p></section>
+<section id="a2"><h2>Abstract</h2><p>Some abstract text.</p></section>
+<section id="a3"><div class="section-title">Model description</div><p>Snippet.</p></section>
+<section id="a4"><div class="section-title">Conclusions</div><p>Snippet.</p></section>
+<section id="a5"><div class="section-title">Recommended articles</div><p>Others.</p></section>
+<section id="a6"><p>Sign in to view the full text.</p></section>
+</body></html>"""
 
 
 class FakeClock:
@@ -108,6 +121,30 @@ def test_probe_reports_a_paywall_page(tmp_path: Path) -> None:
     assert result["status"] == "no_html"
     assert result["reason"] == "paywall"
     assert result["paywall_hits"] >= 2
+
+
+def test_probe_rejects_an_abstract_page_that_wraps_sections(tmp_path: Path) -> None:
+    """摘要页也有 `<section id=…>` 外壳：判据必须是"有没有编号文章标题"。"""
+
+    result = classify_mhtml(write_mhtml(tmp_path / "abstract.mhtml", ABSTRACT_HTML))
+
+    assert result["sections"] >= 3  # 外壳很多，正是误判来源
+    assert result["headings"] == 0
+    assert result["status"] == "no_html"
+    assert result["reason"] == "paywall"
+
+
+def test_next_asks_the_user_to_sign_in_instead_of_retrying() -> None:
+    paywall = _page_next({"status": "no_html", "reason": "paywall"})
+    abstract = _page_next({"status": "no_html", "reason": "abstract_only"})
+    ok = _page_next({"status": "ok", "reason": ""})
+
+    for hint in (paywall, abstract):
+        assert "sign in" in hint
+        assert "ask the user" in hint
+        assert "page_read again" in hint
+        assert "Do not retry" in hint
+    assert "page2md" in ok
 
 
 def test_page_read_refuses_an_unsupported_doi_without_opening_anything(tmp_path: Path) -> None:

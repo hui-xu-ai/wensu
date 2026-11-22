@@ -47,6 +47,28 @@ from .risk import RiskGuard
 PAGE_READ_QUOTA = 2
 
 
+def _page_next(probe: dict[str, Any]) -> str:
+    """What the caller should do next, in the state the page was actually in.
+
+    A paywall or an abstract-only page is almost always a *session* problem: the page was
+    opened without the reader's institutional access. Telling the caller to "offer the PDF
+    route" hides the one action that fixes it — ask the user to sign in, then read again.
+    The tool never retries by itself (ADR 0004).
+    """
+
+    status = probe.get("status")
+    reason = probe.get("reason")
+    if status == "ok":
+        return "run tools/page2md.py on mhtml_path to get Markdown"
+    if status == "no_html" and reason in {"paywall", "abstract_only"}:
+        return (
+            "the page showed no article body, usually because this browser is not signed in "
+            "to the publisher: ask the user to sign in (institutional access / campus network) "
+            "in that browser window, then call page_read again. Do not retry by yourself."
+        )
+    return "no full text on the page: offer the PDF route instead"
+
+
 def _page_spec(publisher: Publisher) -> ChannelSpec:
     """A manifest-shaped view of one publisher, so the planner can run against it.
 
@@ -613,11 +635,7 @@ class ScholarService:
             "bytes": int(saved.get("bytes") or 0),
             "title": str(saved.get("title") or probe.get("title") or ""),
             "quota_charged": PAGE_READ_QUOTA,
-            "next": (
-                "run tools/page2md.py on mhtml_path to get Markdown"
-                if probe.get("status") == "ok"
-                else "no full text on the page: offer the PDF route instead"
-            ),
+            "next": _page_next(probe),
         }
 
     def _collect_chunks(self, adapter: Any, first: dict[str, Any]) -> bytes:

@@ -72,13 +72,19 @@ D:\Python\DeepSeek\DateWork\scholar-search\work\tools\.venv\Scripts\python.exe `
 
 `warnings` 非空就记在心里，它决定你回答时的措辞（见下）。
 
-## 遇到人机验证 / 登录墙
+## 遇到人机验证 / 登录墙 / 拿到摘要页
 
 - `snapshot` 的返回里若出现 `status: "blocked"` 或 `code: "RISK_CAPTCHA"`，说明当前标签页
   正显示验证码或人机验证：**存下来的是验证页，不是论文**。此时：
   1. **不要重试**、不要刷新、不要点页面上的任何东西（ADR 0004：遇风控即停）；
   2. 告诉用户"这页要你先在浏览器里完成验证/登录"，请他做完再说一声；
   3. 用户确认后再调一次 `snapshot`。
+- `page_read` 返回 `status: "no_html"` 且 `reason` 是 `paywall` 或 `abstract_only`，说明浏览器
+  **没有这篇的机构访问权限**（没登录、不在校园网/机构 IP、或该刊没订阅）：存下来的是摘要页。
+  此时同样**不要自己重试**，按返回的 `next` 做事：请用户在**那个浏览器窗口**里登录出版社
+  （机构账号 / 校园网 / CARSI），确认后再调一次 `page_read`。
+  判据在返回里：`headings`（编号文章标题数）为 0、同时 `sections` 却不少 —— 摘要页也会带
+  `<section id=…>` 外壳，所以"有 section"不代表"有正文"。
 - 这个动词**永远不会**替你过验证，也不读取会话 Cookie；页面能看到什么，完全取决于用户自己
   在浏览器里的登录状态。
 - 如果同一篇反复被挡，就换一条路：请用户下载 PDF，然后用 `paper-reader`。

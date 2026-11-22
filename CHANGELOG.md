@@ -6,6 +6,25 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.12.59] - 2026-11-22
+
+### Fixed — `page_read` called an abstract page `ok`
+
+The probe decided from how many `<section id=…>` wrappers a page carried. A ScienceDirect
+abstract page carries plenty of them (highlights, abstract, recommended articles), so a page
+with no article body was reported `status: "ok"` — the real run after 0.12.58 returned `ok`
+with `sections: 7` for `…/article/abs/pii/…`, and the Markdown that followed was 9 KB of
+teasers. The page also prints a sign-in prompt, which the old rule only honoured below three
+wrappers.
+
+The honest signal is the article's own numbering: an abstract page has no `<h2>1. Introduction`
+and no other numbered heading. `classify_mhtml` now reports `headings`, and a page without any
+numbered heading that carries a paywall marker is `no_html` / `paywall`; without the marker and
+without sections, `no_html` / `abstract_only`. `next` now says what actually fixes this:
+**ask the user to sign in** (institutional access / campus network) in that browser window and
+call `page_read` again — never retry by yourself (ADR 0004). The same guidance is in the
+`paper-page` skill, next to the existing captcha section.
+
 ## [0.12.58] - 2026-11-22
 
 ### Added — read an online paper's page as Markdown (`paper-page`)
