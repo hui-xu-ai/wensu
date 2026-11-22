@@ -913,6 +913,105 @@ def _estimate_tokens(text: str) -> int:
     return int(cjk / 1.6 + other / 4)
 
 
+_SENTENCE = re.compile(r"[^.!?。！？]+[.!?。！？]?")
+_STOPWORDS = frozenset(
+    (
+        "the and for with that this from were was are has have not but its their which these those "
+        "into than then also such can may using used use between under over more most only both each "
+        "however therefore thus here there when while where been being does did doing "
+        "our we they"
+    ).split()
+)
+
+
+def _gist(paragraphs: list[str], limit: int = 160) -> str:
+    """One-line "what is this section about", built only from sentences that exist.
+
+    No rewriting: the first sentence, any sentence carrying a number, and the last one.
+    A reader can decide from this whether the section is worth its tokens.
+    """
+
+    if not paragraphs:
+        return ""
+    sentences = [s.strip() for s in _SENTENCE.findall(" ".join(paragraphs)) if s.strip()]
+    if not sentences:
+        return ""
+    picked = [sentences[0]]
+    for sentence in sentences[1:-1]:
+        if re.search(r"\d", sentence) and sentence not in picked:
+            picked.append(sentence)
+            break
+    if len(sentences) > 1:
+        picked.append(sentences[-1])
+    gist = " ".join(dict.fromkeys(picked))
+    return gist[:limit].strip()
+
+
+def _keywords(paragraphs: list[str], limit: int = 8) -> list[str]:
+    """Frequency keywords, no model: ASCII words ≥4 letters and CJK bigrams."""
+
+    text = " ".join(paragraphs).casefold()
+    counts: dict[str, int] = {}
+    for word in re.findall(r"[a-z][a-z-]{3,}", text):
+        if word in _STOPWORDS:
+            continue
+        counts[word] = counts.get(word, 0) + 1
+    for run in re.findall(r"[\u4e00-\u9fff]{2,}", text):
+        for index in range(len(run) - 1):
+            bigram = run[index : index + 2]
+            counts[bigram] = counts.get(bigram, 0) + 1
+    ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    return [word for word, count in ranked[:limit] if count >= 2]
+
+
+def _flat_paragraphs(sections: list[tuple[str, int, list[str]]]) -> list[str]:
+    return [text for _title, _level, paragraphs in sections for text in paragraphs]
+
+
+def _write_brief(out: Path, sections: list[tuple[str, int, list[str]]], title: str) -> None:
+    """`page.brief.md`: the map in one small file (title + one gist per section)."""
+
+    lines = [f"# {title}", ""]
+    for index, (section_title, level, paragraphs) in enumerate(sections, start=1):
+        gist = _gist(paragraphs)
+        marks = f"[{index:02d}] {'#' * level} {section_title} — {len(' '.join(paragraphs))} chars"
+        lines.append(marks)
+        if gist:
+            lines.append(f"  {gist}")
+    (out / "page.brief.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_selection(
+    out: Path,
+    sections: list[tuple[str, int, list[str]]],
+    *,
+    query: str = "",
+    window: str = "",
+) -> None:
+    """`--slice a:b` / `--query text` → `page.slice.md`, paragraphs prefixed with `[pN]`."""
+
+    paragraphs = _flat_paragraphs(sections)
+    selected: list[tuple[int, str]] = []
+    if window:
+        start_text, _, end_text = window.partition(":")
+        start = max(0, int(start_text or 0))
+        end = int(end_text) if end_text.strip() else len(paragraphs)
+        selected = [(index, text) for index, text in enumerate(paragraphs) if start <= index < end]
+    else:
+        needle = query.casefold()
+        hits = [index for index, text in enumerate(paragraphs) if needle in text.casefold()]
+        wanted: set[int] = set()
+        for hit in hits:
+            wanted.update({hit - 1, hit, hit + 1})
+        selected = [
+            (index, paragraphs[index]) for index in sorted(wanted) if 0 <= index < len(paragraphs)
+        ]
+    lines = [f"<!-- {len(selected)} paragraphs of {len(paragraphs)} -->", ""]
+    for index, text in selected:
+        lines.append(f"[p{index}] {text}")
+    (out / "page.slice.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def _write_chunks(out: Path, sections: list[tuple[str, int, list[str]]]) -> dict[str, object]:
     """One file per section plus an index, so a reader can take only what it needs.
 
@@ -943,6 +1042,9 @@ def _write_chunks(out: Path, sections: list[tuple[str, int, list[str]]]) -> dict
                 "chars": len(text),
                 "tokens": tokens,
                 "core": core,
+                "paragraphs": len(paragraphs),
+                "gist": _gist(paragraphs),
+                "keywords": _keywords(paragraphs),
             }
         )
     payload = {
@@ -966,7 +1068,14 @@ def _core_markdown(sections: list[tuple[str, int, list[str]]]) -> str:
     return "\n\n".join(blocks)
 
 
-def convert(source: Path, out: Path, *, mode: str = "full") -> dict[str, object]:
+def convert(
+    source: Path,
+    out: Path,
+    *,
+    mode: str = "full",
+    query: str = "",
+    window: str = "",
+) -> dict[str, object]:
     html, form = _read_html(source)
     body, info = _extract_body(html)
     out.mkdir(parents=True, exist_ok=True)
@@ -1002,7 +1111,11 @@ def convert(source: Path, out: Path, *, mode: str = "full") -> dict[str, object]
         "noise_hits": sorted({word for word in NOISE if word in markdown.lower()}),
     }
     meta["warnings"] = _warnings(meta)
-    chunks = _write_chunks(out, list(_LAST_SECTIONS))
+    sections = list(_LAST_SECTIONS)
+    chunks = _write_chunks(out, sections)
+    _write_brief(out, sections, str(info.get("title") or source.stem))
+    if query or window:
+        _write_selection(out, sections, query=query, window=window)
     if mode == "core":
         (out / "page.core.md").write_text(_core_markdown(list(_LAST_SECTIONS)), encoding="utf-8")
     meta["sections_total"] = len(chunks["sections"])
@@ -1023,6 +1136,8 @@ def main() -> int:
     parser.add_argument(
         "--mode", choices=("full", "core"), default="full", help="core 另写 page.core.md"
     )
+    parser.add_argument("--query", default="", help="只导出命中段落 ±1 句（page.slice.md）")
+    parser.add_argument("--slice", dest="window", default="", help="按段号区间导出，如 12:30")
     arguments = parser.parse_args()
     source = Path(arguments.source)
     out = Path(arguments.out)
@@ -1038,7 +1153,9 @@ def main() -> int:
 
     for target in targets:
         destination = out if source.is_file() else out / target.stem[:80]
-        meta = convert(target, destination, mode=arguments.mode)
+        meta = convert(
+            target, destination, mode=arguments.mode, query=arguments.query, window=arguments.window
+        )
         print(
             f"{target.name}: {meta['bytes_md']} B md · 标题 {meta['headings']} · 表格行 "
             f"{meta['table_rows']} · 公式 {meta['math_inline']} · 图 "

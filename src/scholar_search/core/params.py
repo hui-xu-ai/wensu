@@ -42,11 +42,13 @@ ALLOWED_KEYS: dict[str, frozenset[str]] = {
     "sleep": frozenset({"ms"}),
     # No parameters for a capture; `token`/`offset` read the bytes back in chunks, because
     # the browser's download manager blocks every `.mhtml` it writes (ADR 0018).
-    "snapshot": frozenset({"token", "offset"}),
+    "snapshot": frozenset({"token", "offset", "tab"}),
 }
 
 WAIT_STATES = frozenset({"visible", "hidden"})
 READ_TEXT_MODES = frozenset({"inner", "text"})
+# Which tab a capture reads: the dedicated work tab, or whatever the user is looking at.
+SNAPSHOT_TABS = frozenset({"work", "active"})
 CLICK_WAIT_UNTIL = frozenset({"enabled"})
 
 
@@ -73,6 +75,15 @@ def validate_params(verb: str, params: Any) -> str | None:
             return None
         url = params.get("url")
         if not isinstance(url, str) or not url.strip():
+            return "policy.params"
+        return None
+
+    if verb == "snapshot":
+        if "tab" in params and params["tab"] not in SNAPSHOT_TABS:
+            return "policy.params"
+        if "offset" in params and not isinstance(params["offset"], int):
+            return "policy.params"
+        if "token" in params and not isinstance(params["token"], str):
             return "policy.params"
         return None
 

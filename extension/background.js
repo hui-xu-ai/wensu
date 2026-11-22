@@ -216,6 +216,44 @@ function domainsFor(message) {
   return supplied.length ? supplied : DEFAULT_DOMAINS;
 }
 
+// One tab, reused for every navigation.
+//
+// The first design navigated *whatever tab was active*, which hijacked the page the user
+// was reading (and could have been the editor's own UI). A dedicated work tab keeps the
+// footprint at exactly one tab, never touches a page the caller did not ask for, and gives
+// `page_read` a predictable target to snapshot afterwards.
+const WORK_TAB_KEY = "wensuWorkTabId";
+
+async function workTab(domains) {
+  const stored = (await chrome.storage.session.get(WORK_TAB_KEY))[WORK_TAB_KEY];
+  if (Number.isInteger(stored)) {
+    const tab = await chrome.tabs.get(stored).catch(() => null);
+    if (tab && tab.id) return tab;
+  }
+  const tabs = await chrome.tabs.query({});
+  const reusable = tabs.find((tab) => {
+    if (!tab.url) return false;
+    try {
+      const url = new URL(tab.url);
+      return url.protocol === "https:" && allowedHost(url.hostname, domains);
+    } catch {
+      return false;
+    }
+  });
+  if (reusable && reusable.id) {
+    await chrome.storage.session.set({ [WORK_TAB_KEY]: reusable.id });
+    return reusable;
+  }
+  const created = await chrome.tabs.create({ url: "https://www.sciencedirect.com/", active: false });
+  await chrome.storage.session.set({ [WORK_TAB_KEY]: created.id });
+  return created;
+}
+
+async function replyTab(params, domains) {
+  if (params && params.tab === "work") return workTab(domains);
+  return activeTab();
+}
+
 async function activeTab() {
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   return tab;
@@ -299,7 +337,7 @@ async function onHostMessage(message, channel) {
       // Deliberately not domain-scoped: the user already has this tab open and the verb
       // issues no request of its own (ADR 0018). `pageCapture` rejects browser pages, so
       // the scheme is checked here to return a specific error instead of an API throw.
-      const tab = await activeTab();
+      const tab = await replyTab(params, domains);
       if (!tab || !tab.id) throw new Error("no_active_tab");
       if (!tab.url || !/^https?:/i.test(tab.url)) throw new Error("policy.url_scheme");
       const blob = await chrome.pageCapture.saveAsMHTML({ tabId: tab.id });
@@ -334,7 +372,7 @@ async function onHostMessage(message, channel) {
     }
 
     if (action === "goto") {
-      const tab = await activeTab();
+      const tab = await workTab(domains);
       if (!tab || !tab.id) throw new Error("no_active_tab");
       if (params.reload === true) {
         // A real reload, not a navigation to the same URL: a person pressing F5

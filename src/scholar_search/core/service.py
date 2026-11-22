@@ -591,7 +591,7 @@ class ScholarService:
         with self._browser_transaction():
             outcomes = self._run(plan, spec)
             final_url = outcomes[-1].url or target
-            saved = self._snapshot_locked()
+            saved = self._snapshot_locked(tab="work")
 
         if saved.get("status") == "blocked":
             return {**saved, "doi": identifier, "publisher": publisher.name}
@@ -690,7 +690,7 @@ class ScholarService:
         with self._browser_transaction():
             return self._snapshot_locked()
 
-    def _snapshot_locked(self) -> dict[str, Any]:
+    def _snapshot_locked(self, *, tab: str = "active") -> dict[str, Any]:
         """`snapshot` without taking the browser lock — for a caller already holding it.
 
         The bytes travel as base64 chunks over the bridge and the *kernel* writes the file.
@@ -703,7 +703,8 @@ class ScholarService:
         self._ensure_ready()
         self._ensure_bridge()
         adapter = self._transaction_adapter()
-        first = adapter.execute(Action("snapshot"), timeout_ms=SNAPSHOT_TIMEOUT_MS)
+        action = Action("snapshot", {"tab": tab}) if tab != "active" else Action("snapshot")
+        first = adapter.execute(action, timeout_ms=SNAPSHOT_TIMEOUT_MS)
         if not first.ok:
             raise ActionError(
                 f"the page could not be saved ({first.error or 'action.failed'})",
