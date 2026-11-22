@@ -597,8 +597,7 @@ class ScholarService:
             return {**saved, "doi": identifier, "publisher": publisher.name}
 
         path = Path(str(saved.get("path") or ""))
-        stored = self._store_snapshot(path) if path.is_file() else None
-        readable = stored or path
+        readable = path
         probe = (
             classify_mhtml(readable)
             if readable.is_file()
@@ -672,34 +671,13 @@ class ScholarService:
     def _write_page(self, payload: bytes, meta: dict[str, str]) -> Path:
         """Store the capture under `<home>/pages/<slug>/page.mhtml`, scripts removed."""
 
-        title = meta.get("title") or "page"
+        title = meta.get("title") or meta.get("url") or "page"
         slug = re.sub(r"[^A-Za-z0-9._-]+", "-", title)[:80].strip("-") or "page"
         home = Path(self._policy.state_dir).parent if self._policy else Path.cwd()
         target = home / "pages" / slug / "page.mhtml"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(_strip_scripts(payload))
         return target
-
-    def _store_snapshot(self, path: Path) -> Path | None:
-        """Copy the browser's download into `<home>/pages/<slug>/page.mhtml`.
-
-        The download folder belongs to the user and they may clean it out; the copy that
-        gets read lives with the other run-time data. Returns None when the copy is not
-        possible (a restricted process, a full disk) — the download itself still works.
-        """
-
-        import shutil
-
-        try:
-            home = Path(self._policy.state_dir).parent if self._policy else path.parent
-            slug = re.sub(r"[^A-Za-z0-9._-]+", "-", path.stem)[:80].strip("-") or "page"
-            target = home / "pages" / slug / "page.mhtml"
-            target.parent.mkdir(parents=True, exist_ok=True)
-            if not target.exists() or target.stat().st_size != path.stat().st_size:
-                shutil.copy2(path, target)
-            return target
-        except OSError:
-            return None
 
     def snapshot(self) -> dict[str, Any]:
         """Save the page the user has open as MHTML, next to the other snapshots.
