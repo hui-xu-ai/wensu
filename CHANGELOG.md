@@ -6,6 +6,32 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-22
+
+Third feature release of the page reader, and the first one numbered as a minor version:
+`page_read`, MHTML capture and the literature map are new capabilities, so the version that
+carries them is 0.13.0 rather than another patch. The 0.12.58 / 0.12.59 numbers published
+earlier today carried the same features as pre-release patches and stay in this file as
+history.
+
+What 0.13.0 adds on top of them, both found by driving the real browser after a fresh login:
+
+### Fixed — the article body was captured before it rendered
+
+Publisher bodies paint after the load event. `page_read` navigated and captured immediately,
+so an accessible ScienceDirect article came back as 1.8 KB of "Highlights" and was reported
+`no_html` / `abstract_only`. The plan now waits `1 200 ms` after reaching the article, and if
+the capture still holds no numbered heading **and** no sign-in prompt — a page that is late,
+not closed — it takes one bounded second look (`1 500 ms`, same page, same 2-action quota)
+and keeps it only when that look finds the article. A page that does print a sign-in prompt is
+never retried: that is the paywall case below.
+
+### Fixed — `page_read` called an abstract page `ok`
+
+See 0.12.59: the probe counted `<section id=…>` wrappers, which an abstract page also has.
+It now counts the article's own numbered headings, and trusts an unnumbered page only when it
+wraps six or more sections and carries no paywall marker.
+
 ## [0.12.59] - 2026-11-22
 
 ### Fixed — `page_read` called an abstract page `ok`

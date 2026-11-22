@@ -24,6 +24,9 @@ PAYWALL_MARKERS: tuple[str, ...] = (
 )
 
 SECTION_MARKERS: tuple[str, ...] = ('class="section-title"', "<section id=")
+# Without a numbered heading, only a page that wraps this many sections is still trusted as
+# the article itself; fewer means "abstract shell" (or "still rendering", see service.py).
+FULL_TEXT_SECTIONS = 6
 # `<h2>1. Introduction</h2>` / `<h3><span>2.3</span> Method</h3>`: the article's own numbering.
 _NUMBERED_HEADING = re.compile(
     r"<h[1-3][^>]*>(?:\s|<[^>]+>)*[1-9]\d?\.?(?:&#xA0;|&nbsp;|\s)+[A-Z]",
@@ -83,10 +86,12 @@ def classify_mhtml(path: Path) -> dict[str, object]:
         status, reason = "ok", ""
     elif hits:
         status, reason = "no_html", "paywall"
-    elif sections < 2:
-        status, reason = "no_html", "abstract_only"
-    else:
+    elif sections >= FULL_TEXT_SECTIONS:
+        # A publisher that prints unnumbered headings ("Introduction") is still a full
+        # article: plenty of section wrappers and no sign-in prompt.
         status, reason = "ok", ""
+    else:
+        status, reason = "no_html", "abstract_only"
     return {
         "status": status,
         "reason": reason,

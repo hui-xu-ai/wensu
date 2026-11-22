@@ -45,6 +45,36 @@ from .risk import RiskGuard
 # A page read is two navigations (front page, then the article); the snapshot that
 # follows spends nothing, so this is also what `page_read` bills.
 PAGE_READ_QUOTA = 2
+# Article bodies paint after the load event; a capture taken too early holds only the
+# highlights. Both waits are clamped by the extension to 3 s per action.
+_ARTICLE_SETTLE_MS = 1_200
+_SECOND_LOOK_MS = 1_500
+
+
+def _classify_saved(saved: dict[str, Any]) -> dict[str, Any]:
+    """Probe whatever the capture wrote; a missing file is `not_written`, never `ok`."""
+
+    path = Path(str(saved.get("path") or ""))
+    if path.is_file():
+        return classify_mhtml(path)
+    return {
+        "status": "no_html",
+        "reason": "not_written",
+        "sections": 0,
+        "headings": 0,
+        "paywall_hits": 0,
+    }
+
+
+def _still_rendering(probe: dict[str, Any]) -> bool:
+    """No article body **and** no sign-in prompt: the page is late, not closed."""
+
+    return (
+        probe.get("status") == "no_html"
+        and probe.get("reason") in {"abstract_only", "paywall"}
+        and not probe.get("headings")
+        and not probe.get("paywall_hits")
+    )
 
 
 def _page_next(probe: dict[str, Any]) -> str:
@@ -608,35 +638,47 @@ class ScholarService:
             actions=(
                 Action("goto", {"url": publisher.homepage}),
                 Action("goto", {"url": target}),
+                # Publisher article bodies render after the load event: capturing straight
+                # after `goto` returned 1.8 KB of "Highlights" from a ScienceDirect article
+                # page that was fully accessible (0.12.59, real run after signing in).
+                Action("sleep", {"ms": _ARTICLE_SETTLE_MS}),
             ),
         )
         with self._browser_transaction():
             outcomes = self._run(plan, spec)
             final_url = outcomes[-1].url or target
             saved = self._snapshot_locked(tab="work")
+            probe = _classify_saved(saved)
+            if _still_rendering(probe):
+                # No article body, but also no sign-in prompt: the page is still painting,
+                # not paywalled. One bounded second look, same page, same quota.
+                self._run(
+                    Plan(
+                        channel=f"page:{publisher.name}",
+                        purpose="detail",
+                        actions=(Action("sleep", {"ms": _SECOND_LOOK_MS}),),
+                    ),
+                    spec,
+                )
+                retry = self._snapshot_locked(tab="work")
+                retry_probe = _classify_saved(retry)
+                if retry_probe.get("status") == "ok":
+                    saved, probe = retry, retry_probe
+            if saved.get("status") == "blocked":
+                return {**saved, "doi": identifier, "publisher": publisher.name}
 
-        if saved.get("status") == "blocked":
-            return {**saved, "doi": identifier, "publisher": publisher.name}
-
-        path = Path(str(saved.get("path") or ""))
-        readable = path
-        probe = (
-            classify_mhtml(readable)
-            if readable.is_file()
-            else {"status": "no_html", "reason": "not_written"}
-        )
-        return {
-            **probe,
-            "doi": identifier,
-            "publisher": publisher.name,
-            "final_url": final_url,
-            "mhtml_path": str(readable),
-            "download_path": str(path),
-            "bytes": int(saved.get("bytes") or 0),
-            "title": str(saved.get("title") or probe.get("title") or ""),
-            "quota_charged": PAGE_READ_QUOTA,
-            "next": _page_next(probe),
-        }
+            readable = Path(str(saved.get("path") or ""))
+            return {
+                **probe,
+                "doi": identifier,
+                "publisher": publisher.name,
+                "final_url": final_url,
+                "mhtml_path": str(readable),
+                "bytes": int(saved.get("bytes") or 0),
+                "title": str(saved.get("title") or probe.get("title") or ""),
+                "quota_charged": PAGE_READ_QUOTA,
+                "next": _page_next(probe),
+            }
 
     def _collect_chunks(self, adapter: Any, first: dict[str, Any]) -> bytes:
         """Assemble the capture from base64 chunks the extension hands out on request."""

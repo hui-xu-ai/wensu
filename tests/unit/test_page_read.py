@@ -33,7 +33,12 @@ ARTICLE_HTML = """<!DOCTYPE html><html><body>
 PAYWALL_HTML = """<!DOCTYPE html><html><body><h1>A paper</h1>
 <p>Purchase PDF</p><p>Get access</p></body></html>"""
 
-# A publisher's abstract page: it still wraps highlights and recommended work in
+# Same shell, but with no sign-in prompt at all: this is a page that is still painting,
+# which is what a capture taken right after the load event sees.
+UNRENDERED_HTML = """<!DOCTYPE html><html><body><h1>A paper</h1>
+<section id="u1"><h2>Highlights</h2><p>Short teaser.</p></section>
+<section id="u2"><h2>Abstract</h2><p>Some abstract text.</p></section>
+</body></html>"""
 # `<section id=…>`, so counting those wrappers called it a full article (0.12.58, real run).
 # What it does not have is the article's own numbering.
 ABSTRACT_HTML = """<!DOCTYPE html><html><body>
@@ -147,6 +152,52 @@ def test_next_asks_the_user_to_sign_in_instead_of_retrying() -> None:
     assert "page2md" in ok
 
 
+def test_page_read_takes_a_second_look_when_the_body_is_still_rendering(tmp_path: Path) -> None:
+    """第一次抓到的是还没渲染出来的摘要（无 paywall 提示）：同一页再看一次，不问用户。"""
+
+    abstract = write_mhtml(tmp_path / "unrendered.mhtml", UNRENDERED_HTML).read_bytes()
+    full = write_mhtml(tmp_path / "full.mhtml", ARTICLE_HTML).read_bytes()
+    scripts: list[list[dict[str, object]]] = [
+        [
+            {"verb": "goto", "data": {"url": "https://www.sciencedirect.com/"}},
+            {
+                "verb": "goto",
+                "data": {"url": "https://www.sciencedirect.com/science/article/pii/X"},
+            },
+            {"verb": "sleep", "data": {"ms": 1_200}},
+            {
+                "verb": "snapshot",
+                "data": {
+                    "token": "t1",
+                    "total": len(abstract),
+                    "base64": base64.b64encode(abstract).decode("ascii"),
+                    "url": "https://www.sciencedirect.com/science/article/pii/X",
+                    "title": "A paper",
+                    "captcha_visible": False,
+                },
+            },
+            {"verb": "sleep", "data": {"ms": 1_500}},
+            {
+                "verb": "snapshot",
+                "data": {
+                    "token": "t2",
+                    "total": len(full),
+                    "base64": base64.b64encode(full).decode("ascii"),
+                    "url": "https://www.sciencedirect.com/science/article/pii/X",
+                    "title": "A paper",
+                    "captcha_visible": False,
+                },
+            },
+        ]
+    ]
+    service = build_service(tmp_path, scripts)
+
+    result = service.read_page(doi="10.1016/j.cej.2023.145123")
+
+    assert result["status"] == "ok"
+    assert result["headings"] >= 1
+
+
 def test_page_read_refuses_an_unsupported_doi_without_opening_anything(tmp_path: Path) -> None:
     service = build_service(tmp_path, [])
 
@@ -165,6 +216,8 @@ def test_page_read_navigates_home_then_article_and_classifies(tmp_path: Path) ->
                 "verb": "goto",
                 "data": {"url": "https://www.sciencedirect.com/science/article/pii/X"},
             },
+            # 正文是渲染出来的：内核在抓之前会等一次（0.12.59 真实链路：不等只抓到 Highlight）。
+            {"verb": "sleep", "data": {"ms": 1_200}},
             {
                 "verb": "snapshot",
                 "data": {
