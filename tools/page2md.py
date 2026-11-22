@@ -1022,9 +1022,9 @@ def _key_sentences(paragraphs: list[str], limit: int = 3) -> list[str]:
         score += sum(0.5 for word in keywords if word in lowered)
         if any(
             word in lowered
-            for word in ("assum", "neglect", "model", "constant", "we ", "this study")
+            for word in ("assum", "neglect", "ideal", "hypothes", "model", "constant")
         ):
-            score += 1.0
+            score += 2.5
         if index == 0:
             score += 0.5
         if index == len(sentences) - 1:
@@ -1089,6 +1089,27 @@ def _flat_paragraphs(sections: list[tuple[str, int, list[str]]]) -> list[str]:
     return [text for _title, _level, paragraphs in sections for text in paragraphs]
 
 
+def _figures_of(sections: list[tuple[str, int, list[str]]]) -> list[dict[str, str]]:
+    """Figure labels and captions, so a map can answer "what does Fig. 5 show"."""
+
+    found: list[dict[str, str]] = []
+    for title, _level, paragraphs in sections:
+        for text in paragraphs:
+            match = re.match(r"!\[([^\]]*)\]\(([^)]+)\)", text)
+            if not match:
+                continue
+            caption = " ".join(match.group(1).split())
+            label = re.match(r"(Fig(?:ure)?\.?\s*\d+[a-z]?)", caption, re.IGNORECASE)
+            found.append(
+                {
+                    "label": label.group(1) if label else f"figure-{len(found) + 1}",
+                    "caption": caption[:120],
+                    "section": title,
+                }
+            )
+    return found
+
+
 def _write_brief(out: Path, sections: list[tuple[str, int, list[str]]], title: str) -> None:
     """`page.brief.md`: the map in one small file (title + one gist per section)."""
 
@@ -1104,6 +1125,11 @@ def _write_brief(out: Path, sections: list[tuple[str, int, list[str]]], title: s
         numbers = _numbers(paragraphs)
         if numbers:
             lines.append("  values: " + " | ".join(numbers))
+    figures = _figures_of(sections)
+    if figures:
+        lines.extend(["", f"## Figures ({len(figures)})"])
+        for figure in figures:
+            lines.append(f"  {figure['label']} [{figure['section']}] {figure['caption']}")
     (out / "page.brief.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -1171,6 +1197,7 @@ def _write_chunks(out: Path, sections: list[tuple[str, int, list[str]]]) -> dict
                 "paragraphs": len(paragraphs),
                 "gist": _gist(paragraphs),
                 "key_sentences": _key_sentences(paragraphs),
+                "formula_dense": text.count("$") // 2 >= 8,
                 "numbers": _numbers(paragraphs),
                 "keywords": _keywords(paragraphs),
             }
@@ -1179,6 +1206,7 @@ def _write_chunks(out: Path, sections: list[tuple[str, int, list[str]]]) -> dict
         "sections": entries,
         "total_tokens": sum(int(entry["tokens"]) for entry in entries),
         "core_tokens": core_tokens,
+        "figures": _figures_of(sections),
         "core_hint": "abstract + highlights + keywords + introduction + conclusion",
     }
     (out / "index.json").write_text(
