@@ -53,10 +53,16 @@ D:\Python\DeepSeek\DateWork\scholar-search\work\tools\.venv\Scripts\python.exe `
 
 | 文件 | 内容 |
 |---|---|
-| `page.md` | **读这个**：标题、元信息、`##/###` 小节、`$…$` 公式、`|` 表格、`![图注](assets/…)` |
+| `index.json` | **先读这个**：每小节的标题、`tokens` 估算、`core` 标记，以及全文 / 核心的总 token |
+| `sections/NN-*.md` | 每个小节一个文件，按需只读你需要的那些 |
+| `page.core.md` | `--mode core` 时生成：亮点 + 摘要 + 引言 + 结论（通常 2–3 k tokens） |
+| `page.md` | 全文（已去掉参考文献及其后的所有尾部章节，重复段落已去重） |
 | `meta.json` | 引擎、体积、公式/表格/图计数、`warnings`（保真度告警） |
 | `page.html` / `page.mhtml` | 原始快照，供追溯与重跑 |
 | `assets/` | 正文引用到的图片 |
+
+**省 token 的读法**：先读 `index.json` 挑小节 → 读 `page.core.md`（或 `sections/` 里那几份）
+→ 只有回答需要细节时才读对应小节或 `page.md`。不要一上来把 `page.md` 整篇读进上下文。
 
 ### 3. 先读 `meta.json`，再读 `page.md`
 

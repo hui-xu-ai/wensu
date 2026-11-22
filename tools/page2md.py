@@ -41,6 +41,29 @@ SUFFIXES = {".html", ".htm", ".mhtml", ".mht"}
 NOISE = ("cookie", "subscribe", "sign in", "advertisement", "related articles", "purchase pdf")
 JUNK_XPATH = "//script|//style|//noscript|//nav|//footer|//aside|//form"
 BLOCK_XPATH = ".//p|.//li|.//caption|.//figcaption"
+# Everything from the first of these headings onwards is dropped: it is not the paper.
+BACKMATTER_MARKERS: tuple[str, ...] = (
+    "references",
+    "bibliography",
+    "reference",
+    "further reading",
+    "literature cited",
+    "cited by",
+    "data availability",
+    "data availability statement",
+    "acknowledg",
+    "declaration of competing",
+    "competing interest",
+    "conflict of interest",
+    "author contribution",
+    "credit authorship",
+    "funding",
+    "supplementary",
+    "appendix",
+    "about the journal",
+    "related article",
+    "recommended article",
+)
 
 # MathML 运算符 → LaTeX
 MATH_OPS = {
@@ -472,6 +495,7 @@ def _own_blocks(section) -> list[str]:
 
 
 _OWN_COUNTERS: dict[str, int] = {}
+_LAST_SECTIONS: list[tuple[str, int, list[str]]] = []
 
 
 def _section_entries(doc) -> list[tuple[str, int, list[str]]]:
@@ -506,7 +530,143 @@ def _section_entries(doc) -> list[tuple[str, int, list[str]]]:
                 sibling = sibling.getnext()
         entries.append((title, level, paragraphs))
 
-    return entries
+    # Elsevier puts the abstract and the highlights outside any `<section>`: the abstract
+    # is `div.abstract` (with the heading as a `section-title` sibling that the walk above
+    # never reaches), the highlights are `div.author-highlights` with `<li>` bullets. Both
+    # are the cheapest part of the paper to read, so they are pulled in explicitly.
+    front: list[tuple[str, int, list[str]]] = []
+    for highlight_block in doc.xpath(
+        '//*[contains(@class, "author-highlights") or contains(@class, "highlights")]'
+    )[:1]:
+        bullets = [_text(item) for item in highlight_block.xpath(".//li") if len(_text(item)) >= 12]
+        if bullets:
+            front.append(("Highlights", 2, bullets))
+    if "abstract" not in {title.casefold() for title, _level, _items in entries}:
+        for abstract_block in doc.xpath('//*[contains(@class, "abstract")]')[:1]:
+            paragraphs = [
+                text
+                for text in (_text(node) for node in abstract_block.xpath(BLOCK_XPATH))
+                if len(text) >= 12
+            ]
+            if paragraphs:
+                front.append(("Abstract", 2, paragraphs))
+
+    return front + entries
+
+
+def _normalise(text: str) -> str:
+    """Fingerprint text for duplicate detection: letters and digits only, lowercased."""
+
+    return re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "", text.casefold())
+
+
+def _is_backmatter(title: str) -> bool:
+    """References and everything that follows them is not part of the paper's argument.
+
+    A publisher page ends with a long bibliography, funding notes, competing-interest
+    statements and "further reading" — on a real Elsevier article that tail was 60 % of the
+    bytes and none of the meaning. The list is matched on the heading text, so a section
+    called "References and notes" is caught as well.
+    """
+
+    lowered = re.sub(r"^[\d.\s]+", "", title).casefold()
+    return any(marker in lowered for marker in BACKMATTER_MARKERS)
+
+
+CORE_MARKERS: tuple[str, ...] = (
+    "abstract",
+    "summary",
+    "highlights",
+    "keywords",
+    "introduction",
+    "background",
+    "conclusion",
+    "conclusions",
+    "concluding",
+    "outlook",
+)
+
+
+def _is_core(title: str) -> bool:
+    lowered = re.sub(r"^[\d.\s]+", "", title).casefold()
+    return any(marker in lowered for marker in CORE_MARKERS)
+
+
+def _similar(left: str, right: str) -> bool:
+    """Two paragraphs that only differ by a few characters are the same paragraph.
+
+    `_merge_markdown` deduplicated on an exact prefix, so the same sentence with one word
+    changed (a citation number, a line-wrap hyphen) survived twice. That is where the
+    repeated content in the first real run came from.
+    """
+
+    if not left or not right:
+        return False
+    if abs(len(left) - len(right)) > max(40, len(left) // 4):
+        return False
+    from difflib import SequenceMatcher
+
+    return SequenceMatcher(None, left, right).quick_ratio() > 0.9 and (
+        SequenceMatcher(None, left, right).ratio() > 0.85
+    )
+
+
+def _collect_sections(doc) -> list[tuple[str, int, list[str]]]:
+    """Sections in document order, backmatter cut, near-duplicate paragraphs removed."""
+
+    collected: list[tuple[str, int, list[str]]] = []
+    fingerprints: list[str] = []
+    for title, level, paragraphs in _section_entries(doc):
+        if _is_backmatter(title):
+            break
+        kept: list[str] = []
+        for text in paragraphs:
+            if text == title:
+                continue
+            key = _normalise(text)
+            # Tables, block equations and images are short after normalisation but carry
+            # structure, not prose: never drop those on a length test.
+            structural = text.startswith(("|", "$$", "![", "<"))
+            if len(key) < 12 and not structural:
+                continue
+            if len(key) >= 20 and any(
+                key == previous or _similar(key, previous) for previous in fingerprints
+            ):
+                continue
+            fingerprints.append(key)
+            kept.append(text)
+        if kept:
+            collected.append((title, level, kept))
+    return collected
+
+
+def _dedupe_blocks(markdown: str) -> str:
+    """Drop paragraphs that repeat one already kept.
+
+    Two extractors are merged, so the same sentence can arrive twice with a different
+    literal (a citation number, a soft hyphen). Comparing on the normalised form catches
+    those, which the earlier exact-prefix check did not: the first real page carried 14
+    repeated paragraphs out of 108.
+    """
+
+    kept: list[str] = []
+    fingerprints: list[str] = []
+    for block in markdown.split("\n\n"):
+        text = block.strip()
+        if not text:
+            continue
+        if text.startswith("#") or text.startswith("![") or text.startswith("$$"):
+            kept.append(text)
+            continue
+        key = _normalise(text)
+        if len(key) >= 20 and any(
+            key == previous or _similar(key, previous) for previous in fingerprints
+        ):
+            continue
+        if len(key) >= 20:
+            fingerprints.append(key)
+        kept.append(text)
+    return "\n\n".join(kept)
 
 
 def _section_markdown(html: str) -> tuple[str, int, dict[str, int]]:
@@ -521,21 +681,14 @@ def _section_markdown(html: str) -> tuple[str, int, dict[str, int]]:
 
     _OWN_COUNTERS["math_pandoc"] = _prime_pandoc(doc)
 
-    seen: set[str] = set()
+    sections = _collect_sections(doc)
+    _LAST_SECTIONS.clear()
+    _LAST_SECTIONS.extend(sections)
     blocks: list[str] = []
     characters = 0
-    for title, level, paragraphs in _section_entries(doc):
-        kept = []
-        for text in paragraphs:
-            key = re.sub(r"\s+", " ", text).strip().lower()[:120]
-            if key in seen or text == title:
-                continue
-            seen.add(key)
-            kept.append(text)
-        if not kept:
-            continue
-        blocks.append(f"{'#' * level} {title}\n\n" + "\n\n".join(kept))
-        characters += sum(len(text) for text in kept)
+    for title, level, paragraphs in sections:
+        blocks.append(f"{'#' * level} {title}\n\n" + "\n\n".join(paragraphs))
+        characters += sum(len(text) for text in paragraphs)
     return "\n\n".join(blocks), characters, dict(_OWN_COUNTERS)
 
 
@@ -637,7 +790,7 @@ def _extract_body(html: str) -> tuple[str | None, dict[str, object]]:
     info["bytes_sections"] = len(sections.encode("utf-8"))
     info.update(counters)
 
-    body = _merge_markdown(sections, main_body)
+    body = _dedupe_blocks(_merge_markdown(sections, main_body))
     info["engine"] = (
         "sections+trafilatura"
         if sections and main_body
@@ -752,7 +905,68 @@ def _warnings(meta: dict[str, object]) -> list[str]:
     return found
 
 
-def convert(source: Path, out: Path) -> dict[str, object]:
+def _estimate_tokens(text: str) -> int:
+    """Rough budget: ~4 characters per token in English, ~1.6 for CJK."""
+
+    cjk = len(re.findall(r"[\u4e00-\u9fff]", text))
+    other = len(text) - cjk
+    return int(cjk / 1.6 + other / 4)
+
+
+def _write_chunks(out: Path, sections: list[tuple[str, int, list[str]]]) -> dict[str, object]:
+    """One file per section plus an index, so a reader can take only what it needs.
+
+    Reading a whole paper costs ~15–25 k tokens; the abstract, introduction and conclusion
+    are a tenth of that and carry the claim. The index carries the price of each part so the
+    caller can choose instead of guessing.
+    """
+
+    directory = out / "sections"
+    directory.mkdir(parents=True, exist_ok=True)
+    entries: list[dict[str, object]] = []
+    core_tokens = 0
+    for index, (title, level, paragraphs) in enumerate(sections, start=1):
+        text = "\n\n".join(paragraphs)
+        slug = re.sub(r"[^A-Za-z0-9._-]+", "-", title)[:60].strip("-").lower() or f"section-{index}"
+        name = f"{index:02d}-{slug}.md"
+        (directory / name).write_text(f"{'#' * level} {title}\n\n{text}\n", encoding="utf-8")
+        tokens = _estimate_tokens(text)
+        core = _is_core(title)
+        if core:
+            core_tokens += tokens
+        entries.append(
+            {
+                "index": index,
+                "title": title,
+                "level": level,
+                "file": f"sections/{name}",
+                "chars": len(text),
+                "tokens": tokens,
+                "core": core,
+            }
+        )
+    payload = {
+        "sections": entries,
+        "total_tokens": sum(int(entry["tokens"]) for entry in entries),
+        "core_tokens": core_tokens,
+        "core_hint": "abstract + highlights + keywords + introduction + conclusion",
+    }
+    (out / "index.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return payload
+
+
+def _core_markdown(sections: list[tuple[str, int, list[str]]]) -> str:
+    blocks = [
+        f"{'#' * level} {title}\n\n" + "\n\n".join(paragraphs)
+        for title, level, paragraphs in sections
+        if _is_core(title)
+    ]
+    return "\n\n".join(blocks)
+
+
+def convert(source: Path, out: Path, *, mode: str = "full") -> dict[str, object]:
     html, form = _read_html(source)
     body, info = _extract_body(html)
     out.mkdir(parents=True, exist_ok=True)
@@ -788,6 +1002,12 @@ def convert(source: Path, out: Path) -> dict[str, object]:
         "noise_hits": sorted({word for word in NOISE if word in markdown.lower()}),
     }
     meta["warnings"] = _warnings(meta)
+    chunks = _write_chunks(out, list(_LAST_SECTIONS))
+    if mode == "core":
+        (out / "page.core.md").write_text(_core_markdown(list(_LAST_SECTIONS)), encoding="utf-8")
+    meta["sections_total"] = len(chunks["sections"])
+    meta["tokens_total"] = chunks["total_tokens"]
+    meta["tokens_core"] = chunks["core_tokens"]
     (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     return meta
 
@@ -800,6 +1020,9 @@ def main() -> int:
         "--in", dest="source", required=True, help=".html/.mhtml 文件，或包含它们的目录"
     )
     parser.add_argument("--out", dest="out", required=True, help="输出目录")
+    parser.add_argument(
+        "--mode", choices=("full", "core"), default="full", help="core 另写 page.core.md"
+    )
     arguments = parser.parse_args()
     source = Path(arguments.source)
     out = Path(arguments.out)
@@ -815,7 +1038,7 @@ def main() -> int:
 
     for target in targets:
         destination = out if source.is_file() else out / target.stem[:80]
-        meta = convert(target, destination)
+        meta = convert(target, destination, mode=arguments.mode)
         print(
             f"{target.name}: {meta['bytes_md']} B md · 标题 {meta['headings']} · 表格行 "
             f"{meta['table_rows']} · 公式 {meta['math_inline']} · 图 "
