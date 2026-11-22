@@ -648,10 +648,11 @@ class ScholarService:
             channel=f"page:{publisher.name}",
             purpose="detail",
             actions=(
-                # The home page is only a referrer hop, and publisher front pages answer in
-                # well under a second: the extension already waits for the load event, so
-                # no extra dwell is needed before the tab is blanked.
-                Action("goto", {"url": publisher.homepage, "open": "new", "dwell_ms": 0}),
+                # The home page is only a referrer hop: the extension waits for its load
+                # event, then this fixed pause, and only then is the tab blanked and the
+                # article loaded in it. 600 ms is the interval the user asked for on
+                # 2026-11-22 ("期刊网页跳转和空白页之间的延时改成 0.6s").
+                Action("goto", {"url": publisher.homepage, "open": "new", "dwell_ms": 600}),
                 Action("goto", {"url": target, "close": "disposable"}),
                 # Publisher article bodies render after the load event: capturing straight
                 # after `goto` returned 1.8 KB of "Highlights" from a ScienceDirect article

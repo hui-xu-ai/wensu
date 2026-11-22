@@ -6,6 +6,17 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.4] - 2026-11-22
+
+### Changed — the referrer hop pauses a fixed 0.6 s before the tab is blanked
+
+`page_read` visits the publisher front page, waits for its load event, then pauses 600 ms and
+blanks that tab (`about:blank`) before loading the article into it. The pause is the interval
+the user asked for; it replaces the variable 500–1 500 ms jitter that used to follow every
+navigation, and 0.13.3's zero pause, which blanked the tab before the front page had been
+looked at.
+
+
 ## [0.13.3] - 2026-11-22
 
 Fixes from `wensu-风险与缺陷测试报告-2026-11-22.md` (D1–D5, E2, E4). The report's 13
