@@ -70,19 +70,36 @@
 ```
 MCP 客户端 ──stdio / HTTP──▶ MCP server
                                │
-                        内核：契约 / 策略 / 风控 / 计划 / 审计 / 缓存
+                 内核：契约 / 策略 / 风控 / 计划 / 审计 / 缓存
                                │
-                        渠道插件 channels/cnki/ 与 channels/webofscience/
+        ┌──────────────────────┴───────────────────────┐
+        │                                              │
+  渠道插件 channels/                            page_read / snapshot
+  cnki/、webofscience/                          （25 家出版社白名单）
+  检索 · 详情 · 导出                             通读：只 goto，不点不填
+        │                                              │
+        └──────────────────────┬───────────────────────┘
                                │
-                     桥接适配器 ──TCP(loopback+token)──▶ 原生宿主
-                                                          │
-                                                    stdio │ 浏览器原生消息
-                                                          ▼
-                                                       扩展 ──▶ 你的浏览器
+                    桥接适配器 ──TCP(loopback+token)──▶ 原生宿主
+                                                        │
+                                                  stdio │ 浏览器原生消息
+                                                        ▼
+                                         扩展 ──▶ 你的浏览器（九个动作）
+                                                        │
+                                          chrome.pageCapture（分块过桥）
+                                                        ▼
+                      内核写盘 <home>/pages/<slug>/page.mhtml
+                                                        │
+                    tools/page2md.py ──▶ page.md + index.json（文献地图）
 ```
 
-你不需要开调试端口，也不需要交出浏览器控制权：扩展只做九个通用动作，
-站点知识（选择器、流程、解析）全部在 Python 侧的渠道插件里。
+你不需要开调试端口，也不需要交出浏览器控制权。
+
+- **检索**：扩展只做九个通用动作（`goto`/`wait_for`/`type`/`click`/`select`/`read_html`/`read_text`/
+  `scroll`/`sleep`），站点知识（选择器、流程、解析）全在 Python 侧的渠道插件里。
+- **通读**：内核只发导航，页面由浏览器自己渲染，`chrome.pageCapture` 分块过桥、**内核写盘**
+  （不走下载管理器，否则 Edge 会留下 `.crdownload`）。之后是纯本地转换：`page2md.py` 产出
+  `page.md` 与文献地图 `index.json`，不再访问任何站点。
 
 ## 快速开始
 
