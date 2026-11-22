@@ -12,11 +12,10 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class Publisher:
-    """One publisher: the domains it serves articles from and its front page."""
+    """One publisher: the domains it serves articles from, and its DOI prefixes."""
 
     name: str
     domains: tuple[str, ...]
-    homepage: str
     doi_prefixes: tuple[str, ...] = ()
 
     def hosts(self) -> tuple[str, ...]:
@@ -29,43 +28,40 @@ PUBLISHERS: tuple[Publisher, ...] = (
     Publisher(
         "elsevier",
         ("sciencedirect.com",),
-        "https://www.sciencedirect.com/",
         ("10.1016",),
     ),
-    Publisher("springer", ("link.springer.com",), "https://link.springer.com/", ("10.1007",)),
-    Publisher("nature", ("nature.com",), "https://www.nature.com/", ("10.1038",)),
+    Publisher("springer", ("link.springer.com",), ("10.1007",)),
+    Publisher("nature", ("nature.com",), ("10.1038",)),
     Publisher(
         "wiley",
         ("onlinelibrary.wiley.com",),
-        "https://onlinelibrary.wiley.com/",
         ("10.1002", "10.1111", "10.1002"),
     ),
-    Publisher("acs", ("pubs.acs.org",), "https://pubs.acs.org/", ("10.1021",)),
-    Publisher("rsc", ("pubs.rsc.org",), "https://pubs.rsc.org/", ("10.1039",)),
+    Publisher("acs", ("pubs.acs.org",), ("10.1021",)),
+    Publisher("rsc", ("pubs.rsc.org",), ("10.1039",)),
     Publisher(
         "taylor-francis",
         ("tandfonline.com",),
-        "https://www.tandfonline.com/",
         ("10.1080",),
     ),
-    Publisher("sage", ("journals.sagepub.com",), "https://journals.sagepub.com/", ("10.1177",)),
-    Publisher("mdpi", ("mdpi.com",), "https://www.mdpi.com/", ("10.3390",)),
-    Publisher("frontiers", ("frontiersin.org",), "https://www.frontiersin.org/", ("10.3389",)),
-    Publisher("plos", ("journals.plos.org",), "https://journals.plos.org/", ("10.1371",)),
-    Publisher("arxiv", ("arxiv.org",), "https://arxiv.org/", ("10.48550",)),
-    Publisher("ieee", ("ieeexplore.ieee.org",), "https://ieeexplore.ieee.org/", ("10.1109",)),
-    Publisher("acm", ("dl.acm.org",), "https://dl.acm.org/", ("10.1145",)),
-    Publisher("science", ("science.org",), "https://www.science.org/", ("10.1126",)),
-    Publisher("pnas", ("pnas.org",), "https://www.pnas.org/", ("10.1073",)),
-    Publisher("bmj", ("bmj.com",), "https://www.bmj.com/", ("10.1136",)),
-    Publisher("nejm", ("nejm.org",), "https://www.nejm.org/", ("10.1056",)),
-    Publisher("jama", ("jamanetwork.com",), "https://jamanetwork.com/", ("10.1001",)),
-    Publisher("cambridge", ("cambridge.org",), "https://www.cambridge.org/", ("10.1017",)),
-    Publisher("oxford", ("academic.oup.com",), "https://academic.oup.com/", ("10.1093",)),
-    Publisher("iop", ("iopscience.iop.org",), "https://iopscience.iop.org/", ("10.1088",)),
-    Publisher("aps", ("journals.aps.org",), "https://journals.aps.org/", ("10.1103",)),
-    Publisher("aip", ("pubs.aip.org",), "https://pubs.aip.org/", ("10.1063",)),
-    Publisher("karger", ("karger.com",), "https://karger.com/", ("10.1159",)),
+    Publisher("sage", ("journals.sagepub.com",), ("10.1177",)),
+    Publisher("mdpi", ("mdpi.com",), ("10.3390",)),
+    Publisher("frontiers", ("frontiersin.org",), ("10.3389",)),
+    Publisher("plos", ("journals.plos.org",), ("10.1371",)),
+    Publisher("arxiv", ("arxiv.org",), ("10.48550",)),
+    Publisher("ieee", ("ieeexplore.ieee.org",), ("10.1109",)),
+    Publisher("acm", ("dl.acm.org",), ("10.1145",)),
+    Publisher("science", ("science.org",), ("10.1126",)),
+    Publisher("pnas", ("pnas.org",), ("10.1073",)),
+    Publisher("bmj", ("bmj.com",), ("10.1136",)),
+    Publisher("nejm", ("nejm.org",), ("10.1056",)),
+    Publisher("jama", ("jamanetwork.com",), ("10.1001",)),
+    Publisher("cambridge", ("cambridge.org",), ("10.1017",)),
+    Publisher("oxford", ("academic.oup.com",), ("10.1093",)),
+    Publisher("iop", ("iopscience.iop.org",), ("10.1088",)),
+    Publisher("aps", ("journals.aps.org",), ("10.1103",)),
+    Publisher("aip", ("pubs.aip.org",), ("10.1063",)),
+    Publisher("karger", ("karger.com",), ("10.1159",)),
 )
 
 

@@ -113,7 +113,7 @@ def test_every_publisher_is_https_and_deduplicated() -> None:
 
     assert len(hosts) == len(set(hosts))
     assert all("://" not in host for host in hosts)
-    assert all(publisher.homepage.startswith("https://") for publisher in PUBLISHERS)
+    assert all(publisher.domains and "." in publisher.domains[0] for publisher in PUBLISHERS)
 
 
 def test_probe_accepts_a_full_text_page(tmp_path: Path) -> None:
@@ -201,7 +201,7 @@ def test_page_read_takes_a_second_look_when_the_body_is_still_rendering(tmp_path
 
 
 def test_page_read_deep_links_without_a_front_page_warm_up(tmp_path: Path) -> None:
-    """发布版**不**先访问出版社首页：那是"看起来像站内跳转"的抓取手法（0.13.7 移除）。
+    """发布版只做一步深链：计划里不得出现任何预热式导航（0.13.7 起）。
 
     私有版要恢复时只需把两行 Action 补回去；`goto` 的 `open`/`close`/`wait` 参数仍在，
     所以恢复不需要改扩展。
@@ -221,7 +221,7 @@ def test_page_read_deep_links_without_a_front_page_warm_up(tmp_path: Path) -> No
     actions = seen[0].actions  # type: ignore[attr-defined]
     assert [action.verb for action in actions] == ["goto", "sleep"]
     assert actions[0].params["url"] == "https://doi.org/10.1016/j.cej.2023.145123"
-    assert "open" not in actions[0].params, "首页参照页不得出现在发布版里"
+    assert "open" not in actions[0].params, "发布版不得出现预热式导航"
     assert "https://www.sciencedirect.com/" not in str(actions)
 
 

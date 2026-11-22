@@ -30,7 +30,7 @@ ACTION_COST: dict[str, object] = {
     "local_sort": 0,
     # Saving the tab the user already has open sends the site nothing (ADR 0018).
     "snapshot": 0,
-    # page_read: the publisher front page plus the article page (ADR 0019).
+    # page_read: the publisher domains the page reader may navigate to (ADR 0019).
     "page_read": 2,
     "detail_cached": 0,
     "detail_live": {"cnki": 1},

@@ -1,23 +1,18 @@
-"""The extension must keep one controlled tab, and must not touch anyone else's.
+"""The extension must keep one tab of its own, and must not touch anyone else's.
 
 Three behaviours were pinned by reading `extension/background.js` and then reproduced with
 `tests/js/tab_lifecycle_probe.js` (real script, fake `chrome`), 2026-11-22:
 
-1. `workTab()` adopts **any** tab whose host is in scope — a tab the user opened himself —
-   and remembers it as the work tab (`background.js:264-277`). Subsequent `goto`s then
-   navigate the user's reading tab.
-2. When no such tab exists it creates one at a hard-coded
-   `https://www.sciencedirect.com/` (`background.js:278`), so reading a Wiley/Springer DOI
-   sends an unrequested request to an unrelated publisher.
-3. `read_page`'s referrer hop opens the publisher front page in a throwaway tab
-   (`open:"new"`) and the next `goto` **closes** it (`close:"disposable"`,
-   `background.js:436`). Closing it means the only tab of ours is gone at exactly the
-   moment a search needs a dedicated, composable tab; the observed run ended with the
-   article in a *new* tab id and a request to sciencedirect.com in between.
+1. `workTab()` adopted **any** tab whose host was in scope — a tab the user opened himself —
+   and remembered it as the work tab, so subsequent `goto`s navigated the user's reading tab.
+2. When no such tab existed it created one at a hard-coded `https://www.sciencedirect.com/`,
+   so a navigation to another publisher sent an unrequested request to that host.
+3. `goto` with `open: "new"` opened a tab and the next `goto` **closed** it, which left the
+   extension with no tab of its own at the moment its next navigation needed one.
 
-Desired contract (the third point is the user's requirement, 2026-11-22): the front-page
-tab is **overwritten** with a blank/test page and kept, and that same tab carries the
-article and any later search.
+Desired contract: a tab opened for a single navigation is **blanked** (`about:blank`) and
+kept, and that same tab carries the following navigation; a tab the user opened is never
+adopted; a fresh tab starts blank.
 
 The probe is skipped when no `node` is available; it is a property of the shipped script,
 so it must run in CI wherever node exists (`WENSU_NODE` overrides the lookup).
@@ -38,7 +33,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PROBE = ROOT / "tests" / "js" / "tab_lifecycle_probe.js"
 BACKGROUND = ROOT / "extension" / "background.js"
 
-_FIX = "defect 3 (0.13.2): the referrer tab is closed instead of being blanked and reused"
+_FIX = "defect 3 (0.13.2): the transient tab was closed instead of blanked and reused"
 
 
 def _node() -> str | None:
@@ -69,37 +64,37 @@ def probe() -> dict[str, Any]:
 # -- the three defects -------------------------------------------------------
 
 
-def test_the_referrer_tab_is_kept_and_blanked(probe: dict[str, Any]) -> None:
-    """The front page is overwritten, not closed: one tab in, one tab out.
+def test_the_transient_tab_is_kept_and_blanked(probe: dict[str, Any]) -> None:
+    """The tab is overwritten, not closed: one tab in, one tab out.
 
     The blanking itself lives between the two navigations, so it cannot be observed from
     the tab list afterwards (the same tab is the article by then) — the extension reports
     the ids it blanked, and that is what this asserts.
     """
 
-    referrer = probe["referrer"]
+    transient = probe["transient"]
 
-    assert referrer["home_tab_survived"] is True, (
-        "the front-page tab is removed; a dedicated tab has to stay so a search can be "
+    assert transient["first_tab_survived"] is True, (
+        "the transient tab is removed; a dedicated tab has to stay so a search can be "
         "driven in it afterwards"
     )
-    assert referrer["home_tab_url_after"] != "https://advanced.onlinelibrary.wiley.com/", (
-        "the front page itself must not be what the tab is left showing"
+    assert transient["first_tab_url_after"] != "https://advanced.onlinelibrary.wiley.com/", (
+        "the tab must not be left on the page it was opened at"
     )
-    blanked = referrer["replies"][-1]["blanked"]
-    assert referrer["home_tab_id"] in blanked, (referrer["replies"], referrer["home_tab_id"])
+    blanked = transient["replies"][-1]["blanked"]
+    assert transient["first_tab_id"] in blanked, (transient["replies"], transient["first_tab_id"])
 
 
 def test_the_article_lands_in_the_tab_we_already_had(probe: dict[str, Any]) -> None:
     """Reuse, not replace: one tab in, one tab out, same id."""
 
-    referrer = probe["referrer"]
+    transient = probe["transient"]
 
-    assert probe["work_tab"]["id"] == referrer["home_tab_id"], probe
+    assert probe["work_tab"]["id"] == transient["first_tab_id"], probe
 
 
 def test_no_unrelated_publisher_is_contacted(probe: dict[str, Any]) -> None:
-    assert probe["referrer"]["unexpected_hosts"] == [], (
+    assert probe["transient"]["unexpected_hosts"] == [], (
         "reading a Wiley DOI must not fetch sciencedirect.com"
     )
     assert probe["created_fallback_url"] in {"about:blank", ""}, probe
@@ -115,7 +110,7 @@ def test_a_foreign_tab_is_never_adopted(probe: dict[str, Any]) -> None:
 
 
 def test_the_article_page_does_get_loaded_once(probe: dict[str, Any]) -> None:
-    urls = [tab["url"] for tab in probe["referrer"]["tabs_after"]]
+    urls = [tab["url"] for tab in probe["transient"]["tabs_after"]]
 
     assert any("10.1002/adma.75384" in url for url in urls), probe
 
@@ -123,13 +118,13 @@ def test_the_article_page_does_get_loaded_once(probe: dict[str, Any]) -> None:
 def test_both_gotos_report_success(probe: dict[str, Any]) -> None:
     """The defects are silent: no error is returned while the tab is being mishandled."""
 
-    assert probe["referrer"]["replies_ok"] is True, probe
+    assert probe["transient"]["replies_ok"] is True, probe
 
 
-def test_the_front_page_is_visited_before_the_article(probe: dict[str, Any]) -> None:
-    """The referrer chain itself is wanted — a fix must not drop the hop."""
+def test_the_first_navigation_happens_before_the_second(probe: dict[str, Any]) -> None:
+    """Two chained navigations are wanted — a fix must not drop the first one."""
 
-    requests = probe["referrer"]["requests"]
+    requests = probe["transient"]["requests"]
 
     assert requests[0].startswith("https://advanced.onlinelibrary.wiley.com/"), requests
     assert any("10.1002/adma.75384" in url for url in requests), requests

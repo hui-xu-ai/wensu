@@ -22,7 +22,7 @@ const observations = {
   adopted_foreign_tab: null,
   adopted_tab_id: null,
   created_fallback_url: null,
-  referrer: {},
+  transient: {},
   work_tab: {},
 };
 
@@ -123,7 +123,7 @@ function hostOf(url) {
 
 const DOMAINS = ["onlinelibrary.wiley.com", "advanced.onlinelibrary.wiley.com"];
 const ARTICLE = "https://advanced.onlinelibrary.wiley.com/doi/10.1002/adma.75384";
-const HOMEPAGE = "https://advanced.onlinelibrary.wiley.com/";
+const FIRST_URL = "https://advanced.onlinelibrary.wiley.com/";
 
 async function scenarioAdoption() {
   // A tab the user already had open on the same publisher, and no work tab remembered.
@@ -141,7 +141,7 @@ async function scenarioFallback() {
   observations.created_fallback_url = (tab && tab.url) || null;
 }
 
-async function scenarioReferrerHop() {
+async function scenarioTransientTab() {
   const browser = makeBrowser([]);
   const context = load(browser);
   const replies = [];
@@ -152,7 +152,7 @@ async function scenarioReferrerHop() {
       type: "action",
       id: 1,
       action: "goto",
-      params: { url: HOMEPAGE, open: "new", dwell_ms: 1 },
+      params: { url: FIRST_URL, open: "new", dwell_ms: 1 },
       domains: DOMAINS,
     },
     channel,
@@ -171,13 +171,13 @@ async function scenarioReferrerHop() {
     channel,
   );
 
-  observations.referrer = {
-    home_tab_id: homeId,
-    home_tab_survived: browser.tabs.has(homeId),
-    home_tab_url_after: browser.tabs.has(homeId) ? browser.tabs.get(homeId).url : null,
+  observations.transient = {
+    first_tab_id: homeId,
+    first_tab_survived: browser.tabs.has(homeId),
+    first_tab_url_after: browser.tabs.has(homeId) ? browser.tabs.get(homeId).url : null,
     tabs_after: [...browser.tabs.values()].map((t) => ({ id: t.id, url: t.url })),
     requests: browser.requests.slice(),
-    // `blanked` is the extension's own account of the front-page tab: the tab is kept and
+    // `blanked` is the extension's own account of the transient tab: the tab is kept and
     // overwritten with about:blank, which the browser cannot show us after the fact — the
     // second `goto` blanks it and immediately loads the article in the same tab.
     replies: replies.map((reply) => ({
@@ -205,7 +205,7 @@ async function scenarioReferrerHop() {
   try {
     await scenarioAdoption();
     await scenarioFallback();
-    await scenarioReferrerHop();
+    await scenarioTransientTab();
   } catch (error) {
     observations.error = String((error && error.message) || error);
   }

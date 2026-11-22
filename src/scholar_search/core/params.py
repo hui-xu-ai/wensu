@@ -46,12 +46,13 @@ ALLOWED_KEYS: dict[str, frozenset[str]] = {
 }
 
 WAIT_STATES = frozenset({"visible", "hidden"})
-# `goto` normally drives the one work tab. `open: "new"` opens a throwaway tab (a publisher
-# home page that exists only to be "touched" before the article), and `close: "disposable"`
-# closes those tabs on the next navigation. Parameters of an existing verb, not new verbs.
+# `goto` normally drives the one work tab. `open: "new"` opens a separate tab for a single
+# navigation, `close: "disposable"` blanks those tabs on the next navigation (a blank tab can
+# be reused; a closed one cannot), and `wait: "none"` returns as soon as the navigation is
+# issued. Parameters of an existing verb, not new verbs.
 GOTO_OPEN = frozenset({"work", "new"})
-# `wait: "none"` returns as soon as the navigation is issued (referrer hop: the tab is
-# blanked by the next action, so waiting for the load event only delays the caller).
+# `wait: "none"` returns as soon as the navigation is issued, for callers that immediately
+# replace the tab's contents and do not need the load event.
 GOTO_WAIT = frozenset({"load", "none"})
 GOTO_CLOSE = frozenset({"disposable"})
 READ_TEXT_MODES = frozenset({"inner", "text"})

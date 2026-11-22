@@ -223,8 +223,8 @@ function domainsFor(message) {
 // footprint at exactly one tab, never touches a page the caller did not ask for, and gives
 // `page_read` a predictable target to snapshot afterwards.
 const WORK_TAB_KEY = "wensuWorkTabId";
-// Tabs opened only to "touch" a publisher's home page before the article is read. They are
-// closed on the very next `goto`, so the browser is left with one tab: the article.
+// Tabs opened for a single navigation (`goto` with `open: "new"`). They are blanked on the
+// next `goto`, so the browser never accumulates tabs.
 const DISPOSABLE_KEY = "wensuDisposableTabs";
 
 function dwellFor(params) {
@@ -242,10 +242,8 @@ async function rememberDisposable(tabId) {
 }
 
 async function closeDisposableTabs() {
-  // Blank them, do not close them. The front-page hop exists so the article request looks
-  // like a visit from that publisher, but the tab itself is the only controlled tab this
-  // extension has: closing it left a search with nowhere to run, and the run that reported
-  // this defect ended with the article in a brand-new tab id.
+  // Blank them, do not close them. A closed tab cannot be reused, and the caller's next
+  // navigation then has nowhere controlled to land; a blank tab can carry it.
   const stored = (await chrome.storage.session.get(DISPOSABLE_KEY))[DISPOSABLE_KEY];
   const ids = Array.isArray(stored) ? stored.filter((id) => Number.isInteger(id)) : [];
   await chrome.storage.session.set({ [DISPOSABLE_KEY]: [] });
@@ -407,11 +405,9 @@ async function onHostMessage(message, channel) {
     }
 
     if (action === "goto") {
-      // `open: "new"` is the "touch the home page, then leave" hop: a throwaway tab that
-      // the next `goto` closes (`close: "disposable"`). Opening a publisher's front page
-      // and immediately navigating that same tab to the article left the front page
-      // visible during the whole read; a separate tab that is closed on the way out keeps
-      // one tab in the browser and the article in it.
+      // `open: "new"` opens a separate tab for this navigation; the next `goto` blanks it
+      // (`close: "disposable"`) and continues in it, so a caller can chain two navigations
+      // and still end up with exactly one tab of its own.
       if (params.open === "new") {
         const homeUrl = new URL(params.url);
         if (homeUrl.protocol !== "https:" || !allowedHost(homeUrl.hostname, domains)) {
@@ -421,10 +417,8 @@ async function onHostMessage(message, channel) {
         const began = Date.now();
         const created = await chrome.tabs.create({ url: params.url, active: true });
         await rememberDisposable(created && created.id);
-        // `wait: "none"` is the referrer hop: the request must go out, but the tab is
-        // blanked by the very next action, so waiting for the page to finish loading only
-        // delays the caller (measured: 0.9 s of load before a 0.6 s pause, for a page the
-        // user is never meant to see).
+        // `wait: "none"` returns as soon as the navigation is issued: the caller is going to
+        // replace the tab's contents anyway, so waiting for the load event only delays it.
         if (params.wait !== "none") {
           await waitNavigated(created.id, "", domains).catch(() => null);
           await waitComplete(created.id).catch(() => null);
@@ -488,8 +482,8 @@ async function onHostMessage(message, channel) {
         url: finalUrl,
         title: updated.title || "",
         status: status || undefined,
-        // Reported so a caller can prove the front-page tab was blanked and kept, rather
-        // than closed and replaced by a new one.
+        // Reported so a caller can prove the tab was blanked and kept, rather than closed
+        // and replaced by a new one.
         blanked,
       };
       if (outOfScope || status >= 400) {

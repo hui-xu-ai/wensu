@@ -16,16 +16,24 @@ WoS 两个域名」。这是一次边界变更，必须显式决策。
 
 ## 决定
 
-1. **精选域名清单**（`core/publishers.py`）：25 家出版社/平台，每家一条 `{名称, 域名, 首页, DOI 前缀}`。
+1. **精选域名清单**（`core/publishers.py`）：25 家出版社/平台，每家一条 `{名称, 域名, DOI 前缀}`。
    清单之外一律返回 `unsupported_site`，**不尝试**访问。
-2. **只 `goto`，不点不填**：`page_read` 只用 `goto`（首页 → 文章页）与 `snapshot`，不 click/type/select。
-   撞上验证页立即以 `blocked`/`RISK_CAPTCHA` 结束，不重试、不刷新、不点。
-3. **先首页后文章**：两次导航，形成正常的 referrer 链，而不是一步深链。
+2. **只 `goto`，不点不填**：`page_read` 只用 `goto`（直接打开文章地址）与 `snapshot`，不 click/type/select。
+   撞上验证页立即以 `blocked`/`challenge` 结束，不重试、不刷新、不点。
+3. **一步深链**：直接打开 DOI 解引用后的文章地址，等于用户自己把链接粘进地址栏；不做任何导航预热
+   （见下方「修订 2026-11-22」）。
 4. **DOI 解引用**：DOI 先经 `https://doi.org/<doi>` 解析（该解析器只把请求转到清单内的域名），
    也可以直接给文章 URL；两条路径都计入配额。
-5. **计费**：`page_read` = **2 配额单位**（两次导航），`snapshot` 仍为 0。沿用 3 秒间隔与每日 300 上限。
+5. **计费**：`page_read` = **2 配额单位**（一次导航 + 一次抓取），`snapshot` 仍为 0。沿用 3 秒间隔与每日 300 上限。
 6. **必须给出明确结论**：`status` 为 `ok` / `no_html`（`reason` ∈ `paywall`/`abstract_only`/`pdf_only`/`unparsable`）
    / `unsupported_site` / `blocked`；`no_html` 时尽量带 `pdf_url`，让调用方转 PDF 路线，而不是把摘要当全文。
+
+## 修订 2026-11-22 · 去掉导航预热
+
+原第 3 条曾规定"先访问出版社首页，再打开文章"，理由是形成正常的 referrer 链。该条**已删除**：
+这一步模仿站内导航，属于规避站点风控的手段，公开包里等于给批量抓取留了闸门。现在 `page_read`
+只做一步深链；遇到人机校验一律 `blocked` / `challenge`，由用户在浏览器里自行完成（ADR 0004）。
+`goto` 的 `open` / `close` / `wait` / `dwell_ms` 参数保留——它们是标签页语义，与出版社无关。
 
 ## 被否的替代方案
 

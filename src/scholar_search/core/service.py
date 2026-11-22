@@ -42,8 +42,8 @@ from .publishers import PUBLISHERS, Publisher, publisher_for_doi, publisher_for_
 from .registry import ChannelRegistry, ChannelSpec
 from .risk import RiskGuard
 
-# A page read is two navigations (front page, then the article); the snapshot that
-# follows spends nothing, so this is also what `page_read` bills.
+# A page read is billed as two network units (one navigation plus the capture that
+# follows it, which itself spends nothing) — the price the price table documents.
 PAGE_READ_QUOTA = 2
 # Article bodies paint after the load event; a capture taken too early holds only the
 # highlights. Both waits are clamped by the extension to 3 s per action.
@@ -615,18 +615,10 @@ class ScholarService:
     def read_page(self, *, url: str = "", doi: str = "") -> dict[str, Any]:
         """Open the article a reader asked for, then say what is on it.
 
-        **No front-page warm-up.** Earlier builds visited the publisher's home page first
-        and then the article, i.e. they imitated a reader arriving from the site's own
-        navigation. That is a technique for getting past bot heuristics, and shipped in a
-        public package it is a scraping ramp: one call per DOI, with the site's own
-        navigation pattern reproduced. It has been removed from the released build
-        (0.13.7). `page_read` now navigates straight to the article — a deep link, exactly
-        what a reader who copied the URL would do — and if the publisher challenges it the
-        answer is `blocked` / `challenge` and the human solves it themselves (ADR 0004).
-
-        Two steps, both visible in the answer: the article, then a snapshot of it. Nothing
-        is clicked and nothing is typed — only `goto` and `sleep` — so a page that
-        challenges the browser ends as `blocked` instead of being pushed at.
+        One navigation, no warm-up: the article URL is opened directly — a deep link, the
+        same thing a reader who pasted the URL would do. Nothing is clicked and nothing is
+        typed; only `goto` and `sleep` are used, so a page that challenges the browser ends
+        as `blocked` / `challenge` and the human solves it in the browser (ADR 0004).
 
         Answers with `status: "ok"` and the saved path when the page holds the article,
         `status: "no_html"` with a `reason` when it holds only a preview, a paywall or a
@@ -656,7 +648,7 @@ class ScholarService:
             channel=f"page:{publisher.name}",
             purpose="detail",
             actions=(
-                # Deep link, not a warm-up: no publisher front page is visited first.
+                # A deep link: the article URL is opened as given.
                 Action("goto", {"url": target}),
                 # Publisher article bodies render after the load event: capturing straight
                 # after `goto` returned 1.8 KB of "Highlights" from a ScienceDirect article

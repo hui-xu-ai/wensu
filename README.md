@@ -29,10 +29,12 @@
 
 ## 它不做什么
 
-- **不下载 PDF / CAJ**，不调用任何下载接口，不碰全文
+- **不下载 PDF / CAJ**，不调用任何下载接口。`page_read` 只把**用户能正常打开的那张网页**存成
+  MHTML（正文由 `tools/page2md.py` 转 Markdown），不索取、不解包 PDF
 - **不把题录写入 Zotero / EndNote / Mendeley**。只输出 RIS / EndNote 文本，
   导入由你自己在软件里完成（原因见 [ADR 0006](docs/adr/0006-no-third-party-ingest.md)）
-- **不破解验证码**，遇到验证页立即停机，等你人工处理
+- **不绕过人机验证**：`page_read` 直接打开文章地址（等于你自己把链接粘进地址栏），不做导航预热、
+  不模拟站内跳转；遇到验证页立即停机返回 `blocked`，等**你**在浏览器里点完验证再继续
 - **不做批量抓取**，没有"爬全库"模式，日上限 300 次由内核强制
 - 不实现来源类型筛选（传了会明确报错）；年份筛选只作用于本次已抓取的记录
 
@@ -130,7 +132,7 @@ wensu serve --transport http --host 127.0.0.1 --port 8765
 | `detail` | `url`（`search` 返回的链接或裸 DOI）、`channel`、`include_abstract`、`fields` | 单条完整题录（含摘要、DOI、卷期页） |
 | `detail_many` | `urls[]`、`include_abstract`、`fields` | `results[]`、`ok_count`、`failed_count`；遇风控整批停止 |
 | `export` | `records`、`format`：`ris`/`endnote`/`markdown`/`csv`、`out_path` | 纯文本；给了 `out_path` 则写盘且不回传正文 |
-| `page_read` | `doi`（优先）或 `url` | **2 单位**：先开出版社首页再开文章，存成 MHTML 后回报 `status`（`ok`/`no_html`/`unsupported_site`/`blocked`）、`mhtml_path`、`reason`、`pdf_url` |
+| `page_read` | `doi`（优先）或 `url` | **2 单位**：直接打开文章地址并抓取为 MHTML，回报 `status`（`ok`/`no_html`/`unsupported_site`/`blocked`）、`mhtml_path`、`reason`、`pdf_url`、`quota_charged` |
 | `snapshot` | — （只作用于当前标签页） | **0 单位**：把用户正开着的页面存成 MHTML；遇人机验证返回 `blocked`/`RISK_CAPTCHA` |
 | `status` | `brief` | 渠道、剩余配额、冷却状态、桥接是否就绪 |
 
@@ -199,6 +201,8 @@ wensu setup            # 刷新资源副本 + 重写宿主清单与注册表项
 | **WoS 翻页第 2 页** | 通过（50 条，与第 1 页无重叠） |
 | **WoS 影响因子** | 通过（记录自带 `impact_factor`，本地筛选/排序零请求） |
 | **WoS 摘要按需取** | 通过（检索时播种缓存，`detail` 零网络动作） |
+| **文献通读 `page_read`** | 通过（Nature `10.1038/s41586-020-2649-2` → `ok`；遇到人机校验 → `blocked`/`challenge`，不重试、不绕过） |
+| **文献地图 `tools/page2md.py`** | 通过（`page.md` 全文 + `index.json` 地图，约原文体积的 45%，验收 9/10） |
 
 ## 检索失败了？先看这三条
 
@@ -248,6 +252,17 @@ if ($cur -notmatch 'cnki\.net') {
 `duration_ms` 贴着超时值。把知网窗口切到前台、只留一个可见窗口再试。
 
 更多排障（宿主没起来、`goto` 超时、配额用尽等）见[运维手册](docs/operations.md#7-排障)。
+
+### 4. 出版社页面要求人机验证
+
+`page_read` 打开的是**普通的文章地址**，和你在浏览器里粘贴链接没有区别。如果站点判定这个环境可疑，
+它会返回验证页；工具此时给出 `blocked` / `challenge`（附 `signal`，例如命中的标记词）并立即停止，
+**不重试、不换 IP、不尝试识别验证码**（[ADR 0004](docs/adr/0004-stop-on-challenge.md)）。处理办法只有一个：
+
+1. 在那个浏览器窗口里**人工**完成验证（拖动滑块 / 点选），确认文章正文能正常显示；
+2. 再调一次 `page_read`。
+
+连续对同一个站点高频调用会更容易触发这一步，所以按需读、不要批量刷。
 
 ## 目录
 

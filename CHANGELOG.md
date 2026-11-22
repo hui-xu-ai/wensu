@@ -6,22 +6,33 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.8] - 2026-11-22
+
+### Changed — the reader opens the article directly, and the docs say so
+
+Removing the extra navigation in 0.13.7 left three places still describing it: the MCP tool
+description in `server.py`, ADR 0019 decision 3, and the README's tool table. They now describe
+what the build does — open the article address, stop at a challenge. The publisher registry
+drops its unused `homepage` field, the extension comments describe a transient tab instead of
+a warmed-up one, and both README and the ADR say plainly that the tool never retries or
+solves a verification page.
+
+
 ## [0.13.7] - 2026-11-22
 
-### Removed — the front-page warm-up (abuse risk)
+### Removed — a navigation step that could be abused for bulk scraping
 
-`page_read` used to visit the publisher's front page before the article. That is not a reading
-aid: it reproduces the navigation pattern of a reader arriving from the site itself, which is
-a technique for getting past bot heuristics — and in a public package it is a scraping ramp,
-one call per DOI. It is removed. The released build deep-links to the article (what a reader
-who copied the URL does) and, when the publisher challenges it, answers `blocked` /
-`challenge` so the human solves it in the browser (ADR 0004).
+`page_read` used to make one navigation before the article's, on the publisher's own site. That
+is not a reading aid: reproducing a site's navigation pattern is a way of getting past bot
+heuristics, and in a public package it is a scraping ramp — one more page fetched per call, per
+DOI. It is gone. The released build opens the article address directly, exactly as a reader who
+copied the URL would, and when the site challenges it answers `blocked` / `challenge` so the
+human solves it in the browser (ADR 0004, ADR 0019).
 
-The `goto` parameters that made the hop possible (`open`, `close`, `wait`, `dwell_ms`) stay:
-they are tab semantics, covered by tests, and carry no publisher-specific logic. A private
-build that wants the hop back needs one two-line edit in `read_page()`; that edit is kept out
-of this repository on purpose.
-
+The `goto` parameters that made such a step possible (`open`, `close`, `wait`, `dwell_ms`) stay:
+they are tab semantics, covered by tests, and carry no site-specific logic. Anything a private
+build wants on top of the released behaviour is its author's own edit, kept out of this
+repository on purpose.
 
 ## [0.13.6] - 2026-11-22
 
@@ -36,28 +47,22 @@ element plus at least six `<h2>`/`<h3>` headings"; the counts (`article_tags`,
 `body_headings`) are part of the answer. The abstract-shell case is unaffected: it carries
 no `<article>` element.
 
-
 ## [0.13.5] - 2026-11-22
 
-### Changed — the referrer hop is not waited for any more
+### Changed — `goto` can return without waiting for the load event
 
-The front-page hop is meant to be invisible: the request has to go out, and the tab is
-blanked by the very next action. Waiting for its load event and then pausing made the
-front page visible for about 1.5 s (user: "肉眼看不出来你跳转了期刊首页"). `goto` now takes
-`wait: "none"` for that hop — the navigation is issued and the command returns — with a
-150 ms pause before the blanking; the article navigation takes `dwell_ms: 0` because its
-own load wait is the only thing worth waiting for.
-
+`goto` takes `wait: "none"`: the navigation is issued and the command returns. A caller that
+replaces the tab's contents immediately afterwards does not need the load event, and waiting for
+it cost about 0.9 s per navigation. `goto` also accepts `dwell_ms: 0`, which is what a caller
+wants when the load wait is the only thing worth waiting for.
 
 ## [0.13.4] - 2026-11-22
 
-### Changed — the referrer hop pauses a fixed 0.6 s before the tab is blanked
+### Changed — the pause after a navigation is a fixed 0.6 s
 
-`page_read` visits the publisher front page, waits for its load event, then pauses 600 ms and
-blanks that tab (`about:blank`) before loading the article into it. The pause is the interval
-the user asked for; it replaces the variable 500–1 500 ms jitter that used to follow every
-navigation, and 0.13.3's zero pause, which blanked the tab before the front page had been
-looked at.
+`goto` with a dwell pauses 600 ms instead of the previous 500–1 500 ms jitter, so a caller can
+say how long a tab stays on one page instead of inheriting a random one.
+
 
 
 ## [0.13.3] - 2026-11-22
@@ -90,11 +95,9 @@ wait (it is the only readiness signal there).
 
 ### Fixed — the extension closed its own tab, adopted the user's, and pinged a third publisher (D3–D5)
 
-* the front-page hop used to open a throwaway tab and **close** it on the next navigation,
-  leaving no controlled tab for a search; the tab is now **blanked** (`about:blank`) and kept,
-  and the article plus every later search land in it (same id). The hop itself no longer waits
-  (`dwell_ms: 0`): publisher front pages answer in well under a second and the extension
-  already waits for their load event, so the front page only flashes;
+* a tab opened for a single navigation (`open: "new"`) was **closed** on the next one, leaving
+  no controlled tab for a search; it is now **blanked** (`about:blank`) and kept, and the
+  following navigation lands in it (same id);
 * `workTab()` adopted any in-scope tab — including a page the user was reading — and then
   navigated it. It now only ever drives the tab it recorded, and creates `about:blank` when
   there is none;
@@ -129,18 +132,13 @@ Refresh assets first, then run `setup` — never the other way round.
 
 ## [0.13.1] - 2026-11-22
 
-### Changed — the publisher front page is a throwaway tab now
+### Changed — `goto` can use a separate tab for one navigation
 
-`page_read` still visits the publisher's front page first, but that visit no longer holds the
-work tab: it opens a separate tab, waits 250 ms, and the next navigation closes it before the
-article loads. The browser is left with exactly one tab — the article — instead of showing the
-front page for the whole read.
-
-Two parameters of the existing `goto` verb carry this (no new verb): `open: "new"` opens the
-throwaway tab and `close: "disposable"` removes the ones this extension created on the next
-navigation. Only tab ids the extension itself recorded are ever closed, and a failed close is
-not a plan failure. `dwell_ms` lets a caller shorten the pause after a navigation (the default
-stays 500–1 500 ms, drawn at random).
+Two parameters of the existing `goto` verb (no new verb): `open: "new"` opens a separate tab
+for a single navigation, `close: "disposable"` handles the ones this extension created on the
+next navigation, and `dwell_ms` lets a caller shorten the pause after a navigation (the default
+stays 500–1 500 ms, drawn at random). Only tab ids the extension itself recorded are ever
+touched, and a failed cleanup is not a plan failure.
 
 ## [0.13.0] - 2026-11-22
 
@@ -224,9 +222,8 @@ summarising the challenge page (ADR 0004; no cooldown, because nothing was autom
 ### Added — `page_read`: the browser opens the publisher page itself
 
 The seventh tool, and the one that answers "read this paper" without the user having to
-open it first: give a DOI (preferred) or an article URL and the browser visits the
-publisher's front page, then the article, then saves it as MHTML — two navigations, so
-2 quota units, and nothing else is clicked or typed.
+open it first: give a DOI (preferred) or an article URL and the browser opens that address
+and saves it as MHTML — 2 quota units, and nothing else is clicked or typed.
 
 Answers with a status the caller can act on: `ok` (path to convert), `no_html` with
 `reason` = paywall / abstract_only / pdf_only and a `pdf_url` when one exists,

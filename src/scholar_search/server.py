@@ -787,8 +787,8 @@ def build_server(service: ScholarService) -> FastMCP:
         """Open a publisher article page and say whether it holds the full text.
 
         Give `doi` (preferred — it also decides the publisher) or an article `url`. The
-        browser visits the publisher's **front page** first and the article second, then
-        saves the page as MHTML; two navigations, so **2 quota units**.
+        browser opens that address directly, then saves the page as MHTML; the navigation
+        plus the capture is charged as **2 quota units**.
 
         Read `status` before anything else:
 
