@@ -940,6 +940,7 @@ _SENTENCE_END = re.compile(
     r"(?<=[.!?。！？])\s+(?![\d‥])",
 )
 _TAIL_MARKERS = ("recommended articles", "cited by", "related articles", "further reading")
+_EQ_LABEL = re.compile(r"\(\d{1,2}\)\s*[A-Za-z∇∂⇀]")
 _STOPWORD_TEXT = (
     "the and for with that this from were was are has have not but its their which these those "
     "into than then also such can may using used use between under over more most only both each "
@@ -951,7 +952,7 @@ _STOPWORDS = frozenset(_STOPWORD_TEXT.split())
 _BROKEN_DECIMAL = re.compile(r"(?<=\d)\.\s+(?=\d)")
 _NUMBER_FACT = re.compile(
     r"(?:[A-Za-z]{1,3}\s*=\s*)?\d+(?:\.\d+)?(?:\s*[×x]\s*10[-−]?\d+)?\s*"
-    r"(?:%|J·mol⁻¹|J/mol|K|MPa|kPa|Pa|mm|μm|nm|µm|h|min|s|mol|kg|mg|g/L|mL)",
+    r"(?:%|J·mol⁻¹|J/mol|K|MPa|kPa|W·m⁻²|W/m2|m·s⁻¹|mm|μm|nm|µm|mol|kg|mg|g/L|mL)",
 )
 _MAX_PARAGRAPH_CHARS = 1200
 
@@ -1009,7 +1010,9 @@ def _key_sentences(paragraphs: list[str], limit: int = 3) -> list[str]:
     """
 
     joined = " ".join(paragraphs)
-    sentences = [s.strip() for s in _SENTENCE_END.split(joined) if len(s.strip()) > 30]
+    sentences = [
+        s.strip() for s in _SENTENCE_END.split(joined) if len(s.strip()) > 30 and "](http" not in s
+    ]
     if not sentences:
         return []
     keywords = set(_keywords(paragraphs, limit=12))
@@ -1103,7 +1106,7 @@ def _figures_of(sections: list[tuple[str, int, list[str]]]) -> list[dict[str, st
             found.append(
                 {
                     "label": label.group(1) if label else f"figure-{len(found) + 1}",
-                    "caption": caption[:120],
+                    "caption": caption[:260],
                     "section": title,
                 }
             )
@@ -1197,7 +1200,8 @@ def _write_chunks(out: Path, sections: list[tuple[str, int, list[str]]]) -> dict
                 "paragraphs": len(paragraphs),
                 "gist": _gist(paragraphs),
                 "key_sentences": _key_sentences(paragraphs),
-                "formula_dense": text.count("$") // 2 >= 8,
+                "formula_dense": bool(_EQ_LABEL.search(text))
+                or len(re.findall(r"[∇∂∑∫]", text)) >= 3,
                 "numbers": _numbers(paragraphs),
                 "keywords": _keywords(paragraphs),
             }
