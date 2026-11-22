@@ -6,6 +6,27 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.14.2] - 2026-11-22
+
+### Fixed — the CNKI record range lost records, then overshot, then failed on small sets
+
+Three defects, all found by running the range against the live site:
+
+* **short reads.** The grid fills in chunks, so one read caught a page with 20 of its
+  50 rows: 150 asked, 120 returned. Each page is now read twice (a `read_html` is a read
+  verb, so the second one is free) and the merge deduplicates;
+* **overshoot.** With two reads a page can hand back more rows than its own span — a
+  150-record range returned 170. The response is now trimmed to the requested span in
+  `_present`, so the contract holds whichever channel answered;
+* **a range wider than the result set errored out.** Nine hits and a 150-record range
+  meant a `click.page-turn` that found no next page, and the whole call failed even
+  though the first page was already on screen. A failed page turn now means "that was
+  the last page": the page on screen is read and returned (9 records for that query).
+
+A CNKI range must also start at record 1 — the channel turns pages, it does not jump to
+page 11 — so `records_from=51` is refused with a message that says which range works.
+
+
 ## [0.14.1] - 2026-11-22
 
 ### Added — the same record range on CNKI (three pages, 150 records)

@@ -179,14 +179,21 @@ def _range_reads(query: SearchQuery) -> tuple[Action, ...]:
     size = 50 if query.limit > 20 else 20
     wanted = span[1] - span[0] + 1
     pages = min(MAX_PAGE, -(-wanted // size))
-    actions: list[Action] = [Action("read_html", timeout_ms=READ_TIMEOUT_MS)]
+    # Each page is read twice: the grid fills in chunks, and one read caught a page with
+    # only 20 of its 50 rows (measured 2026-11-22: 150 asked, 120 returned). A second read
+    # after a pause costs nothing — `read_html` is a read verb — and merging deduplicates,
+    # so the fuller render wins.
+    actions: list[Action] = [
+        Action("read_html", timeout_ms=READ_TIMEOUT_MS),
+        settle(PAGE_SETTLE_EXTRA_MS),
+        Action("read_html", timeout_ms=READ_TIMEOUT_MS),
+    ]
     for _ in range(pages - 1):
         actions += [
             settle(PAGE_SETTLE_MS),
             Action("click", {"selector": SEARCH["next_page"]}, timeout_ms=CLICK_TIMEOUT_MS),
             # The grid redraws a couple of seconds after the click: 2.5 s read the previous
-            # page (measured 2026-11-22), so the wait is 3 s plus 1.5 s (one `sleep` is
-            # capped at 3 s).
+            # page (measured), so the wait is 3 s plus 1.5 s (one `sleep` is capped at 3 s).
             settle(PAGE_SETTLE_EXTRA_MS),
             settle(PAGE_TURN_MS),
             Action(
@@ -194,6 +201,8 @@ def _range_reads(query: SearchQuery) -> tuple[Action, ...]:
                 {"selector": SEARCH_READY, "timeout_ms": FILTER_WAIT_MS},
                 timeout_ms=FILTER_WAIT_MS + WAIT_REPLY_MARGIN_MS,
             ),
+            Action("read_html", timeout_ms=READ_TIMEOUT_MS),
+            settle(PAGE_SETTLE_EXTRA_MS),
             Action("read_html", timeout_ms=READ_TIMEOUT_MS),
         ]
     return tuple(actions)

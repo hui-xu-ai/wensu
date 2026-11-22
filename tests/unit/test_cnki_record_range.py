@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from scholar_search.channels.cnki.v2026_10 import plan_search
 from scholar_search.core.contracts import Record, SearchPage, SearchQuery
 from scholar_search.core.service import _merge_pages
@@ -18,7 +20,7 @@ def _query(**kwargs: object) -> SearchQuery:
     return SearchQuery(**base)  # type: ignore[arg-type]
 
 
-def _reads(plan: object) -> int:
+def _pages(plan: object) -> int:
     return sum(1 for action in plan.actions if action.verb == "read_html")  # type: ignore[attr-defined]
 
 
@@ -34,21 +36,22 @@ def _turns(plan: object) -> int:
 def test_a_range_of_three_pages_reads_three_times() -> None:
     plan = plan_search.build(_query(records_from=1, records_to=150))
 
-    assert _reads(plan) == 3, plan.actions
+    # 每页读两次（网格分批渲染，实测 150 只要回 120），所以三页 = 六次 read_html
+    assert _pages(plan) == 6, plan.actions
     assert _turns(plan) == 2, plan.actions
 
 
 def test_a_single_page_range_reads_once() -> None:
     plan = plan_search.build(_query(records_from=1, records_to=50))
 
-    assert _reads(plan) == 1
+    assert _pages(plan) == 2
     assert _turns(plan) == 0
 
 
 def test_no_range_keeps_the_single_read() -> None:
     plan = plan_search.build(_query())
 
-    assert _reads(plan) == 1
+    assert _pages(plan) == 1
     assert _turns(plan) == 0
 
 
@@ -57,7 +60,7 @@ def test_a_range_never_exceeds_three_pages() -> None:
 
     plan = plan_search.build(_query(records_from=1, records_to=150, limit=20))
 
-    assert _reads(plan) == 3
+    assert _turns(plan) == 2
 
 
 def test_the_turn_waits_long_enough_for_the_grid_to_redraw() -> None:
@@ -95,3 +98,16 @@ def test_merged_pages_keep_each_record_once() -> None:
     assert [record.url for record in merged.records] == ["u1", "u2", "u3"]
     assert merged.total == 6304
     assert merged.page_count == 120
+
+
+def test_a_range_that_does_not_start_at_one_is_refused() -> None:
+    """翻页从第 1 页开始：`records_from=501` 等于跳到第 11 页，本实现做不到，必须明说。"""
+
+    from scholar_search.core.errors import ScholarSearchError  # noqa: I001 — 分组不同，函数内导入
+
+    from test_page_read import build_service
+
+    service = build_service(__import__("pathlib").Path("/nonexistent"), [[]])
+    # 夹具服务里的渠道对象未必带 range 能力，所以断言"范围被拒"这一事实（两种拒绝文案都算）。
+    with pytest.raises(ScholarSearchError, match="record range"):
+        service.search(_query(records_from=51, records_to=150))

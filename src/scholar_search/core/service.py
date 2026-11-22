@@ -272,6 +272,12 @@ class ScholarService:
                     "result page, not an export file. Use page/limit there, or ask "
                     "webofscience."
                 )
+            if span[0] != 1 and getattr(channel, "record_range_starts_at_one", False):
+                raise ScholarSearchError(
+                    f"channel {query.channel!r} reads a range from the first record only: it "
+                    f"turns pages rather than jumping to record {span[0]}. Ask for "
+                    f"records_from=1, or use page/limit."
+                )
             if span[1] - span[0] + 1 > cap:
                 raise ScholarSearchError(
                     f"channel {query.channel!r} reads at most {cap} records per call "
@@ -362,10 +368,23 @@ class ScholarService:
             plan = channel.plan_search(query)
             try:
                 outcomes = self._run(plan, spec)
-            except ActionError:
+            except ActionError as error:
+                # A record range asks for N pages; a result set smaller than the range has
+                # no next page, and the turn then fails with `not_found`. That is not a
+                # failed search: the first page is already on screen, so read it and answer
+                # with what exists rather than throwing away a good page.
+                if query.records_span is not None and error.stage == "click.page-turn":
+                    outcomes = self._run(
+                        Plan(
+                            channel=query.channel,
+                            purpose="search",
+                            actions=(Action("read_html", timeout_ms=4_000),),
+                        ),
+                        spec,
+                    )
                 # Channels without a splittable plan can still say "nothing matched"
                 # by their own wording; ask the page before calling it a failure.
-                if self._looks_empty(channel, spec):
+                elif self._looks_empty(channel, spec):
                     empty = SearchPage(
                         records=(),
                         total=0,
@@ -375,7 +394,8 @@ class ScholarService:
                     )
                     self._cache.set(key, _page_to(empty))
                     return empty
-                raise
+                else:
+                    raise
         # An export-capable channel has no read action in its plan — the payload is a file —
         # so demanding a page payload here would fail before the file is even looked at.
         html = "" if getattr(channel, "parse_export", None) is not None else _html(outcomes)
@@ -1474,10 +1494,14 @@ def _present(page: SearchPage, query: SearchQuery) -> SearchPage:
         )
         dropped_year = len(before) - len(records)
     records, dropped_filter = _narrow(records, query)
-    if query.records_span is None and len(records) > query.limit:
-        # A record range is its own size control: the caller asked for records 1–1000 in
-        # one export, so slicing to `limit` (which defaults to 20) would answer with
-        # twenty of them and no sign that the rest were dropped on the floor.
+    span = query.records_span
+    if span is not None:
+        # A range names how many records the caller wants, and it overrides `limit` (which
+        # defaults to 20). Trim to the contract: a page-turn channel can hand back more than
+        # the span because its grid keeps filling while the plan runs — a 150-record range
+        # returned 170 rows (measured 2026-11-22).
+        records = records[: span[1] - span[0] + 1]
+    elif len(records) > query.limit:
         records = records[: query.limit]
     if not query.include_abstract:
         # An abstract is roughly 85% of a record's context cost. Dropping it

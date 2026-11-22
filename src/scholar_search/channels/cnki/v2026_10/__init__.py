@@ -49,6 +49,11 @@ class CnkiChannel:
     # grid holds at most 50 rows, so 150 (three pages) is the whole envelope the
     # interaction rules allow in one call.
     record_range_max = 150
+    # Pages are turned from the first one, so a range has to start at record 1: reaching
+    # record 501 would mean jumping to page 11, and this build turns pages, it does not
+    # jump them. Asking for a later start is refused rather than silently answered with
+    # the first records.
+    record_range_starts_at_one = True
 
     def plan_search(self, query: SearchQuery) -> Plan:
         return plan_search.build(query)
