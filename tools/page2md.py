@@ -914,14 +914,12 @@ def _estimate_tokens(text: str) -> int:
 
 
 _SENTENCE = re.compile(r"[^.!?。！？]+[.!?。！？]?")
-_STOPWORDS = frozenset(
-    (
-        "the and for with that this from were was are has have not but its their which these those "
-        "into than then also such can may using used use between under over more most only both each "
-        "however therefore thus here there when while where been being does did doing "
-        "our we they"
-    ).split()
+_STOPWORD_TEXT = (
+    "the and for with that this from were was are has have not but its their which these those "
+    "into than then also such can may using used use between under over more most only both each "
+    "however therefore thus here there when while where been being does did doing our we they"
 )
+_STOPWORDS = frozenset(_STOPWORD_TEXT.split())
 
 
 def _gist(paragraphs: list[str], limit: int = 160) -> str:

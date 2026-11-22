@@ -89,6 +89,21 @@ D:\Python\DeepSeek\DateWork\scholar-search\work\tools\.venv\Scripts\python.exe `
 3. 不要声称"已完整读取全文"——说清读了哪份文件、多少小节、哪些部分可能不准。
 4. 需要引用页码、图版细节或关键数值定论时，主动建议用户下载 PDF；PDF 到手后用 `paper-reader`。
 
+## 省 token 的读法（建议，不是硬约束）
+
+工具只保证两件事：`page.md`（结构化全文，已去参考文献与重复）和 `index.json`（地图，带每节
+`tokens`/`gist`/`keywords`）。**怎么读由你决定**，下面只是经验：
+
+1. **只想知道这篇讲什么**：读 `page.brief.md`（一张地图，约 600 tokens）。
+2. **要写摘要/综述**：派一个**子代理**读原文（它可以自己 `read` 任意 `sections/*.md`），只让它
+   返回结构化结论 + 出处（`节号#pN`）；主上下文只收那份 JSON。子代理读完即弃，主上下文不膨胀。
+   建议字段：`problem / method / key_numbers[{value,meaning,where}] / conclusions / figures /
+   sections[{title,topic,tokens}] / uncertain / fidelity_warnings`。
+   任何数字都要求它逐字引用并带 `where`；主代理引用前用 `--slice` 只取那一段核对。
+3. **回答具体问题**：`--query "关键词"` 或 `--slice 12:20` 只导出相关段落（几百 token 起）。
+4. **一次调研多篇**：每篇一个子代理，主代理只合并各篇 JSON；不要在自己的上下文里逐篇读全文。
+5. 压缩（图注/公式/表格）默认**不做**；需要时显式开开关，并留意 `meta.json.compressed`。
+
 ## 硬约束
 
 - 快照与转换产物只写 `SCHOLAR_SEARCH_HOME`（默认 `%LOCALAPPDATA%\scholar-search`），**不进 git**；
