@@ -641,22 +641,78 @@ def _collect_sections(doc) -> list[tuple[str, int, list[str]]]:
 
 
 def _cut_tail(markdown: str) -> str:
-    """Drop a trailing "Recommended articles" block that the extractor merged in.
+    """Drop the publisher furniture the extractor merged in after the article.
 
     The section walk stops at the backmatter, but trafilatura's own body still carried the
-    publisher's recommendation widgets: the acceptance run found ~60 lines of another
-    paper's abstract at the end of `page.md`.
+    publisher's tail. Matching on literal headings was not enough: ScienceDirect prints no
+    "Recommended articles" heading, it just re-exports the introduction, the section titles
+    and every figure caption again, then the declarations and the recommendation cards — on
+    the acceptance article that replayed tail was 37 % of `page.md` (round 4).
+
+    So the cut is structural: backmatter phrases end the document, and so does a *replay* —
+    a block that repeats earlier text while at least one of the next blocks repeats too.
+    A single repeat is left alone: quoting an earlier paragraph is normal prose.
     """
 
-    lowered = markdown.casefold()
-    cut = len(markdown)
+    blocks = [block for block in markdown.split("\n\n") if block.strip()]
+    kept: list[str] = []
+    fingerprints: list[str] = []
+    for start, block in enumerate(blocks):
+        if _is_furniture_block(block):
+            break
+        key = _normalise(block)
+        window = blocks[start : start + _TAIL_WINDOW]
+        if _repeats(key, fingerprints) and _replays(window, fingerprints):
+            break
+        kept.append(block)
+        if len(key) >= 20:
+            fingerprints.append(key)
+    if len(kept) == len(blocks):
+        return _cut_tail_markers(markdown)
+    return _cut_tail_markers("\n\n".join(kept) + "\n")
+
+
+def _cut_tail_markers(text: str) -> str:
+    """The literal markers, kept for the publishers that do print them as a heading."""
+
+    lowered = text.casefold()
+    cut = len(text)
     for marker in _TAIL_MARKERS:
         position = lowered.find("## " + marker)
         if position < 0:
             position = lowered.find(marker)
         if 0 <= position < cut:
             cut = position
-    return markdown[:cut].rstrip() + "\n" if cut < len(markdown) else markdown
+    return text[:cut].rstrip() + "\n" if cut < len(text) else text
+
+
+def _is_furniture_block(block: str) -> bool:
+    """Blocks that are never part of the paper's argument, whatever their heading."""
+
+    text = block.strip()
+    if len(text) > _FURNITURE_MAX_CHARS:
+        return False
+    lowered = re.sub(r"^[#\s]+", "", text.casefold())
+    return any(lowered.startswith(marker) for marker in _FURNITURE_MARKERS)
+
+
+def _repeats(key: str, fingerprints: list[str]) -> bool:
+    if len(key) < 20:
+        return False
+    for previous in fingerprints:
+        if key == previous or _similar(key, previous):
+            return True
+        # A sentence re-exported on its own, out of a paragraph that already had it.
+        if len(key) >= 60 and len(previous) >= 60 and (key in previous or previous in key):
+            return True
+    return False
+
+
+def _replays(window: list[str], fingerprints: list[str]) -> bool:
+    """Two repeating blocks inside one window = the extractor is replaying, not quoting."""
+
+    repeats = sum(1 for block in window if _repeats(_normalise(block), fingerprints))
+    return repeats >= 2
 
 
 def _dedupe_blocks(markdown: str) -> str:
@@ -940,6 +996,23 @@ _SENTENCE_END = re.compile(
     r"(?<=[.!?。！？])\s+(?![\d‥])",
 )
 _TAIL_MARKERS = ("recommended articles", "cited by", "related articles", "further reading")
+# Furniture that starts a block: the publisher prints no heading above these.
+_FURNITURE_MARKERS = (
+    "the authors declare",
+    "declaration of competing",
+    "competing interest",
+    "acknowledg",
+    "funding",
+    "data availability",
+    "credit author",
+    "recommended articles",
+    "cited by",
+    "related articles",
+    "further reading",
+    "supplementary data",
+)
+_FURNITURE_MAX_CHARS = 400
+_TAIL_WINDOW = 4
 _EQ_LABEL = re.compile(r"\(\d{1,2}\)\s*[A-Za-z∇∂⇀]")
 _STOPWORD_TEXT = (
     "the and for with that this from were was are has have not but its their which these those "
@@ -950,11 +1023,25 @@ _STOPWORDS = frozenset(_STOPWORD_TEXT.split())
 
 
 _BROKEN_DECIMAL = re.compile(r"(?<=\d)\.\s+(?=\d)")
+# Two kinds of facts are worth a line in the map: a value with a unit / percentage, and a
+# quantity only physics papers write that way — 0.70, 58.86°, 1 × 10⁻³. Round 5 lost Q2, Q4,
+# Q8 and Q9 because only the first kind was captured: numbers regex matched "19.4%" but not
+# "0.32", so the table bounds, the sensitivity 1×10⁻³ and α = 0 stayed invisible.
 _NUMBER_FACT = re.compile(
-    r"(?:[A-Za-z]{1,3}\s*=\s*)?\d+(?:\.\d+)?(?:\s*[×x]\s*10[-−]?\d+)?\s*"
-    r"(?:%|J·mol⁻¹|J/mol|K|MPa|kPa|W·m⁻²|W/m2|m·s⁻¹|mm|μm|nm|µm|mol|kg|mg|g/L|mL)",
+    r"(?<![A-Za-z0-9-])"
+    r"(?:[A-Za-zα-ωΑ-Ω]{1,3}\s*=\s*)?"
+    r"(?:"
+    r"\d+(?:\.\d+)?\s*[×x]\s*10[-−]?\d+"  # 1 × 10-3
+    r"|\d+(?:\.\d+)?\s*-?\s*"  # a value keeps its unit when it has one
+    r"(?:%|J·mol⁻¹|J/mol|K|MPa|kPa|W·m⁻²|W/m2|m·s⁻¹|mm|μm|nm|µm|mol|kg|mg|g/L|mL|grids)"
+    r"|\d+\.\d{2,}\s*°?"  # 0.70, 58.86°, 0.31 — a bare quantity, no unit
+    r")",
 )
 _MAX_PARAGRAPH_CHARS = 1200
+_NUMBER_CTX_CHARS = 64
+_GIST_CHARS = 130
+_KEY_SENTENCE_CHARS = 200
+_TABLE_CAPTION = re.compile(r"^Table\s+\d+[.:]")
 
 
 def _fix_decimals(text: str) -> str:
@@ -987,21 +1074,88 @@ def _split_long(text: str, limit: int = _MAX_PARAGRAPH_CHARS) -> list[str]:
     return pieces or [text]
 
 
-def _numbers(paragraphs: list[str], limit: int = 10) -> list[str]:
-    """Verbatim numeric facts of a section, so a map can carry the constants a reader needs."""
+def _numbers(
+    paragraphs: list[str], limit: int = 8, *, ctx_chars: int = _NUMBER_CTX_CHARS
+) -> list[dict[str, str]]:
+    """Verbatim numeric facts **with the sentence they came from**.
 
-    found: list[str] = []
+    A bare `"15.5%"` is unusable: round 4 of the acceptance showed a reader that got the
+    value could not tell what it measured and silently dropped the whole pool (4 of 10
+    questions lost that way). The context sentence is copied, never paraphrased.
+
+    Percentages and unit-bearing values are kept before the bare decimals: on the acceptance
+    article the six slots of §3.1 filled up with `0.70`/`58.86°` and silently dropped
+    `19.4%`/`26.4%` — the two numbers the section's claim actually rests on (round 6).
+    """
+
+    found: list[dict[str, str]] = []
+    seen: set[str] = set()
+    claimed: list[dict[str, str]] = []
+    bare: list[dict[str, str]] = []
+    table_caption = ""
     for text in paragraphs:
+        stripped = text.strip()
+        if _TABLE_CAPTION.match(stripped):
+            table_caption = stripped
         for match in _NUMBER_FACT.findall(text):
             value = match.strip()
-            if value and value not in found:
-                found.append(value)
-            if len(found) >= limit:
-                return found
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            fact = {"value": value, "ctx": _number_context(value, text, table_caption)}
+            (claimed if _is_claim_number(value) else bare).append(fact)
+    found = (claimed + bare)[:limit]
     return found
 
 
-def _key_sentences(paragraphs: list[str], limit: int = 3) -> list[str]:
+def _is_claim_number(value: str) -> bool:
+    """A percentage or a unit-bearing quantity states something; `0.70` may be geometry."""
+
+    return "%" in value or "× 10" in value or bool(re.search(r"\d\s*(?:[A-Za-zμµ°]|·)", value))
+
+
+def _number_context(value: str, text: str, table_caption: str) -> str:
+    """The room the value stands in: its own sentence, or the caption of its table."""
+
+    if text.lstrip().startswith("|"):
+        return _clip_around(table_caption, value, _NUMBER_CTX_CHARS)
+    for sentence in _SENTENCE_END.split(text):
+        if value in sentence:
+            return _clip_around(sentence.strip(), value, _NUMBER_CTX_CHARS)
+    return _clip_around(text.strip(), value, _NUMBER_CTX_CHARS)
+
+
+def _clip_around(text: str, anchor: str, limit: int) -> str:
+    """Shorten `text` to `limit` chars, never cutting `anchor` out, and stay on words.
+
+    The window starts at the sentence's own beginning whenever the value fits there: a value
+    quoted without its subject ("…are relatively improved by 19.4% and 26.4%") tells a reader
+    nothing about what was improved.
+    """
+
+    if len(text) <= limit:
+        return text
+    position = text.find(anchor)
+    if position < 0:
+        return text[:limit].rstrip()
+    if position + len(anchor) <= limit:
+        start = 0
+    else:
+        start = max(0, position - (limit - len(anchor)) // 2)
+        space = text.find(" ", start, position)
+        if space > 0:
+            start = space + 1
+    end = min(len(text), start + limit)
+    if end < len(text):
+        space = text.rfind(" ", position + len(anchor), end)
+        if space > 0:
+            end = space
+    return text[start:end].strip()
+
+
+def _key_sentences(
+    paragraphs: list[str], limit: int = 3, *, chars: int = _KEY_SENTENCE_CHARS
+) -> list[str]:
     """2–3 sentences that carry the section: numbers, domain words, and the last sentence.
 
     The first gist was "the first sentence", which for a methods section says nothing
@@ -1028,16 +1182,33 @@ def _key_sentences(paragraphs: list[str], limit: int = 3) -> list[str]:
             for word in ("assum", "neglect", "ideal", "hypothes", "model", "constant")
         ):
             score += 2.5
+        # Mechanism/direction sentences carry no number, so nothing else in the map would hold
+        # them: round 6 lost Q9 ("the distribution tends to a radial gradient when α = 0").
+        if any(
+            word in lowered
+            for word in ("gradient", "uniform", "tends to", "shift", "evolve", "increases with")
+        ):
+            score += 2.0
         if index == 0:
             score += 0.5
         if index == len(sentences) - 1:
             score += 0.3
         scored.append((score, index, sentence))
     top = sorted(scored, key=lambda item: (-item[0], item[1]))[:limit]
-    return [sentence for _score, _index, sentence in sorted(top, key=lambda item: item[1])]
+    kept = [sentence for _score, _index, sentence in sorted(top, key=lambda item: item[1])]
+    return [_truncate_words(sentence, chars) for sentence in kept]
 
 
-def _gist(paragraphs: list[str], limit: int = 200) -> str:
+def _truncate_words(text: str, chars: int) -> str:
+    """Cut at a word boundary; a map line must never end mid-word."""
+
+    if len(text) <= chars:
+        return text
+    head = text[:chars].rsplit(" ", 1)[0].rstrip(",;:")
+    return head + " …"
+
+
+def _gist(paragraphs: list[str], limit: int = _GIST_CHARS) -> str:
     """One-line "what is this section about", built only from sentences that exist.
 
     No rewriting: the first sentence, any sentence carrying a number, and the last one.
@@ -1047,7 +1218,7 @@ def _gist(paragraphs: list[str], limit: int = 200) -> str:
 
     if not paragraphs:
         return ""
-    sentences = [s.strip() for s in _SENTENCE.findall(" ".join(paragraphs)) if s.strip()]
+    sentences = [s.strip() for s in _SENTENCE_END.split(" ".join(paragraphs)) if s.strip()]
     if not sentences:
         return ""
     picked = [sentences[0]]
@@ -1127,7 +1298,7 @@ def _write_brief(out: Path, sections: list[tuple[str, int, list[str]]], title: s
             lines.append(f"  · {sentence}")
         numbers = _numbers(paragraphs)
         if numbers:
-            lines.append("  values: " + " | ".join(numbers))
+            lines.append("  values: " + " | ".join(fact["value"] for fact in numbers))
     figures = _figures_of(sections)
     if figures:
         lines.extend(["", f"## Figures ({len(figures)})"])
@@ -1179,6 +1350,8 @@ def _write_chunks(out: Path, sections: list[tuple[str, int, list[str]]]) -> dict
     directory.mkdir(parents=True, exist_ok=True)
     entries: list[dict[str, object]] = []
     core_tokens = 0
+    figures = _figures_of(sections)
+    captions = [_normalise(figure["caption"]) for figure in figures]
     for index, (title, level, paragraphs) in enumerate(sections, start=1):
         text = "\n\n".join(paragraphs)
         slug = re.sub(r"[^A-Za-z0-9._-]+", "-", title)[:60].strip("-").lower() or f"section-{index}"
@@ -1188,33 +1361,46 @@ def _write_chunks(out: Path, sections: list[tuple[str, int, list[str]]]) -> dict
         core = _is_core(title)
         if core:
             core_tokens += tokens
+        numbers = _numbers(paragraphs)
+        # A section that states four or more values is a results section: it needs the third
+        # key sentence (the mechanism sentence usually quotes no number, so nothing else
+        # would carry it — round 6 lost Q9 exactly there).
+        limit = 4 if len(numbers) >= 4 else (3 if core else 2)
+        key_sentences = [
+            sentence
+            for sentence in _key_sentences(paragraphs, limit=limit)
+            # A figure caption is already in `figures`; repeating it as a key sentence is noise.
+            if not any(
+                len(_normalise(sentence)) >= 30 and _normalise(sentence) in caption
+                for caption in captions
+            )
+        ]
+        numbers = _numbers(paragraphs)
+        joined_key = " ".join(key_sentences)
+        for number in numbers:
+            # Already visible in a key sentence: the context would just be the same text twice.
+            if number["value"] in joined_key:
+                number["ctx"] = ""
         entries.append(
             {
-                "index": index,
                 "title": title,
-                "level": level,
                 "file": f"sections/{name}",
-                "chars": len(text),
                 "tokens": tokens,
-                "core": core,
-                "paragraphs": len(paragraphs),
                 "gist": _gist(paragraphs),
-                "key_sentences": _key_sentences(paragraphs),
+                "key_sentences": key_sentences,
                 "formula_dense": bool(_EQ_LABEL.search(text))
                 or len(re.findall(r"[∇∂∑∫]", text)) >= 3,
-                "numbers": _numbers(paragraphs),
-                "keywords": _keywords(paragraphs),
+                "numbers": numbers,
             }
         )
     payload = {
         "sections": entries,
         "total_tokens": sum(int(entry["tokens"]) for entry in entries),
         "core_tokens": core_tokens,
-        "figures": _figures_of(sections),
-        "core_hint": "abstract + highlights + keywords + introduction + conclusion",
+        "figures": figures,
     }
     (out / "index.json").write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8"
     )
     return payload
 

@@ -165,3 +165,161 @@ def test_convert_writes_page_and_meta(
     )
     assert meta["form"] == "html"
     assert (out / "page.html").is_file()
+
+
+INTRO = "The transport resistance of a porous catalyst bed limits separation and reaction."
+METHOD = "Topology optimization redistributes the porosity field to improve radial transport."
+TEASER = "A publisher-only teaser sentence that the section walk never reaches sits here."
+
+
+def test_cut_tail_stops_where_the_extractor_starts_replaying() -> None:
+    """B：尾部不是靠字面标记认的，而是靠"开始重放已出现过的段落"认的。
+
+    真实 Byline：ScienceDirect 正文后跟一段重复的引言/图注/小节标题，再跟声明与相关文章卡片。
+    那段重复没有任何 `Recommended articles` 标题，所以旧的标记匹配全部漏网（第 4 轮实测 37%）。
+    """
+
+    markdown = "\n\n".join(
+        [
+            "## 1. Introduction",
+            INTRO,
+            "## 2. Methods",
+            METHOD,
+            TEASER,
+            INTRO,  # 重放开始
+            METHOD,
+            "Fig. 3. Validation of the model with experimental results.",
+            "A paragraph that belongs to another paper's abstract entirely.",
+        ]
+    )
+
+    cut = page2md._cut_tail(markdown)
+
+    assert TEASER in cut  # 重放之前的独有内容要留（出版社页才有）
+    assert cut.count(INTRO) == 1
+    assert "Fig. 3." not in cut
+    assert "another paper" not in cut
+
+
+def test_cut_tail_keeps_a_one_off_repeat() -> None:
+    """窗口规则：单块重复不算重放，否则正常论文里引一句前文就会把后半篇砍掉。"""
+
+    markdown = "\n\n".join([INTRO, METHOD, INTRO, TEASER, "A closing remark that is unique."])
+
+    cut = page2md._cut_tail(markdown)
+
+    assert "A closing remark that is unique." in cut
+    assert cut.count(INTRO) == 2
+
+
+def test_cut_tail_drops_declarations_and_recommendation_cards() -> None:
+    markdown = "\n\n".join(
+        [
+            INTRO,
+            "The authors declare that they have no known competing financial interests.",
+            "United Nations, Department of Economic and Social Affairs, Population Division.",
+        ]
+    )
+
+    cut = page2md._cut_tail(markdown)
+
+    assert INTRO in cut
+    assert "declare" not in cut
+    assert "Population Division" not in cut
+
+
+def test_numbers_capture_bare_decimals_degrees_and_scientific_notation() -> None:
+    """第 5 轮丢掉 Q2/Q4/Q8 的原因：只收"带单位的数"，`0.70`/`58.86°`/`1 × 10-3` 全不可见。"""
+
+    paragraphs = [
+        "The maximum porosity is 0.70 and the angle between the block and the axis is 58.86°.",
+        "The sensitivity of the objective is only about 1 × 10-3 on average.",
+        "Section 2.2.2 describes the model settings.",
+    ]
+
+    values = [fact["value"] for fact in page2md._numbers(paragraphs)]
+
+    assert "0.70" in values
+    assert "58.86°" in values
+    assert "1 × 10-3" in values
+    assert not any(value.startswith("2.2") for value in values)  # 节号不是事实
+
+
+def test_number_ignores_a_subscripted_formula() -> None:
+    """`H2 molar fraction` 里没有 "2 mol" 这个事实——左侧必须是词边界。"""
+
+    facts = page2md._numbers(["Fig. 8. Distribution of porosity and H2 molar fraction."])
+
+    assert facts == []
+
+
+def test_numbers_carry_the_sentence_they_came_from() -> None:
+    """A：裸值 `"19.4%"` 谁也用不上；值 + 所在原句，读者才能把它绑到论断上。"""
+
+    paragraphs = [
+        "In the optimized case the methane conversion is relatively improved by 19.4% at 0.6.",
+        "Unrelated closing text without any figure of merit in it at all.",
+    ]
+
+    facts = page2md._numbers(paragraphs)
+
+    assert facts and facts[0]["value"] == "19.4%"
+    assert "19.4%" in facts[0]["ctx"]
+    assert "relatively improved" in facts[0]["ctx"]  # 值 + 谓词，够绑到论断上
+
+
+def test_gist_does_not_split_a_decimal() -> None:
+    """gist 曾按小数点分句："…is 0.5, which…" 被切成 "…is 0." + "5, which…"。"""
+
+    paragraphs = [
+        "The original porosity is 0.5, which is also a lower bound on the average porosity.",
+        "Nothing numeric follows in this second sentence at all.",
+    ]
+
+    gist = page2md._gist(paragraphs)
+
+    assert gist.startswith("The original porosity is 0.5, which")  # 没被切成两句
+    assert " 5," not in gist
+
+
+def test_key_sentences_are_capped_on_a_word_boundary() -> None:
+    paragraphs = ["A sentence " + "word " * 80 + "ends here."]
+
+    sentences = page2md._key_sentences(paragraphs, limit=1, chars=60)
+
+    assert len(sentences) == 1
+    assert len(sentences[0]) <= 63
+    assert sentences[0].endswith("…")
+
+
+def test_number_inside_a_table_takes_the_table_caption() -> None:
+    paragraphs = [
+        "Table 2. Geometric parameters of the optimized distribution.",
+        "| period | high | low |\n| --- | --- | --- |\n| 17.94 mm | 11.01 mm | 6.93 mm |",
+    ]
+
+    facts = page2md._numbers(paragraphs)
+    by_value = {fact["value"]: fact["ctx"] for fact in facts}
+
+    assert "Table 2" in by_value.get("17.94 mm", "")
+
+
+def test_index_drops_bookkeeping_fields(
+    sample_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C：地图是给人/模型读的，"chars/level/core/paragraphs" 是给程序看的重复信息。"""
+
+    monkeypatch.setattr(
+        page2md, "_extract_body", lambda html: ("## 1. Introduction\n\nbody", {"title": "T"})
+    )
+    out = tmp_path / "out"
+
+    page2md.convert(sample_dir, out)
+
+    raw = (out / "index.json").read_text(encoding="utf-8")
+    index = json.loads(raw)
+    entry = index["sections"][0]
+    for gone in ("chars", "level", "core", "paragraphs", "index", "keywords"):
+        assert gone not in entry
+    assert len(entry["key_sentences"]) <= 2
+    assert '\n  "' not in raw  # indent 1，省掉纯格式字节

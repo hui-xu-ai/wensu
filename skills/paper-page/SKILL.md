@@ -53,7 +53,7 @@ D:\Python\DeepSeek\DateWork\scholar-search\work\tools\.venv\Scripts\python.exe `
 
 | 文件 | 内容 |
 |---|---|
-| `index.json` | **先读这个**：每小节的标题、`tokens` 估算、`core` 标记，以及全文 / 核心的总 token |
+| `index.json` | **先读这个**（地图）：每小节 `title`/`file`/`tokens`/`gist`/`key_sentences`/`formula_dense`/`numbers`，加顶层 `figures`（图注目录）与全文 token 合计 |
 | `sections/NN-*.md` | 每个小节一个文件，按需只读你需要的那些 |
 | `page.core.md` | `--mode core` 时生成：亮点 + 摘要 + 引言 + 结论（通常 2–3 k tokens） |
 | `page.md` | 全文（已去掉参考文献及其后的所有尾部章节，重复段落已去重） |
@@ -63,6 +63,10 @@ D:\Python\DeepSeek\DateWork\scholar-search\work\tools\.venv\Scripts\python.exe `
 
 **省 token 的读法**：先读 `index.json` 挑小节 → 读 `page.core.md`（或 `sections/` 里那几份）
 → 只有回答需要细节时才读对应小节或 `page.md`。不要一上来把 `page.md` 整篇读进上下文。
+
+`index.json` 的 `numbers` 是**带原句的值**（`{"value": "19.4%", "ctx": "…relatively improved by 19.4%…"}`），
+`ctx` 就是这个数所在的那句原文；直接引用它回答"提升了多少"，不要自己去猜口径。
+地图体积约为 `page.md` 的 45%（实测一篇 Elsevier 论文：`index.json` 4.3 k vs 全文 9.6 k tokens）。
 
 ### 3. 先读 `meta.json`，再读 `page.md`
 
