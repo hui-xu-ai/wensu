@@ -6,6 +6,21 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-11-22
+
+### Changed — the publisher front page is a throwaway tab now
+
+`page_read` still visits the publisher's front page first, but that visit no longer holds the
+work tab: it opens a separate tab, waits 250 ms, and the next navigation closes it before the
+article loads. The browser is left with exactly one tab — the article — instead of showing the
+front page for the whole read.
+
+Two parameters of the existing `goto` verb carry this (no new verb): `open: "new"` opens the
+throwaway tab and `close: "disposable"` removes the ones this extension created on the next
+navigation. Only tab ids the extension itself recorded are ever closed, and a failed close is
+not a plan failure. `dwell_ms` lets a caller shorten the pause after a navigation (the default
+stays 500–1 500 ms, drawn at random).
+
 ## [0.13.0] - 2026-11-22
 
 Third feature release of the page reader, and the first one numbered as a minor version:

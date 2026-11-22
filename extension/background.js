@@ -223,6 +223,37 @@ function domainsFor(message) {
 // footprint at exactly one tab, never touches a page the caller did not ask for, and gives
 // `page_read` a predictable target to snapshot afterwards.
 const WORK_TAB_KEY = "wensuWorkTabId";
+// Tabs opened only to "touch" a publisher's home page before the article is read. They are
+// closed on the very next `goto`, so the browser is left with one tab: the article.
+const DISPOSABLE_KEY = "wensuDisposableTabs";
+
+function dwellFor(params) {
+  const declared = Number(params && params.dwell_ms);
+  if (Number.isFinite(declared) && declared >= 0) return Math.min(declared, 3_000);
+  return 500 + Math.random() * 1_000;
+}
+
+async function rememberDisposable(tabId) {
+  if (!Number.isInteger(tabId)) return;
+  const stored = (await chrome.storage.session.get(DISPOSABLE_KEY))[DISPOSABLE_KEY];
+  const ids = Array.isArray(stored) ? stored.filter((id) => Number.isInteger(id)) : [];
+  if (!ids.includes(tabId)) ids.push(tabId);
+  await chrome.storage.session.set({ [DISPOSABLE_KEY]: ids.slice(-5) });
+}
+
+async function closeDisposableTabs() {
+  const stored = (await chrome.storage.session.get(DISPOSABLE_KEY))[DISPOSABLE_KEY];
+  const ids = Array.isArray(stored) ? stored.filter((id) => Number.isInteger(id)) : [];
+  await chrome.storage.session.set({ [DISPOSABLE_KEY]: [] });
+  const closed = [];
+  for (const id of ids) {
+    // Only ids this extension created are ever in this list, and a failure is not worth
+    // a plan step: the tab may already be gone, or the user closed it himself.
+    const done = await chrome.tabs.remove(id).then(() => true).catch(() => false);
+    if (done) closed.push(id);
+  }
+  return closed;
+}
 
 async function workTab(domains) {
   const stored = (await chrome.storage.session.get(WORK_TAB_KEY))[WORK_TAB_KEY];
@@ -372,6 +403,37 @@ async function onHostMessage(message, channel) {
     }
 
     if (action === "goto") {
+      // `open: "new"` is the "touch the home page, then leave" hop: a throwaway tab that
+      // the next `goto` closes (`close: "disposable"`). Opening a publisher's front page
+      // and immediately navigating that same tab to the article left the front page
+      // visible during the whole read; a separate tab that is closed on the way out keeps
+      // one tab in the browser and the article in it.
+      if (params.open === "new") {
+        const homeUrl = new URL(params.url);
+        if (homeUrl.protocol !== "https:" || !allowedHost(homeUrl.hostname, domains)) {
+          throw new Error("policy.domain");
+        }
+        await closeDisposableTabs();
+        const began = Date.now();
+        const created = await chrome.tabs.create({ url: params.url, active: true });
+        await rememberDisposable(created && created.id);
+        await waitNavigated(created.id, "", domains).catch(() => null);
+        await waitComplete(created.id).catch(() => null);
+        await new Promise((resolve) => setTimeout(resolve, dwellFor(params)));
+        const updated = await chrome.tabs.get(created.id).catch(() => null);
+        const where = (updated && updated.url) || params.url;
+        return reply({
+          ok: true,
+          data: {
+            url: where,
+            title: (updated && updated.title) || "",
+            transient: true,
+          },
+          duration_ms: Date.now() - began,
+          url: where,
+        });
+      }
+      if (params.close === "disposable") await closeDisposableTabs();
       const tab = await workTab(domains);
       if (!tab || !tab.id) throw new Error("no_active_tab");
       if (params.reload === true) {
@@ -403,7 +465,7 @@ async function onHostMessage(message, channel) {
         await waitNavigated(tab.id, before, domains);
       }
       await waitComplete(tab.id);
-      await new Promise((resolve) => setTimeout(resolve, 500 + Math.random() * 1000));
+      await new Promise((resolve) => setTimeout(resolve, dwellFor(params)));
 
       const updated = await chrome.tabs.get(tab.id);
       const finalUrl = updated.url || params.url;

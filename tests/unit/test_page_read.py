@@ -8,9 +8,12 @@ import email.mime.multipart
 import email.mime.text
 from pathlib import Path
 
+import pytest
+
 from scholar_search.adapters.fixture import FixtureAdapter
 from scholar_search.core.cache import Cache
 from scholar_search.core.pageprobe import classify_mhtml
+from scholar_search.core.params import validate_params
 from scholar_search.core.planner import Planner
 from scholar_search.core.policy import PolicyEngine
 from scholar_search.core.publishers import (
@@ -196,6 +199,40 @@ def test_page_read_takes_a_second_look_when_the_body_is_still_rendering(tmp_path
 
     assert result["status"] == "ok"
     assert result["headings"] >= 1
+
+
+def test_page_read_touches_the_home_page_in_a_throwaway_tab(tmp_path: Path) -> None:
+    """首页只"碰一下"：新开的临时标签页由下一次 goto 关掉，最后只留文章页那一张。"""
+
+    service = build_service(tmp_path, [[]])  # 事务会先钉一个 adapter
+    seen: list[object] = []
+
+    def fake_run(plan: object, spec: object) -> tuple[object, ...]:
+        seen.append(plan)
+        raise RuntimeError("stop here")  # 只看计划，不真的跑
+
+    service._run = fake_run  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError):
+        service.read_page(doi="10.1016/j.cej.2023.145123")
+
+    actions = seen[0].actions  # type: ignore[attr-defined]
+    assert actions[0].verb == "goto"
+    assert actions[0].params["open"] == "new"
+    assert actions[0].params["url"] == "https://www.sciencedirect.com/"
+    assert actions[0].params["dwell_ms"] <= 300
+    assert actions[1].verb == "goto"
+    assert actions[1].params["close"] == "disposable"
+    assert actions[1].params["url"] == "https://doi.org/10.1016/j.cej.2023.145123"
+
+
+def test_goto_accepts_the_transient_tab_parameters() -> None:
+    assert validate_params("goto", {"url": "https://www.sciencedirect.com/", "open": "new"}) is None
+    assert validate_params("goto", {"url": "https://doi.org/10/x", "close": "disposable"}) is None
+    assert validate_params("goto", {"url": "https://doi.org/10/x", "dwell_ms": 250}) is None
+    assert validate_params("goto", {"url": "https://doi.org/10/x", "open": "everywhere"})
+    assert validate_params("goto", {"url": "https://doi.org/10/x", "close": "all"})
+    assert validate_params("goto", {"url": "https://doi.org/10/x", "dwell_ms": 9_000})
+    assert validate_params("goto", {"url": "https://doi.org/10/x", "dwell_ms": True})
 
 
 def test_page_read_refuses_an_unsupported_doi_without_opening_anything(tmp_path: Path) -> None:

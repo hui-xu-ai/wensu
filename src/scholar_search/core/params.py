@@ -25,7 +25,7 @@ MAX_TEXT_CHARS = 16_000
 MAX_SLEEP_MS = 3_000
 
 ALLOWED_KEYS: dict[str, frozenset[str]] = {
-    "goto": frozenset({"url", "reload"}),
+    "goto": frozenset({"url", "reload", "open", "close", "dwell_ms"}),
     "wait_for": frozenset({"selector", "timeout_ms", "state"}),
     "type": frozenset({"selector", "text", "clear"}),
     # `wait_until` lets a click report when the site finished the work it started.
@@ -46,6 +46,11 @@ ALLOWED_KEYS: dict[str, frozenset[str]] = {
 }
 
 WAIT_STATES = frozenset({"visible", "hidden"})
+# `goto` normally drives the one work tab. `open: "new"` opens a throwaway tab (a publisher
+# home page that exists only to be "touched" before the article), and `close: "disposable"`
+# closes those tabs on the next navigation. Parameters of an existing verb, not new verbs.
+GOTO_OPEN = frozenset({"work", "new"})
+GOTO_CLOSE = frozenset({"disposable"})
 READ_TEXT_MODES = frozenset({"inner", "text"})
 # Which tab a capture reads: the dedicated work tab, or whatever the user is looking at.
 SNAPSHOT_TABS = frozenset({"work", "active"})
@@ -68,6 +73,14 @@ def validate_params(verb: str, params: Any) -> str | None:
         return "policy.params"
 
     if verb == "goto":
+        if "open" in params and params["open"] not in GOTO_OPEN:
+            return "policy.params"
+        if "close" in params and params["close"] not in GOTO_CLOSE:
+            return "policy.params"
+        if "dwell_ms" in params:
+            dwell = params["dwell_ms"]
+            if not isinstance(dwell, int) or isinstance(dwell, bool) or not 0 <= dwell <= 3_000:
+                return "policy.params"
         if params.get("reload") is True:
             # A reload is the F5 the user would press. Measured on the live site:
             # the reloaded result page streams all 50 records through

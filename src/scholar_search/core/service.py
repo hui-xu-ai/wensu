@@ -636,8 +636,10 @@ class ScholarService:
             channel=f"page:{publisher.name}",
             purpose="detail",
             actions=(
-                Action("goto", {"url": publisher.homepage}),
-                Action("goto", {"url": target}),
+                # The home page is touched, not read: a throwaway tab that the next
+                # navigation closes, so the browser is left with one tab — the article.
+                Action("goto", {"url": publisher.homepage, "open": "new", "dwell_ms": 250}),
+                Action("goto", {"url": target, "close": "disposable"}),
                 # Publisher article bodies render after the load event: capturing straight
                 # after `goto` returned 1.8 KB of "Highlights" from a ScienceDirect article
                 # page that was fully accessible (0.12.59, real run after signing in).
