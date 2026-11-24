@@ -244,7 +244,7 @@ const WINDOW_KEY = "wensuWorkWindowId";
 function dwellFor(params) {
   const declared = Number(params && params.dwell_ms);
   if (Number.isFinite(declared) && declared >= 0) return Math.min(declared, 3_000);
-  return 500 + Math.random() * 1_000;
+  return 250 + Math.random() * 200;
 }
 
 async function rememberDisposable(tabId) {

@@ -73,7 +73,7 @@ def build_after_click(query: SearchQuery, *, today: dt.date | None = None) -> Pl
             {"selector": selectors.RESULT_READY, "state": "visible"},
             timeout_ms=RESULT_TIMEOUT_MS,
         ),
-        settle(jitter(1_200, 1_800)),
+        settle(jitter(600, 900)),
         *sort_actions(query.sort, capture=False),
         Action("click", {"selector": selectors.EXPORT_TRIGGER}, timeout_ms=CLICK_TIMEOUT_MS),
         Action(
@@ -81,14 +81,14 @@ def build_after_click(query: SearchQuery, *, today: dt.date | None = None) -> Pl
             {"selector": selectors.EXPORT_BIBTEX, "state": "visible"},
             timeout_ms=WAIT_TIMEOUT_MS,
         ),
-        settle(jitter(400, 700)),
+        settle(jitter(300, 450)),
         Action("click", {"selector": selectors.EXPORT_BIBTEX}, timeout_ms=CLICK_TIMEOUT_MS),
         Action(
             "wait_for",
             {"selector": selectors.EXPORT_CONTENT_COMBO, "state": "visible"},
             timeout_ms=WAIT_TIMEOUT_MS,
         ),
-        settle(jitter(300, 600)),
+        settle(jitter(200, 350)),
         # The dialog opens on its least complete option, which carries neither DOI nor
         # abstract. Selecting 完整记录 is what makes the file usable at all.
         Action(
@@ -112,7 +112,7 @@ def build_after_click(query: SearchQuery, *, today: dt.date | None = None) -> Pl
             {"selector": selectors.EXPORT_CONFIRM, "state": "visible"},
             timeout_ms=WAIT_TIMEOUT_MS,
         ),
-        settle(jitter(250, 500)),
+        settle(jitter(200, 350)),
         # `expect_download` is what turns the reply into a file path; without it the
         # extension reports only that the click happened. `timeout_ms` travels in the
         # params as well as on the action because the download wait is budgeted from the

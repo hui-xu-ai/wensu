@@ -6,6 +6,17 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed — WoS round trip: interval 1200 → 900 ms, shorter settles, smaller dwell
+
+Measured live (3 records, 7 charged actions): a round takes **44.8 s**, down from 48.2 s, and the
+first estimate ("20–22 s") was simply wrong — the time is mostly the site's own work: ~8.8 s for
+the SPA to render results after submit, ~4.4 s for the export download, ~1.1 s per export-dialog
+step. What *is* ours: 7 × 900 ms spacing (6.3 s) and 5.1 s of `settle` pauses. Both are trimmed
+here (interval 1200 → 900, export settles 1200–1800 → 600–900 and the rest by ~30%), and the
+extension's post-navigation dwell drops from 500–1500 ms to 250–450 ms — that last one only takes
+effect after the extension is reloaded. ADR 0021 records the measurement and the honest floor:
+~30 s of a round is the site's own rendering and download.
+
 ### Changed — a verification wall stops the plan but no longer cools the tool down (ADR 0022)
 
 ADR 0004 cooled everything for 24 h on any risk signal. With page reading (ADR 0019) that turned
