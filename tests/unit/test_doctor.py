@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 
 from scholar_search.cli import build_parser
-from scholar_search.core.doctor import find_bundle, verdict
+from scholar_search.core.doctor import find_bundle, pandoc_version, verdict
 
 
 def _profile(home: Path, name: str, version: str | None) -> Path:
@@ -59,3 +59,24 @@ def test_the_cli_offers_doctor() -> None:
     args = build_parser().parse_args(["doctor"])
 
     assert args.command == "doctor"
+
+
+def test_pandoc_missing_is_reported_not_installed(monkeypatch) -> None:
+    """No pandoc means a hint, never a download: installing a binary is the user's call."""
+
+    monkeypatch.setattr("shutil.which", lambda name: None)
+
+    assert pandoc_version() is None
+
+
+def test_pandoc_version_is_read_from_the_binary(monkeypatch, tmp_path) -> None:
+    fake = tmp_path / "pandoc.exe"
+    fake.write_text("", encoding="utf-8")
+    monkeypatch.setattr("shutil.which", lambda name: str(fake))
+
+    class Result:
+        stdout = "pandoc 3.1.11\nFeatures: +server +lua\n"
+
+    monkeypatch.setattr("subprocess.run", lambda *a, **k: Result())
+
+    assert pandoc_version() == "3.1.11"

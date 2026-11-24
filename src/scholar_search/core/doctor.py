@@ -14,6 +14,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +26,11 @@ OK = "ok"
 PARTIAL = "partial"
 MISMATCH = "mismatch"
 UNKNOWN = "unknown"
+
+PANDOC_HINT = (
+    "pandoc 未安装：公式仍会转换，但复杂的（积分上下限、矩阵）可能失真。"
+    "安装：winget install JohnMacFarlane.Pandoc  或  https://pandoc.org/installing.html"
+)
 
 
 def dsh_homes() -> list[Path]:
@@ -82,3 +90,32 @@ def verdict(*, cli: str | None, extension: str | None, bundle: str | None) -> st
     if len(known) < 3:
         return PARTIAL
     return OK
+
+
+def pandoc_version() -> str | None:
+    """The installed pandoc's version, or None. Never installs anything.
+
+    `page2md` converts formulae without pandoc — the builtin MathML subset converter is the
+    fallback — so a missing pandoc degrades quality rather than blocking the chain. Asking
+    the user to install it is a one-line hint, not a hidden download: pulling a third-party
+    binary from an MCP tool is a supply-chain decision, not a convenience.
+    """
+
+    executable = shutil.which("pandoc")
+    if executable is None:
+        return None
+    try:
+        completed = subprocess.run(
+            [executable, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    first = (completed.stdout or "").splitlines()
+    if not first:
+        return None
+    match = re.search(r"\d+\.\d+(?:\.\d+)?", first[0])
+    return match.group(0) if match else first[0].strip()[:40]

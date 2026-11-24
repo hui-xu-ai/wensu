@@ -6,6 +6,23 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed — a formula can no longer inflate the Markdown
+
+`page2md`'s builtin MathML path fell back to the flattened text of the whole tree, so a
+matrix or an aligned system arrived as hundreds of characters of symbol soup: unreadable,
+and paid for by every consumer of the Markdown. A formula that does not convert is now a
+one-token `[math]` marker, and a converted one is cut at `MATH_MAX_CHARS` (160) with its own
+warning. The wording no longer promises a marker where the extractor actually dropped the
+node — measured on the Wiley sample: 6 counted failures, 0 markers in `page.md`.
+
+### Added — setup and doctor say when pandoc is missing
+
+pandoc sharpens formula conversion; without it the builtin converter runs, so it is a
+quality knob rather than a dependency. `wensu setup` and `wensu doctor` now name the install
+command (`winget install JohnMacFarlane.Pandoc`) instead of leaving the degradation to be
+discovered in `meta.json`. Nothing is downloaded automatically: pulling a third-party binary
+is the user's decision, not a convenience.
+
 ### Added — `wensu doctor` answers "is the build that answers the build that was installed"
 
 The three versions live in three places (this package, a DSH profile's `node_modules`, the

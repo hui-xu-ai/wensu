@@ -336,6 +336,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             register_host=not args.no_host,
             skills_dir=Path(args.skills_dir) if args.skills_dir else None,
         )
+        # pandoc only sharpens formula conversion; without it the builtin converter runs.
+        # Say so, with the install command, at the one moment the user is already setting
+        # things up — and never download a third-party binary on their behalf.
+        if code == 0:
+            from .core.doctor import PANDOC_HINT, pandoc_version
+
+            if pandoc_version() is None:
+                print(PANDOC_HINT)
         # The browser profile is what every later session depends on: without it the
         # tool has no idea which window the extension lives in, and a caller is left
         # guessing — which is how one ended up killing the user's browser.
@@ -601,11 +609,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         from . import __version__ as cli_version
         from .bootstrap import build_service
-        from .core.doctor import MISMATCH, find_bundle, verdict
+        from .core.doctor import MISMATCH, PANDOC_HINT, find_bundle, pandoc_version, verdict
 
         status = build_service().status(brief=True)
         found = find_bundle([_Path(args.dsh_home)] if args.dsh_home else None)
         extension = status.get("extension_version")
+        pandoc = pandoc_version()
         report = {
             "cli": cli_version,
             "extension": extension,
@@ -613,9 +622,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             "bundle": found["version"],
             "bundle_profile": found["profile"],
             "bundle_path": found["path"],
+            "pandoc": pandoc,
             "bridge_ready": status.get("bridge_ready"),
             "quota_remaining": status.get("quota_remaining"),
             "cooldown_until": status.get("cooldown_until"),
+            "notes": [] if pandoc else [PANDOC_HINT],
         }
         report["verdict"] = verdict(
             cli=str(cli_version),

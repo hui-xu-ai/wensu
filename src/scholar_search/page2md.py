@@ -39,6 +39,9 @@ from pathlib import Path
 
 TOOL_VERSION = "0.3.0-m1"
 SUFFIXES = {".html", ".htm", ".mhtml", ".mht"}
+# One formula, at most this many characters. Beyond it the Markdown grows without being
+# readable (and every consumer pays for it), so it is cut with an explicit warning instead.
+MATH_MAX_CHARS = 160
 NOISE = ("cookie", "subscribe", "sign in", "advertisement", "related articles", "purchase pdf")
 JUNK_XPATH = "//script|//style|//noscript|//nav|//footer|//aside|//form"
 BLOCK_XPATH = ".//p|.//li|.//caption|.//figcaption"
@@ -216,7 +219,7 @@ def _mathml_to_latex(node) -> str:
 
 
 def _latex_from_math_element(element) -> str:
-    """把一个公式节点变成 LaTeX。
+    """把一个公式节点变成 LaTeX；转换不出来时返回空串，由调用方给一个短标记。
 
     优先用 pandoc 批量转换的结果（实测在积分上下限、矩阵、括号尺寸上准确得多）；
     没有 pandoc 或没命中时退回自研的 MathML 子集转换器。
@@ -228,10 +231,7 @@ def _latex_from_math_element(element) -> str:
     cached = _MATH_PANDOC.get(key)
     if cached:
         return cached
-    raw = _mathml_to_latex(element).strip()
-    if raw:
-        return raw
-    return _text(element)
+    return _mathml_to_latex(element).strip()
 
 
 _MATH_PANDOC: dict[str, str] = {}
@@ -321,7 +321,16 @@ def _render_inline(element, counters: dict[str, int]) -> str:
             latex = _latex_from_math_element(node)
             counters["math_total"] += 1
             if not latex:
+                # A short marker, not the flattened tree: a matrix or an aligned system
+                # flattens into hundreds of characters of symbol soup, which inflates the
+                # Markdown (and every token bill that reads it) without being readable.
+                # 2026-11-24: the unbounded `_text()` fallback did exactly that.
                 counters["math_failed"] += 1
+                pieces.append(" [math] ")
+                return
+            if len(latex) > MATH_MAX_CHARS:
+                counters["math_truncated"] += 1
+                latex = latex[:MATH_MAX_CHARS].rstrip() + "…"
             if element is not node and node.get("display") == "block":
                 pieces.append(f" $${latex}$ ")
             else:
@@ -435,6 +444,7 @@ def _own_blocks(section) -> list[str]:
     counters = {
         "math_total": 0,
         "math_failed": 0,
+        "math_truncated": 0,
         "tables_rendered": 0,
         "tables_skipped_inline": 0,
         "images_inline": 0,
@@ -980,7 +990,14 @@ def _warnings(meta: dict[str, object]) -> list[str]:
     found: list[str] = []
     failed = int(meta.get("math_failed") or 0)
     if failed:
-        found.append(f"{failed} 个公式退化成线性文本（LaTeX 转换失败）")
+        # "未能转成 LaTeX" is all that is known: some of these nodes are rendered as a
+        # `[math]` marker, others sit in blocks the extractor drops. Claiming a marker
+        # exists where the Markdown has none would send a reader looking for it (measured
+        # on the Wiley sample, 2026-11-24: 6 failures, 0 markers in page.md).
+        found.append(f"{failed} 个公式未能转成 LaTeX（复杂公式可能失真，建议看 PDF 复核）")
+    truncated = int(meta.get("math_truncated") or 0)
+    if truncated:
+        found.append(f"{truncated} 个公式过长，已在 {MATH_MAX_CHARS} 字符处截断")
     if not meta.get("math_total"):
         found.append("页面没有 MathML 公式；公式可能是图片，需看 PDF 或 OCR")
     elif not meta.get("math_pandoc"):
