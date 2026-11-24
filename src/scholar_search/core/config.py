@@ -21,7 +21,7 @@ ENV_HOME = "SCHOLAR_SEARCH_HOME"
 class HardLimits:
     """Non-negotiable limits enforced by the kernel."""
 
-    min_interval_ms: int = 3_000
+    min_interval_ms: int = 1_200
     default_interval_ms: int = 4_000
     max_interval_ms: int = 6_000
     max_pages_per_call: int = 3

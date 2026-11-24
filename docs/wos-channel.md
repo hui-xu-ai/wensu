@@ -16,7 +16,7 @@
 | 域名白名单 | `webofscience.clarivate.cn`、`www.webofscience.com`（后者只防跳转链）；`goto` 一律用前者，省一次 302 |
 | 检索页形态 | **不走 API 重放**：拦截页面自己的 `/api/wosnx/core/runQueryGetRecordsStream` 流，读渲染 DOM 拿不到摘要 |
 | 字段映射 | 见下表，`record.json` 17 个字段中 15 个有来源 |
-| 配额折算 | 一次检索 = `goto` + `type` + `click` = **3 个网络动作**，沿用 ADR 0005（300/日、间隔 3000ms + 抖动、并发 1） |
+| 配额折算 | 一次检索 = `goto` + `type` + 6 次 `click` = **8 个网络动作**（`wait_for`/`sleep` 不计费，2026-11-24 审计实测），沿用 ADR 0005（300/日、并发 1），间隔为 1200ms + 抖动（ADR 0021） |
 | 许可边界 | 用户以个人研究用途访问其机构订阅下的公开题录；项目只读、不导出文件、不分发 |
 
 ## 字段映射（实测 50 条覆盖）

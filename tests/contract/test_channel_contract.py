@@ -67,7 +67,7 @@ def test_declared_domains_are_bare_hosts(path: Path) -> None:
 
 
 def test_hard_limits_match_adr() -> None:
-    assert HARD.min_interval_ms == 3_000
+    assert HARD.min_interval_ms == 1_200
     assert HARD.max_pages_per_call == 3
     assert HARD.max_pages_per_session == 8
     assert HARD.daily_request_limit == 300

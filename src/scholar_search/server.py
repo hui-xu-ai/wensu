@@ -178,6 +178,11 @@ def _page_payload(
         # The expression that actually reached the site, when it differs from the
         # query the caller typed. Absent when the channel does not reshape queries.
         "query_effective": page.query_effective,
+        # How many records this answer holds, and whether the fetch stopped short of what
+        # the site matched. `total == limit` used to be unreadable, and one caller spent a
+        # second search resolving it (2026-11-24 report, D4).
+        "returned": getattr(page, "returned", len(page.records)),
+        "truncated": getattr(page, "truncated", False),
     }
     if query is not None:
         applied = _filters_payload(page, query)

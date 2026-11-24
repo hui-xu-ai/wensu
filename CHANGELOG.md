@@ -6,6 +6,25 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed — the network interval drops from 3000 ms to 1200 ms (ADR 0021)
+
+A Web of Science search is 8 charged actions (`goto`, `type`, 6 × `click`; `wait_for`/`sleep`
+are not charged), so the 3 s floor was **24 s of pure waiting** per round and the audited round
+took ~40 s — the direct cause of "检索太慢". The floor was a guess from before any measurement;
+a full day of live use produced no captcha/403/`blocked` signal, and the owner's stopwatch on
+the site itself shows 0.9–1.6 s pacing is unremarkable. `HARD.min_interval_ms` is now `1200`
+(jitter kept, concurrency 1, ≤3 pages, ≤300 actions/day unchanged), a round should land at
+**~20–22 s**, and ADR 0021 records the alternatives, the risk, and the rollback threshold: any
+`blocked`/`RISK_CAPTCHA`/403 within 7 days means reverting to 3000 ms and recording an incident.
+`AGENTS.md`, `docs/acceptance.md`, `docs/wos-channel.md` and the `scholar-search` skill (which
+now states the expected duration) are updated with it.
+
+### Fixed — the CLI and MCP payloads both carry `returned` / `truncated`
+
+The two new fields were added to `SearchPage` but not to `_page_payload`, so the surface that
+builds every answer silently dropped them; both surfaces are built by that one function, which
+is exactly why the omission was worth checking in both places.
+
 ### Fixed — `total == limit` no longer needs a second search to interpret
 
 `total == limit` could not distinguish "the site matched exactly this many" from "cut at my
