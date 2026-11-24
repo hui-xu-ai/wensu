@@ -49,8 +49,8 @@
         "zh": "文溯 · 知网与 Web of Science 检索"
       },
       "description": {
-        "en": "Ask the AI to find papers and read them, end to end. Find: search CNKI and Web of Science and pull a whole batch in one go. Read: give it an article link or DOI and it reads the full text, then tells you what each section says and which sentence every key number comes from. Use: export the citation straight into your reference manager. Read-only, no PDF downloads, and it stops at a captcha for you to handle. Needs Windows, Python 3.11+, the wensu command on PATH, plus the browser extension and native host.",
-        "zh": "让 AI 帮你找文献、读全文，一条路走完。找：在知网、Web of Science 里检索，一次翻出一大段结果；读：给一篇论文的链接或 DOI，它读完全文，告诉你每节讲了什么、关键数据出自哪句话；用：导出引文信息，直接导入文献管理软件。只读，不下载 PDF；遇到验证码会停下来等你处理。需要 Windows、Python 3.11+、PATH 中的 wensu 命令，并另行配置浏览器扩展和原生宿主。"
+        "en": "Grounded answers instead of guesses: the AI reads the paper before it answers. Find: search CNKI and Web of Science and pull a whole batch, screening by abstract and impact factor first. Read: it reads the full text and returns per-section highlights, key sentences and key numbers with the exact sentence they came from, so citations point back to the paper. Use: export the citation for the reference list. Read-only, no PDF downloads, and it stops at a captcha for you. Needs Windows, Python 3.11+, wensu on PATH, plus the browser extension and native host.",
+        "zh": "让 AI 读完原文再回答，专业问题少编。找：知网、Web of Science 一次翻出一大段，先用摘要和影响因子筛掉不读的；读：读完整篇正文，给出每节要点、关键句和带原句的关键数据，AI 引用时能指回原文；用：导出引文信息，答案后面能直接跟参考文献。只读、不下载 PDF，遇到验证码会停下等你处理。需要 Windows、Python 3.11+、PATH 中的 wensu，以及浏览器扩展和原生宿主。"
       },
       "icon": "icons/wensu.svg",
       "author": "hui-xu-ai",
