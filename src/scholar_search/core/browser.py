@@ -28,7 +28,7 @@ import subprocess
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .config import app_home, profiles_dir
 
@@ -264,13 +264,18 @@ def profile_is_running(config: BrowserConfig) -> bool | None:
             return None
         import msvcrt
 
+        # Viewed as `Any`: typeshed hides `locking`/`LK_*` when the checker does not run on
+        # Windows, and CI type-checks on Linux. A `type: ignore` would be the mirror-image
+        # problem — unused on Windows, where this job runs, and `warn_unused_ignores`
+        # would then fail the local gate.
+        handle_module = cast(Any, msvcrt)
         try:
-            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            handle_module.locking(handle.fileno(), handle_module.LK_NBLCK, 1)
         except OSError:
             return True  # someone holds it: a browser is using the profile
         else:
             with contextlib.suppress(OSError):
-                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                handle_module.locking(handle.fileno(), handle_module.LK_UNLCK, 1)
             return False
     finally:
         with contextlib.suppress(OSError):

@@ -15,6 +15,15 @@ remaining findings in the repo's own `tools/bootstrap-project.py` are fixed prop
 (`contextlib.suppress` instead of `try/except/pass`, a stale `noqa`, two wrapped lines).
 Shipped code is still linted in full.
 
+### Fixed — `mypy src` failed on Linux on a Windows-only module
+
+`core/browser.py` asks `msvcrt` whether something holds the profile's `LOCK` file. Typeshed
+hides `locking`/`LK_*` when the checker does not run on Windows, so CI's Linux job reported
+four `attr-defined` errors while the local Windows run was clean — and a `type: ignore`
+would have been the mirror image (`warn_unused_ignores` fails the Windows run). The module
+is now viewed through `cast(Any, ...)`, which checks identically on both platforms;
+verified with `mypy --platform linux src` and the normal run.
+
 ## [0.14.3] - 2026-11-24
 
 ### Changed — the bundle's own metadata described a smaller tool than it is
