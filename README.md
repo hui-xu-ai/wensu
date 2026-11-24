@@ -3,13 +3,15 @@
 ！！！  注意不要用机构或大学的IP自动化访问这些网站，可能面临来自他们的处罚  ！！！
 
 
-只读的文献**检索 + 通读**服务，以 MCP 工具或按需 CLI 的形式提供给 AI 客户端。微内核 + 渠道插件：
+给 AI 客户端用的**文献检索 + 全文精读**服务：MCP 工具，也可按需用 CLI。微内核 + 渠道插件。
 
-- **检索**：知网（中文文献，中文检索式，17 个官方字段）与 Web of Science（英文文献，`TS=`/`ALL=`
-  检索式，**自带期刊影响因子**），一次调用可读一整段（知网 150 条、WoS 500 条）
-- **通读**：给一个 DOI，AI 在你已登录的浏览器里打开出版社页面，存成 MHTML，再转成 Markdown 全文
-  与**文献地图**（`index.json`：每节要点、关键句、带原句的数值），约原文体积的 45%
-- 25 家出版社白名单、遇人机验证立即停机等你处理、日上限 300 次由内核强制
+- **找得到**：知网与 Web of Science 双渠道，一次调用读一整段（知网 150 条 / WoS 500 条），
+  WoS 记录自带期刊影响因子，筛选与排序在本地完成、零额外请求
+- **读得完**：给一个 DOI，就在你**已登录的浏览器**里打开文章页，存成 MHTML，再由本地转换产出
+  Markdown 全文与**文献地图**（每节要点、关键句、带原句的数值，约原文体积的 45%）
+- **交得出**：单篇详情、RIS / EndNote 题录文本——查到的东西能直接落到引用里
+
+每一步都能单用：只查文献就只用检索；手上已有一篇 DOI，就只用精读。
 
 万方、维普等以后按同一契约接入。
 
@@ -20,9 +22,22 @@
 
 [![开放插件市场](https://img.shields.io/endpoint?url=https%3A%2F%2Fdshopen.org%2Fbadge%2F%40hui-xu-ai%2Fdsh-wensu.json)](https://dshopen.org/zh/plugins/@hui-xu-ai/dsh-wensu/)
 
+## 一条链怎么走
+
+```text
+1) 找  search(channel="webofscience", query="TS=(ionic polymer actuator) AND PY=(2024-2026)",
+              records_from=1, records_to=150, min_impact_factor=6)
+2) 筛  detail(url=…, include_abstract=True)          # 只读摘要，决定读哪三篇
+3) 读  page_read(doi="10.1038/s41586-020-2649-2")     # → page.mhtml
+       python tools/page2md.py page.mhtml             # → page.md + index.json（文献地图）
+4) 引  export(records=…, format="ris")                # 手动导入 Zotero / EndNote
+```
+
+一条链 = 4 次工具调用。检索 1 个额度起，精读固定 2 个额度，日上限 300 由内核强制。
+
 ## 它能做什么
 
-**检索题录**
+**找 · 检索题录**
 
 - **关键词检索**：标题、作者、刊名、年份、被引、下载、详情链接
 - **专业检索式**：知网官方 17 个字段（`SU/TKA/KY/TI/FT/AU/FI/RP/AF/FU/AB/CO/RF/CLC/LY/DOI/CF`），
@@ -30,25 +45,29 @@
 - **记录范围**：`records_from` / `records_to` 一次读一整段（知网翻页 150 条、WoS 导出 500 条），
   不再靠"排除已读"反复重检
 - **排序**：相关度 / 发表时间降序 / 被引降序；WoS 还带影响因子，可在本地筛选排序
-- **单篇详情**：摘要、关键词、作者单位、卷期页、DOI
-- **导出**：RIS / EndNote 纯文本，保留页面给出的文献类型（期刊 / 学位论文 / 会议 / 图书 / 报纸…）
 
-**通读全文**（`page_read` + `tools/page2md.py`）
+**读 · 全文精读**（`page_read` + `tools/page2md.py`）
 
 - **打开页面**：`page_read(doi=…)` 在浏览器里直接打开文章地址，存成 `<home>/pages/<slug>/page.mhtml`，
   并给出 `status`（`ok` / `no_html` / `unsupported_site` / `blocked`）与原因
 - **全文 Markdown**：`page2md` 产出 `page.md`，公式、上下标、表格、图注按章节保留
 - **文献地图**：`index.json` 给每节的要点、关键句、带原句上下文的数值，先看地图再决定读哪一节
 - **按需切片**：`--slice 3`、`--query "μ"`、`--mode core`，只取需要的部分，省上下文
+- **贯读手上那页**：`snapshot` 把你自己已经开着的页面存成 MHTML，零额度
+
+**交 · 详情与引用**
+
+- **单篇详情**：摘要、关键词、作者单位、卷期页、DOI
+- **导出**：RIS / EndNote 纯文本，保留页面给出的文献类型（期刊 / 学位论文 / 会议 / 图书 / 报纸…）
+- **状态**：`status` 看配额、冷却、桥接是否就绪
 
 ## 它不做什么
 
-- **不下载 PDF / CAJ**，不调用任何下载接口。`page_read` 只把**用户能正常打开的那张网页**存成
-  MHTML（正文由 `tools/page2md.py` 转 Markdown），不索取、不解包 PDF
-- **不把题录写入 Zotero / EndNote / Mendeley**。只输出 RIS / EndNote 文本，
-  导入由你自己在软件里完成（原因见 [ADR 0006](docs/adr/0006-no-third-party-ingest.md)）
 - **不绕过人机验证**：`page_read` 直接打开文章地址（等于你自己把链接粘进地址栏），不做导航预热、
   不模拟站内跳转；遇到验证页立即停机返回 `blocked`，等**你**在浏览器里点完验证再继续
+- **不下载 PDF / CAJ**：精读的是**网页正文**（渲染后的文章页），不调用任何下载接口，不解包 PDF
+- **不把题录写入 Zotero / EndNote / Mendeley**。只输出 RIS / EndNote 文本，
+  导入由你自己在软件里完成（原因见 [ADR 0006](docs/adr/0006-no-third-party-ingest.md)）
 - **不做批量抓取**，没有"爬全库"模式，日上限 300 次由内核强制
 - 不实现来源类型筛选（传了会明确报错）；年份筛选只作用于本次已抓取的记录
 
