@@ -36,7 +36,7 @@ from .contracts import (
 from .errors import ActionError, ChannelError, ParseError, PolicyError, ScholarSearchError
 from .export import to_csv, to_endnote, to_markdown, to_ris
 from .locking import interprocess_lock
-from .pageprobe import classify_mhtml
+from .pageprobe import challenge_in_title, classify_mhtml
 from .planner import Planner
 from .policy import PolicyEngine
 from .publishers import PUBLISHERS, Publisher, publisher_for_doi, publisher_for_host
@@ -751,21 +751,59 @@ class ScholarService:
             }
 
         spec = _page_spec(publisher)
-        plan = Plan(
-            channel=f"page:{publisher.name}",
-            purpose="detail",
-            actions=(
-                # A deep link: the article URL is opened as given.
-                Action("goto", {"url": target}),
-                # Publisher article bodies render after the load event: capturing straight
-                # after `goto` returned 1.8 KB of "Highlights" from a ScienceDirect article
-                # page that was fully accessible (0.12.59, real run after signing in).
-                Action("sleep", {"ms": _ARTICLE_SETTLE_MS}),
-            ),
-        )
+        # The navigation is its own plan, because what it returns decides whether anything
+        # else may happen at all: on a wall (ADR 0004) the tool must not sleep, capture or
+        # look again. The title arrives with the `goto` reply, so this check is free.
         with self._browser_transaction():
-            outcomes = self._run(plan, spec)
+            outcomes = self._run(
+                Plan(
+                    channel=f"page:{publisher.name}",
+                    purpose="detail",
+                    actions=(
+                        # A deep link: the article URL is opened as given.
+                        Action("goto", {"url": target}),
+                    ),
+                ),
+                spec,
+            )
             final_url = outcomes[-1].url or target
+            wall_title = ""
+            for outcome in outcomes:
+                candidate = outcome.data.get("title")
+                if isinstance(candidate, str) and candidate:
+                    wall_title = candidate
+            marker = challenge_in_title(wall_title)
+            if marker:
+                # Capturing the wall (the old order) cost a quota point, saved bytes that are
+                # not the article, and replaced a body already captured — measured on Wiley
+                # 2026-11-24: title 「请稍候…」, 73 KB of wall (report D1/D2).
+                return {
+                    "status": "blocked",
+                    "reason": "challenge",
+                    "signal": f"title:{marker}",
+                    "doi": identifier,
+                    "publisher": publisher.name,
+                    "final_url": final_url,
+                    "mhtml_path": None,
+                    "bytes": 0,
+                    "title": wall_title,
+                    # One action ran (`goto`): `sleep` and `wait_for` are not charged, and
+                    # billing the flat PAGE_READ_QUOTA would charge for a capture that never
+                    # happened.
+                    "quota_charged": 1,
+                    "next": _page_next({"status": "blocked", "reason": "challenge"}),
+                }
+            # Publisher article bodies render after the load event: capturing straight after
+            # `goto` returned 1.8 KB of "Highlights" from a ScienceDirect article page that
+            # was fully accessible (0.12.59, real run after signing in).
+            self._run(
+                Plan(
+                    channel=f"page:{publisher.name}",
+                    purpose="detail",
+                    actions=(Action("sleep", {"ms": _ARTICLE_SETTLE_MS}),),
+                ),
+                spec,
+            )
             saved = self._snapshot_locked(tab="work")
             probe = _classify_saved(saved, url=final_url)
             if _still_rendering(probe):

@@ -51,6 +51,34 @@ CHALLENGE_URL_MARKERS: tuple[str, ...] = (
     "/challenge-platform/",
 )
 
+# Titles a wall uses. Checked on the `goto` reply, *before* anything is captured: the wall's
+# bytes are not the article, capturing them costs a quota point, and — measured 2026-11-24 on
+# Wiley — the capture replaces a body that had already been saved. Cloudflare titles that
+# page 「请稍候…」, and the extension already reports the tab title with every `goto`, so the
+# wall is recognizable for free. This list stays short and unambiguous on purpose: a false
+# positive would call a readable article a wall.
+CHALLENGE_TITLES: tuple[str, ...] = (
+    "just a moment",
+    "请稍候",
+    "verifying you are human",
+    "checking your browser",
+    "正在进行安全验证",
+    "attention required",
+)
+
+
+def challenge_in_title(title: str) -> str | None:
+    """The marker that made this title a wall, or None. Never captures anything."""
+
+    lowered = (title or "").strip().lower()
+    if not lowered:
+        return None
+    for marker in CHALLENGE_TITLES:
+        if marker in lowered:
+            return marker
+    return None
+
+
 SECTION_MARKERS: tuple[str, ...] = ('class="section-title"', "<section id=")
 # Without a numbered heading, only a page that wraps this many sections is still trusted as
 # the article itself; fewer means "abstract shell" (or "still rendering", see service.py).

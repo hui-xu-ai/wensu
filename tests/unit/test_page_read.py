@@ -218,8 +218,13 @@ def test_page_read_deep_links_without_a_front_page_warm_up(tmp_path: Path) -> No
     with pytest.raises(RuntimeError):
         service.read_page(doi="10.1016/j.cej.2023.145123")
 
-    actions = seen[0].actions  # type: ignore[attr-defined]
-    assert [action.verb for action in actions] == ["goto", "sleep"]
+    # The navigation is its own plan: what `goto` returns decides whether anything else may
+    # run at all (a wall must stop the tool, ADR 0004). This fake raises on that first plan,
+    # so exactly one is observed — and it has to be the deep link alone.
+    assert len(seen) == 1, seen
+    first = seen[0]
+    actions = first.actions  # type: ignore[attr-defined]
+    assert [action.verb for action in actions] == ["goto"]
     assert actions[0].params["url"] == "https://doi.org/10.1016/j.cej.2023.145123"
     assert "open" not in actions[0].params, "发布版不得出现预热式导航"
     assert "https://www.sciencedirect.com/" not in str(actions)

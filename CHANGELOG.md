@@ -6,6 +6,17 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — a challenge wall is recognized before anything touches it
+
+`page_read` used to navigate, capture, and only then classify the bytes — so a Cloudflare wall
+(title 「请稍候…」, ~73 KB) was saved as if it were a page, cost the full 2 quota units, and
+replaced a body that had already been captured. The wall's title arrives with the `goto`
+reply, so the navigation is now its own plan: on a wall the tool stops right there, **captures
+nothing**, reports `quota_charged: 1`, and says to ask the user and then use `snapshot`. The
+wall check is `challenge_in_title` in `core/pageprobe.py` (short, unambiguous list; a false
+positive would call a readable article a wall), and the tool's own description now states that
+a wall is never captured or saved.
+
 ### Changed — the network interval drops from 3000 ms to 1200 ms (ADR 0021)
 
 A Web of Science search is 8 charged actions (`goto`, `type`, 6 × `click`; `wait_for`/`sleep`

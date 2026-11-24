@@ -823,17 +823,21 @@ def build_server(service: ScholarService) -> FastMCP:
 
         Give `doi` (preferred — it also decides the publisher) or an article `url`. The
         browser opens that address directly, then saves the page as MHTML; the navigation
-        plus the capture is charged as **2 quota units**.
+        plus the capture is charged as **2 quota units** — or **1** when the page turns out
+        to be a challenge wall, because nothing is captured then.
 
         Read `status` before anything else:
 
-        * `ok` — `mhtml_path` holds the article; run `wensu page2md --in <path> --out <dir>`;
+        * `ok` — `mhtml_path` holds the article; call `page2md` with it;
         * `no_html` — the page has no full text; `reason` says `paywall`, `abstract_only`,
           `pdf_only` or `unparsable`, and `pdf_url` may offer the PDF route;
         * `unsupported_site` — the DOI belongs to a publisher this build does not visit
           (the curated list is in `core/publishers.py`, ADR 0019), so nothing was opened;
-        * `blocked` — the site challenged the browser; solve it yourself in the browser,
-          then ask again. Do not retry in a loop.
+        * `blocked` — the site showed a human-verification wall. It is recognized from the
+          tab title right after the navigation, so **the wall is never captured or saved**
+          (ADR 0004): `mhtml_path` is null. Ask the user to solve it in that browser window,
+          then call `snapshot` — do not call `page_read` again, which would re-navigate and
+          replace any body already captured.
 
         Nothing is clicked or typed, and a page that only shows a preview is reported as
         such rather than passed off as the article.

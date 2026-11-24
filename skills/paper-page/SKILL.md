@@ -81,10 +81,11 @@ wensu page2md --in "<页面>.html" --out "%LOCALAPPDATA%\scholar-search\pages\<s
 
 ## 遇到人机验证 / 登录墙 / 拿到摘要页
 
-- `page_read` 返回 `status: "blocked"`（例如 Cloudflare 的「请稍候…」）：**这一次导航已经把
-  标签页带到验证页**，所以正确的顺序是
+- `page_read` 返回 `status: "blocked"`（例如 Cloudflare 的「请稍候…」）：**工具在导航完成后立刻
+  停下，不会抓取那张验证页**（`mhtml_path` 为 null、只记 1 个动作的额度），这是 ADR 0004 的要求，
+  所以没有任何“验证页被保存成文件”的副作用。接下来的顺序是
   1. 请用户在那个浏览器窗口里过验证（一次点击），**不要自己重试 `page_read`** —— 再调一次会把
-     已经抓到的正文导航回验证页（2026-11-24 实测，报告 D1/D2）；
+     标签页带回验证页（2026-11-24 实测，报告 D1/D2）；
   2. 用户确认后调 `snapshot`（0 额度）抓当前页；
   3. 再 `page2md` 转 Markdown。
 - `snapshot` 的返回里若出现 `status: "blocked"` 或 `code: "RISK_CAPTCHA"`，说明当前标签页
