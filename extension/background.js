@@ -184,6 +184,11 @@ function connect() {
     port = channel;
     reconnectDelayMs = 3000;
     channel.onMessage.addListener((message) => onHostMessage(message, channel));
+    // Get the work tab ready off the action path. Doing this inside the first `goto` added
+    // window creation and a tab move on top of a 13 s publisher load, which pushed the
+    // action past the kernel's 15 s budget: the page opened, and the caller was told
+    // `bridge.timeout` (2026-11-24, reproduced twice on Wiley).
+    void workTab([]).catch(() => null);
     channel.onDisconnect.addListener(() => {
       if (port === channel) port = null;
       // A host that was never registered fails differently from one that exited.
@@ -226,6 +231,15 @@ const WORK_TAB_KEY = "wensuWorkTabId";
 // Tabs opened for a single navigation (`goto` with `open: "new"`). They are blanked on the
 // next `goto`, so the browser never accumulates tabs.
 const DISPOSABLE_KEY = "wensuDisposableTabs";
+// Every tab this extension created, newest last. The work-tab id lives in `storage.local`,
+// but that id can still point at a tab the user closed — and older builds remembered the id
+// in `storage.session`, which is emptied when the extension reloads. Without this list the
+// fallback below created one more `about:blank` on every reload and never removed the old
+// one, so a profile slowly filled with them (2026-11-24, reported as the browser slowing
+// down). The list is what makes "at most one tab of ours" true even after the id is lost.
+const OWNED_KEY = "wensuOwnedTabs";
+// The window that holds the work tab, so the agent's page stays out of the user's tab strip.
+const WINDOW_KEY = "wensuWorkWindowId";
 
 function dwellFor(params) {
   const declared = Number(params && params.dwell_ms);
@@ -235,18 +249,25 @@ function dwellFor(params) {
 
 async function rememberDisposable(tabId) {
   if (!Number.isInteger(tabId)) return;
-  const stored = (await chrome.storage.session.get(DISPOSABLE_KEY))[DISPOSABLE_KEY];
+  const stored = (await chrome.storage.local.get(DISPOSABLE_KEY))[DISPOSABLE_KEY];
   const ids = Array.isArray(stored) ? stored.filter((id) => Number.isInteger(id)) : [];
   if (!ids.includes(tabId)) ids.push(tabId);
-  await chrome.storage.session.set({ [DISPOSABLE_KEY]: ids.slice(-5) });
+  const known = (await chrome.storage.local.get(OWNED_KEY))[OWNED_KEY];
+  const owned = Array.isArray(known) ? known.filter((id) => Number.isInteger(id)) : [];
+  await chrome.storage.local.set({
+    [DISPOSABLE_KEY]: ids.slice(-5),
+    // A transient tab is still a tab of ours: it becomes the work tab when it is blanked,
+    // so it belongs in the same list the fallback consults.
+    [OWNED_KEY]: [...new Set([...owned, tabId])].slice(-8),
+  });
 }
 
 async function closeDisposableTabs() {
   // Blank them, do not close them. A closed tab cannot be reused, and the caller's next
   // navigation then has nowhere controlled to land; a blank tab can carry it.
-  const stored = (await chrome.storage.session.get(DISPOSABLE_KEY))[DISPOSABLE_KEY];
+  const stored = (await chrome.storage.local.get(DISPOSABLE_KEY))[DISPOSABLE_KEY];
   const ids = Array.isArray(stored) ? stored.filter((id) => Number.isInteger(id)) : [];
-  await chrome.storage.session.set({ [DISPOSABLE_KEY]: [] });
+  await chrome.storage.local.set({ [DISPOSABLE_KEY]: [] });
   const blanked = [];
   for (const id of ids) {
     // Only ids this extension created are ever in this list; a failure means the user
@@ -260,16 +281,60 @@ async function closeDisposableTabs() {
   // The newest one becomes *the* work tab, so the article and every later search land in
   // the tab we already own instead of a fresh one.
   const newest = blanked[blanked.length - 1];
-  if (Number.isInteger(newest)) await chrome.storage.session.set({ [WORK_TAB_KEY]: newest });
+  if (Number.isInteger(newest)) await chrome.storage.local.set({ [WORK_TAB_KEY]: newest });
   return blanked;
 }
 
 async function workTab(domains) {
-  const stored = (await chrome.storage.session.get(WORK_TAB_KEY))[WORK_TAB_KEY];
-  if (Number.isInteger(stored)) {
-    const tab = await chrome.tabs.get(stored).catch(() => null);
-    if (tab && tab.id) return tab;
+  const tab = await resolveWorkTab(domains);
+  // Pin it: a pinned tab is compact, visually separate from the user's own pages, and the
+  // browser asks before closing it. Only tabs in our own list ever reach here — the user's
+  // tabs are refused by `resolveWorkTab` — so pinning cannot touch anyone else's page.
+  if (tab && tab.id) await within(chrome.tabs.update(tab.id, { pinned: true }), 1_000);
+  return tab;
+}
+
+// `undefined` (rather than a rejection) when a browser call neither answers nor fails: a
+// promise that never settles must not hold a navigation hostage.
+async function within(promise, ms) {
+  return Promise.race([
+    promise.catch(() => null),
+    new Promise((resolve) => setTimeout(() => resolve(null), ms)),
+  ]);
+}
+
+function alive(tab) {
+  return tab && Number.isInteger(tab.id) ? tab : null;
+}
+
+async function rememberedTab() {
+  // Persistent storage, not `storage.session`: the session area is emptied when the
+  // extension is reloaded or the browser restarts, while the tab it named survives — the
+  // exact mismatch that used to leave one orphan tab per reload.
+  const stored = (await chrome.storage.local.get(WORK_TAB_KEY))[WORK_TAB_KEY];
+  if (!Number.isInteger(stored)) return null;
+  return alive(await chrome.tabs.get(stored).catch(() => null));
+}
+
+async function adoptOwnedTab() {
+  const known = (await chrome.storage.local.get(OWNED_KEY))[OWNED_KEY];
+  const owned = Array.isArray(known) ? known.filter((id) => Number.isInteger(id)) : [];
+  const found = [];
+  for (const id of owned) {
+    const tab = alive(await chrome.tabs.get(id).catch(() => null));
+    if (tab) found.push(tab);
   }
+  if (!found.length) return null;
+  // Reuse the newest surviving tab of ours and drop the spares: an id this build forgot is
+  // not a reason to open a second tab. Only ids this extension created are ever in the
+  // list, so nothing of the user's is touched.
+  const newest = found[found.length - 1];
+  for (const spare of found.slice(0, -1)) await chrome.tabs.remove(spare.id).catch(() => null);
+  await chrome.storage.local.set({ [WORK_TAB_KEY]: newest.id });
+  return newest;
+}
+
+async function createWorkTab() {
   // Never adopt a tab the user opened himself. The previous version picked any tab whose
   // host was in scope and remembered it as the work tab, so the next `goto` navigated the
   // page the user was reading — the opposite of what the comment above promises
@@ -278,8 +343,50 @@ async function workTab(domains) {
   // The new tab starts blank on purpose: creating it at a hard-coded publisher address
   // sent a request to Elsevier even when the article was a Wiley DOI.
   const created = await chrome.tabs.create({ url: "about:blank", active: false });
-  await chrome.storage.session.set({ [WORK_TAB_KEY]: created.id });
+  const known = (await chrome.storage.local.get(OWNED_KEY))[OWNED_KEY];
+  const owned = Array.isArray(known) ? known.filter((id) => Number.isInteger(id)) : [];
+  await chrome.storage.local.set({
+    [OWNED_KEY]: [...owned, created.id].slice(-8),
+    [WORK_TAB_KEY]: created.id,
+  });
   return created;
+}
+
+// A window of our own, so the agent's page never takes a slot in the user's tab strip.
+// `focused: false` keeps the caret where the user left it. Everything here is best effort
+// and deadline-bounded: if this browser will not hand out a window, the work tab simply
+// stays where it is and the navigation still happens (a hang here looks exactly like a
+// dead bridge — 2026-11-24, `bridge.timeout` at `navigate.open`).
+async function isolateWorkTab(tab) {
+  if (!tab) return tab;
+  const stored = (await chrome.storage.local.get(WINDOW_KEY))[WINDOW_KEY];
+  let win = Number.isInteger(stored)
+    ? await within(chrome.windows.get(stored), 1_000)
+    : null;
+  if (win && win.id) {
+    if (tab.windowId !== win.id) {
+      await within(chrome.tabs.move(tab.id, { windowId: win.id, index: -1 }), 2_000);
+    }
+    return (await chrome.tabs.get(tab.id).catch(() => null)) || tab;
+  }
+  const opened = await within(
+    chrome.windows.create({ url: "about:blank", focused: false, type: "normal" }),
+    2_000,
+  );
+  if (!opened || !opened.id) return tab; // no window: keep the user's tab strip as it is
+  // `windows.create` answers with the window only — no tab list — so the blank tab it
+  // opened has to be looked up (reading `win.tabs[0]` threw and the host got no reply).
+  const blanked = await within(chrome.tabs.query({ windowId: opened.id }), 2_000);
+  const blank = Array.isArray(blanked) ? blanked[0] : null;
+  await within(chrome.tabs.move(tab.id, { windowId: opened.id, index: -1 }), 2_000);
+  if (blank && blank.id !== tab.id) await chrome.tabs.remove(blank.id).catch(() => null);
+  await chrome.storage.local.set({ [WINDOW_KEY]: opened.id });
+  return (await chrome.tabs.get(tab.id).catch(() => null)) || tab;
+}
+
+async function resolveWorkTab(domains) {
+  const tab = (await rememberedTab()) || (await adoptOwnedTab()) || (await createWorkTab());
+  return (await isolateWorkTab(tab)) || tab;
 }
 
 async function replyTab(params, domains) {
@@ -467,9 +574,20 @@ async function onHostMessage(message, channel) {
         await chrome.tabs.update(tab.id, { url: params.url });
         // Read the tab back only once it has moved: `tabs.get` immediately after
         // `update` can return the previous URL, which looked like a redirect out of scope.
-        await waitNavigated(tab.id, before, domains);
+        //
+        // Bounded on purpose: a human-verification interstitial ("just a moment…") never
+        // fires the load event, and the unbounded waits here outlasted the kernel's 15 s
+        // budget — the caller was told `bridge.timeout` while the tab already showed the
+        // challenge page. Reporting whatever is on screen lets the kernel classify it
+        // (`blocked`), which is the honest answer and the one the risk rules describe
+        // (2026-11-24, reproduced four times on a Cloudflare interstitial).
+        const started = Date.now();
+        await within(waitNavigated(tab.id, before, domains), 10_000);
+        // Whatever is left of a 13 s budget: heavy publisher pages genuinely need past 10 s
+        // (Wiley measured 13.3 s), so this trims the tail of the *wait*, not the page.
+        await within(waitComplete(tab.id), Math.max(1_000, 13_000 - (Date.now() - started)));
       }
-      await waitComplete(tab.id);
+      if (params.reload === true) await within(waitComplete(tab.id), 3_000);
       await new Promise((resolve) => setTimeout(resolve, dwellFor(params)));
 
       const updated = await chrome.tabs.get(tab.id);

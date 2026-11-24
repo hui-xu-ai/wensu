@@ -106,6 +106,44 @@ def test_a_foreign_tab_is_never_adopted(probe: dict[str, Any]) -> None:
     )
 
 
+# -- tabs must not accumulate (2026-11-24) -----------------------------------
+
+
+def test_the_work_tab_is_remembered_across_an_extension_reload(probe: dict[str, Any]) -> None:
+    """The id lives in persistent storage, so a reload reuses the tab instead of opening one.
+
+    `storage.session` is emptied when the extension reloads; the tab it named survives. That
+    mismatch opened one more `about:blank` per reload and nothing ever closed the old one.
+    """
+
+    reload = probe["reload"]
+
+    assert reload["tab_id"] == 41, reload
+    assert reload["tabs_after"] == reload["tabs_before"] == 1, reload
+    assert reload["created"] == 0, reload
+
+
+def test_the_work_tab_is_pinned(probe: dict[str, Any]) -> None:
+    """Pinned keeps it compact, apart from the user's pages, and hard to close by accident."""
+
+    assert probe["work_tab"]["pinned"] is True, probe["work_tab"]
+
+
+def test_the_work_tab_gets_a_window_of_its_own(probe: dict[str, Any]) -> None:
+    """The user's tab strip must not gain a slot every time the agent reads a page."""
+
+    assert probe["work_tab"]["window_id"] != 1, probe["work_tab"]
+
+
+def test_stale_tabs_of_ours_are_reused_and_the_spares_removed(probe: dict[str, Any]) -> None:
+    """An id this build forgot is no reason to open a second tab."""
+
+    orphans = probe["orphans"]
+
+    assert orphans["tab_id"] == 52, orphans
+    assert orphans["remaining"] == [52], orphans
+
+
 # -- guards ------------------------------------------------------------------
 
 

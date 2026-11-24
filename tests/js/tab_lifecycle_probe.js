@@ -30,8 +30,13 @@ function makeBrowser(seed = []) {
   const tabs = new Map();
   const requests = [];
   const session = new Map();
+  const local = new Map();
+  const windows = new Map([[1, { id: 1 }]]);
+  let nextWindowId = 900;
   let nextId = 100;
-  for (const tab of seed) tabs.set(tab.id, { title: "", status: "complete", ...tab });
+  for (const tab of seed) {
+    tabs.set(tab.id, { title: "", status: "complete", windowId: 1, ...tab });
+  }
 
   const chrome = {
     runtime: {
@@ -54,11 +59,25 @@ function makeBrowser(seed = []) {
           for (const key of Object.keys(obj)) session.set(key, obj[key]);
         },
       },
+      // `local` outlives a reload; a scenario seeds it to stand for "what the last run
+      // remembered" while `session` starts empty, which is the state after a reload.
+      local: {
+        get: async (key) => ({ [key]: local.get(key) }),
+        set: async (obj) => {
+          for (const key of Object.keys(obj)) local.set(key, obj[key]);
+        },
+      },
     },
     tabs: {
       create: async (opts) => {
         const id = nextId++;
-        const tab = { id, url: opts.url, status: "complete", active: opts.active !== false };
+        const tab = {
+          id,
+          url: opts.url,
+          status: "complete",
+          active: opts.active !== false,
+          windowId: opts.windowId || 1,
+        };
         tabs.set(id, tab);
         requests.push(opts.url);
         return { ...tab };
@@ -67,10 +86,14 @@ function makeBrowser(seed = []) {
         if (!tabs.has(id)) throw new Error("no tab");
         return { ...tabs.get(id) };
       },
-      query: async () => [...tabs.values()].map((tab) => ({ ...tab })),
+      query: async (filter) =>
+        [...tabs.values()]
+          .filter((tab) => !filter || filter.windowId === undefined || tab.windowId === filter.windowId)
+          .map((tab) => ({ ...tab })),
       update: async (id, opts) => {
         const tab = tabs.get(id);
         if (!tab) throw new Error("no tab");
+        if (opts.pinned !== undefined) tab.pinned = opts.pinned;
         if (opts.url) {
           tab.url = opts.url;
           requests.push(opts.url);
@@ -80,17 +103,48 @@ function makeBrowser(seed = []) {
       remove: async (id) => {
         if (!tabs.delete(id)) throw new Error("no tab");
       },
+      move: async (id, opts) => {
+        const tab = tabs.get(id);
+        if (!tab) throw new Error("no tab");
+        if (opts && opts.windowId) tab.windowId = opts.windowId;
+        return { ...tab };
+      },
       reload: async () => {},
       // `pageMeta` races this against a 1 s deadline; rejecting keeps the probe fast.
       sendMessage: async () => {
         throw new Error("no receiver");
       },
     },
+    windows: {
+      create: async (opts) => {
+        const id = nextWindowId++;
+        windows.set(id, { id });
+        const tabId = nextId++;
+        const tab = {
+          id: tabId,
+          url: (opts && opts.url) || "about:blank",
+          status: "complete",
+          active: true,
+          windowId: id,
+        };
+        tabs.set(tabId, tab);
+        requests.push(tab.url);
+        // Real Chromium answers with `{ id, type, ... }` and **no** `tabs` array: a caller
+        // that reads `win.tabs[0]` throws, and the host never gets a reply (2026-11-24,
+        // reproduced live as `bridge.timeout` at `navigate.open`).
+        return { id };
+      },
+      get: async (id) => {
+        if (!windows.has(id)) throw new Error("no window");
+        return { id };
+      },
+      update: async (id) => ({ id }),
+    },
     downloads: { onCreated: { addListener() {} }, search: async () => [] },
     scripting: { executeScript: async () => [{ result: {} }] },
     pageCapture: { saveAsMHTML: async () => ({}) },
   };
-  return { chrome, tabs, requests, session };
+  return { chrome, tabs, requests, session, local, windows };
 }
 
 function load(browser) {
@@ -141,9 +195,50 @@ async function scenarioFallback() {
   observations.created_fallback_url = (tab && tab.url) || null;
 }
 
+async function scenarioAfterReload() {
+  // The last run's memory lives in `local`; `session` is empty, which is the state after
+  // the extension reloads. The tab it named is still open, so no second tab may appear.
+  const browser = makeBrowser([{ id: 41, url: "about:blank" }]);
+  browser.local.set("wensuWorkTabId", 41);
+  browser.local.set("wensuWorkWindowId", 1);
+  const context = load(browser);
+  const before = browser.tabs.size;
+  const tab = await context.workTab(DOMAINS);
+  observations.reload = {
+    tab_id: tab && tab.id,
+    tabs_before: before,
+    tabs_after: browser.tabs.size,
+    created: browser.requests.filter((url) => url === "about:blank").length,
+  };
+}
+
+async function scenarioStaleOwnedTabs() {
+  // Two tabs an older build left behind and no remembered work id: adopt the newest and
+  // remove the spare, so the count goes down instead of up.
+  const browser = makeBrowser([
+    { id: 51, url: "about:blank" },
+    { id: 52, url: "about:blank" },
+  ]);
+  browser.local.set("wensuOwnedTabs", [51, 52]);
+  browser.local.set("wensuWorkWindowId", 1);
+  const context = load(browser);
+  const tab = await context.workTab(DOMAINS);
+  observations.orphans = {
+    tab_id: tab && tab.id,
+    remaining: [...browser.tabs.keys()],
+  };
+}
+
 async function scenarioTransientTab() {
   const browser = makeBrowser([]);
   const context = load(browser);
+  // The extension warms its work tab when it connects (that is what keeps the window
+  // creation off the action path), so let that settle and then start from an empty browser:
+  // this scenario drives the two-`goto` flow from scratch on purpose.
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  browser.tabs.clear();
+  browser.local.clear();
+  browser.requests.length = 0;
   const replies = [];
   const channel = { postMessage: (payload) => replies.push(payload) };
 
@@ -194,7 +289,12 @@ async function scenarioTransientTab() {
   // Which tab ended up bound for later actions (a search must land there, not in the
   // user's own tab).
   const work = await context.workTab(DOMAINS);
-  observations.work_tab = { id: work && work.id, url: work && work.url };
+  observations.work_tab = {
+    id: work && work.id,
+    url: work && work.url,
+    window_id: work && work.windowId,
+    pinned: Boolean(browser.tabs.get(work.id) && browser.tabs.get(work.id).pinned),
+  };
 }
 
 (async () => {
@@ -205,6 +305,8 @@ async function scenarioTransientTab() {
   try {
     await scenarioAdoption();
     await scenarioFallback();
+    await scenarioAfterReload();
+    await scenarioStaleOwnedTabs();
     await scenarioTransientTab();
   } catch (error) {
     observations.error = String((error && error.message) || error);
