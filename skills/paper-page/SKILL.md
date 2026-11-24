@@ -43,10 +43,17 @@ Get-ChildItem <目录> -Filter *.html     # 或 *.mhtml
 
 ### 2. 转换
 
+**优先用工具，不要开 shell**（2026-11-24 实测：shell 的授权预置失败过一次，整条链路在白抓页面之后断掉）：
+
+```
+page2md(mhtml_path="<page_read 或 snapshot 返回的 mhtml_path>", out_dir="<可选>")
+```
+
+它跑在 MCP 服务进程里，**0 额度**，返回 `page_md` / `index_json` / `engine` / `warnings`。
+只有在没有 MCP 工具可用时，才用命令行等价物：
+
 ```powershell
-D:\Python\DeepSeek\DateWork\scholar-search\work\tools\.venv\Scripts\python.exe `
-  D:\Python\DeepSeek\DateWork\scholar-search\tools\page2md.py `
-  --in "<页面>.html" --out "%LOCALAPPDATA%\scholar-search\pages\<slug>"
+wensu page2md --in "<页面>.html" --out "%LOCALAPPDATA%\scholar-search\pages\<slug>"
 ```
 
 输出目录里：
@@ -74,6 +81,12 @@ D:\Python\DeepSeek\DateWork\scholar-search\work\tools\.venv\Scripts\python.exe `
 
 ## 遇到人机验证 / 登录墙 / 拿到摘要页
 
+- `page_read` 返回 `status: "blocked"`（例如 Cloudflare 的「请稍候…」）：**这一次导航已经把
+  标签页带到验证页**，所以正确的顺序是
+  1. 请用户在那个浏览器窗口里过验证（一次点击），**不要自己重试 `page_read`** —— 再调一次会把
+     已经抓到的正文导航回验证页（2026-11-24 实测，报告 D1/D2）；
+  2. 用户确认后调 `snapshot`（0 额度）抓当前页；
+  3. 再 `page2md` 转 Markdown。
 - `snapshot` 的返回里若出现 `status: "blocked"` 或 `code: "RISK_CAPTCHA"`，说明当前标签页
   正显示验证码或人机验证：**存下来的是验证页，不是论文**。此时：
   1. **不要重试**、不要刷新、不要点页面上的任何东西（ADR 0004：遇风控即停）；
