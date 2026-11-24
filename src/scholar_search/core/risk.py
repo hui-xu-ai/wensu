@@ -31,7 +31,7 @@ VERIFY_URL_MARKERS: tuple[str, ...] = (
 RISK_TITLE_MARKERS: tuple[str, ...] = (
     # Cloudflare's interstitial. These were missing, and that is the whole reason a 73 KB
     # wall was captured as if it were an article: `inspect()` found nothing suspicious in
-    # the `goto` outcome, so the plan went on to sleep and snapshots (measured 2026-11-24 on
+    # the `goto` outcome, so the plan went on to sleep and snapshot (measured 2026-11-24 on
     # Wiley: title 「请稍候…」, `headings: 0`, `signal: body:ray id` only after the fact).
     "just a moment",
     "请稍候",

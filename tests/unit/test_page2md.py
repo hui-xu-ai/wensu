@@ -1,5 +1,4 @@
 """`scholar_search/page2md.py` 的单元测试。
-
 夹具全部是**自造的极简 HTML**，不含任何出版商内容（AGENTS.md：fixture 必须脱敏）。
 不依赖 trafilatura：`_extract_body` 内部才 import 它，测试里只调纯 lxml 的部分。
 
