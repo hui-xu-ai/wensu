@@ -42,32 +42,34 @@ def test_page_read_stops_at_the_wall_and_captures_nothing(tmp_path: Path) -> Non
     result = service.read_page(doi=DOI)
 
     assert result["status"] == "blocked", result
-    # The wall is named by the risk rules (a gate title), so the answer carries the signal
-    # and the cooldown ADR 0004 requires — not just a friendly message.
+    # The wall is named by the risk rules (a gate title), so the answer carries the signal —
+    # and no cooldown, because a click clears it (ADR 0022).
     assert result["signal"], result
-    assert result.get("cooldown_until"), result
+    assert not result.get("cooldown_until"), result
+    assert "reset" not in (result.get("advice") or ""), result
     assert result["mhtml_path"] is None, result
     assert result["quota_charged"] == 1, result
     assert "snapshot" in result["next"]
     assert not list(tmp_path.rglob("page.mhtml")), "a wall must not be saved as a page"
 
 
-def test_a_blocked_wall_cools_the_page_channel_down(tmp_path: Path) -> None:
-    """ADR 0004: a risk signal stops traffic, not just the current plan.
+def test_a_wall_stops_the_plan_without_cooling_anything_down(tmp_path: Path) -> None:
+    """A verification wall is expected traffic, not abuse (ADR 0022).
 
-    The second call answers `blocked` without navigating: the empty second script would make
-    any action raise, so reaching the assertion proves nothing was executed.
+    The second `page_read` runs: its script is consumed, so "no cooldown" is proven by the
+    fact that a navigation was attempted rather than refused.
     """
 
     from test_page_read import build_service
 
-    service = build_service(tmp_path, [_goto("Just a moment..."), []])
+    service = build_service(tmp_path, [_goto("Just a moment..."), _goto("请稍候…")])
     service.read_page(doi=DOI)
 
     again = service.read_page(doi=DOI)
 
     assert again["status"] == "blocked", again
-    assert again.get("cooldown_until"), again
+    assert not again.get("cooldown_until"), again
+    assert again["quota_charged"] == 1, again
 
 
 def _snapshot_reply(blob: bytes, title: str, *, captcha: bool) -> dict[str, object]:
@@ -100,8 +102,8 @@ def test_snapshot_refuses_to_save_a_wall(tmp_path: Path) -> None:
     assert not list(tmp_path.rglob("page.mhtml")), "a wall must not reach the disk"
 
 
-def test_snapshot_still_works_while_the_page_channel_cools_down(tmp_path: Path) -> None:
-    """The recovery path is "solve it, then snapshot" — a cooldown must not close it."""
+def test_snapshot_still_works_after_a_wall(tmp_path: Path) -> None:
+    """The recovery path is "solve it, then snapshot" — nothing may close it."""
 
     from test_page_read import build_service
 

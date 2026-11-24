@@ -61,7 +61,7 @@ class AuditLog:
             fields["error"] = error[:120]
         self.write("action", **fields)
 
-    def risk(self, *, channel: str, signal: str, cooldown_until: str) -> None:
+    def risk(self, *, channel: str, signal: str, cooldown_until: str | None) -> None:
         self.write(
             "risk",
             channel=channel,

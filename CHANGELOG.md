@@ -6,23 +6,33 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed — a verification wall stops the plan but no longer cools the tool down (ADR 0022)
+
+ADR 0004 cooled everything for 24 h on any risk signal. With page reading (ADR 0019) that turned
+one expected event — Cloudflare asking a human to click once — into a day of downtime for the
+whole tool, including unrelated CNKI/Web of Science searching, and it closed the very recovery
+path it left open: `snapshot` also consulted the guard, so "solve it, then snapshot" was
+refused. Now the reaction depends on the signal: a `captcha`/`verify_redirect` on a `page:*`
+plan stops the plan, writes an audit entry with `cooldown_until: null` and returns `blocked`
+with advice to solve it and call `snapshot`; `http_403`, `rate_limited`, `login_redirect` and
+`text_marker` still cool down 24 h, because those do mean "stop coming back".
+
 ### Fixed — the risk rules now name Cloudflare's interstitial
 
 The root cause of the wall being captured was here, not in `page_read`: `RISK_TITLE_MARKERS`
 held 安全验证 / 验证中心 / sign in / access denied, but not 「请稍候」 or `Just a moment`, so
 `inspect()` saw nothing wrong in the `goto` outcome and the plan continued to sleep and
 snapshot. With those titles listed, the wall trips inside the navigation action: the planner
-stops before the next action, ADR 0004's cooldown is written, and `page_read` answers
-`blocked` (with `signal` and `cooldown_until`) without ever capturing anything.
+stops before the next action and `page_read` answers `blocked` (with `signal`) without ever
+capturing anything.
 
-### Fixed — `snapshot` refuses to save a wall, and a cooldown cannot close the recovery path
+### Fixed — `snapshot` refuses to save a wall, and nothing may close the recovery path
 
 `snapshot` wrote the file *before* checking, so a challenge page was persisted as if it were
 an article. The check now runs first: on a wall it answers `blocked`, reports
 `discarded_bytes`, and writes nothing. It also no longer asks the risk guard for permission
-first — it issues no request to any site (ADR 0018), so "solve it in the browser, then
-snapshot" keeps working during the 24 h cooldown that `page_read` just triggered. Both tools
-now turn a `RiskBlocked` into a payload instead of an MCP error.
+first — it issues no request to any site (ADR 0018). Both tools turn a `RiskBlocked` into a
+payload instead of an MCP error.
 
 ### Added — the "no bulk text in answers" budget is a test
 

@@ -13,11 +13,28 @@ from dataclasses import dataclass
 from urllib.parse import urlparse
 
 from .audit import AuditLog
-from .contracts import Action, ActionOutcome, BrowserAdapter, ChannelManifest, Plan
-from .errors import PolicyError
+from .contracts import (
+    Action,
+    ActionOutcome,
+    BrowserAdapter,
+    ChannelManifest,
+    Plan,
+    RiskSignal,
+)
+from .errors import PolicyError, RiskBlocked
 from .locking import interprocess_lock
 from .policy import NETWORK_VERBS, PolicyEngine
 from .risk import RiskGuard
+
+# Signals a person can clear in seconds, and which a publisher serves to any automated
+# browser. Stopping the plan is right; cooling the whole tool down is not (ADR 0022).
+_SOFT_SIGNALS = frozenset({RiskSignal.CAPTCHA, RiskSignal.VERIFY_REDIRECT})
+
+
+def _stops_without_cooldown(channel: str, signal: RiskSignal) -> bool:
+    """A page read that meets a wall stops there — no cooldown, just ask the person."""
+
+    return channel.startswith("page:") and signal in _SOFT_SIGNALS
 
 
 def _risk_reason(signal: object, action: Action, outcome: ActionOutcome) -> str:
@@ -99,6 +116,21 @@ class Planner:
 
             signal = self.risk.inspect(outcome)
             if signal is not None:
+                if _stops_without_cooldown(plan.channel, signal):
+                    # A publisher's verification wall: stop the plan, save nothing, and let
+                    # the person click through it. Cooling the machine down for a day would
+                    # turn one click into an outage (ADR 0022) — and the wall is expected
+                    # traffic, not abuse.
+                    self.audit.risk(
+                        channel=plan.channel,
+                        signal=signal.value,
+                        cooldown_until=None,
+                    )
+                    raise RiskBlocked(
+                        _risk_reason(signal, action, outcome),
+                        signal=signal.value,
+                        cooldown_until=None,
+                    )
                 blocked = self.risk.trip(signal, _risk_reason(signal, action, outcome))
                 self.audit.risk(
                     channel=plan.channel,

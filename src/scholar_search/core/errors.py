@@ -56,22 +56,34 @@ class ActionError(ScholarSearchError):
 
 
 class RiskBlocked(ScholarSearchError):
-    """A risk signal was detected; execution stops immediately."""
+    """A risk signal was detected; execution stops immediately.
 
-    def __init__(self, message: str, *, signal: str, cooldown_until: str) -> None:
+    `cooldown_until` is None when the stop carries no cooldown — a publisher's verification
+    wall is solved by the person in front of the browser in seconds, so punishing the machine
+    for a day is the wrong reaction (ADR 0022). Signals that mean abuse or a broken session
+    still carry the 24 h cooldown from ADR 0004.
+    """
+
+    def __init__(self, message: str, *, signal: str, cooldown_until: str | None = None) -> None:
         super().__init__(message)
         self.signal = signal
         self.cooldown_until = cooldown_until
 
     def to_payload(self) -> dict[str, str]:
-        payload = {
+        payload: dict[str, str] = {
             "status": "blocked",
             "signal": self.signal,
-            "cooldown_until": self.cooldown_until,
             "action_required": "manual_verification",
         }
+        if self.cooldown_until is not None:
+            payload["cooldown_until"] = self.cooldown_until
         advice = _RISK_ADVICE.get(self.signal)
         if advice is not None:
+            # Only a stop that cools down has an escape hatch worth naming, and only for the
+            # signals a person can actually clear: a 403 is not fixed by signing in, so it
+            # must not be told to `reset` (ADR 0022 keeps the wall advice cooldown-free).
+            if self.cooldown_until is not None and self.signal in _CLEARABLE_SIGNALS:
+                advice = f"{advice} After solving it, run `wensu reset --confirm`."
             payload["advice"] = advice
         return payload
 
@@ -81,6 +93,9 @@ class RiskBlocked(ScholarSearchError):
 # three of the four: a captcha is solved in seconds, and an expired session is signed
 # back in. Waiting a day fixes neither, and the way out — `reset --confirm` — was never
 # mentioned anywhere the caller could see.
+# Signals a person clears by acting in the browser (sign in, tick the box). Only these get
+# the reset exit named, and only when a cool-down was actually written.
+_CLEARABLE_SIGNALS = frozenset({"captcha", "verify_redirect", "login_redirect"})
 _RISK_ADVICE: dict[str, str] = {
     "login_redirect": (
         "The browser profile's session ended: the site sent the tab to a sign-in URL. "
@@ -89,12 +104,13 @@ _RISK_ADVICE: dict[str, str] = {
         "the network, only with the session."
     ),
     "captcha": (
-        "Solve the captcha in that browser window, then run `wensu reset --confirm`. "
-        "Never automate it, and do not retry before solving it."
+        "Solve the captcha in that browser window yourself. Never automate it, and do not "
+        "retry before solving it — the tool stops at the wall instead of pushing through."
     ),
     "verify_redirect": (
-        "The site asked for account verification. Complete it in the browser window, "
-        "then run `wensu reset --confirm`."
+        "The site asked for a human check (a verification wall). Complete it in that browser "
+        "window, then call `snapshot` for the page now on screen — no cooldown applies here, "
+        "because this is expected traffic rather than abuse (ADR 0022)."
     ),
     "http_403": (
         "The site refused the request with 403. Stop for the day; retrying, changing "
