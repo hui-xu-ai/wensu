@@ -6,6 +6,15 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — `total == limit` no longer needs a second search to interpret
+
+Web of Science's page path reports the number it returned as `total`, so "the site has exactly
+this many" and "cut at my own limit" looked identical; one caller spent a second search — 8
+quota points and a whole cycle — resolving that doubt (2026-11-24 report, D4). Every search
+answer now carries `returned` (what it actually holds) and `truncated` ("you got exactly what
+you asked for, so there may be more"), and a `records_from`/`records_to` range reports
+`truncated: false` because its size is part of its contract.
+
 ### Fixed — `page_read` no longer navigates the same article twice
 
 Re-navigating is what replaced a good capture with a challenge page (2026-11-24 report,

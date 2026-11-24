@@ -347,6 +347,15 @@ class SearchPage:
     # zero-result search gives the caller nothing to diagnose: the query it sent is
     # not the query that ran.
     query_effective: str | None = None
+    # How many records this answer carries, and whether the request stopped at its own
+    # `limit`. Web of Science's page path reports the number it returned as `total`, so
+    # `total == limit` cannot distinguish "the site has exactly this many" from "cut at the
+    # limit" — a caller spent a second search (8 quota points, a whole cycle) resolving
+    # that doubt (2026-11-24 report, D4). `truncated` says "you got exactly what you asked
+    # for, so there may be more"; a range request (`records_from`/`records_to`) is not
+    # truncated by definition and reports False.
+    returned: int = 0
+    truncated: bool = False
 
 
 # --------------------------------------------------------------------------

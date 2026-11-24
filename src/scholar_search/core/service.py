@@ -1619,7 +1619,13 @@ def _present(page: SearchPage, query: SearchQuery) -> SearchPage:
             page = replace(page, empty_reason="all_dropped_by_year")
         elif dropped_filter:
             page = replace(page, empty_reason="all_dropped_by_filter")
-    return page
+    return replace(
+        page,
+        returned=len(records),
+        truncated=bool(
+            query.records_span is None and page.total is not None and len(records) >= query.limit
+        ),
+    )
 
 
 def _click_landing(outcomes: Sequence[ActionOutcome]) -> tuple[str | None, bool]:
