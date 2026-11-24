@@ -4,7 +4,8 @@
 的依赖，并通过 `cordis.patch.yml` 插入一条 MCP 客户端实例。
 
 装好之后 agent 会拿到七个工具：`search` / `detail` / `detail_many` / `export` / `page_read` / `snapshot` / `status`，覆盖**知网**与
-**Web of Science** 两个渠道，WoS 记录自带期刊影响因子。不下载全文，只出题录。
+**Web of Science** 两个渠道，WoS 记录自带期刊影响因子。查库只出题录；要读正文就 `page_read` 在你已登录的浏览器里打开整篇，
+再 `wensu page2md` 转成每节要点/关键句/带原句数据的 Markdown。**不下载 PDF**。
 
 ## 版本对照
 
@@ -78,12 +79,15 @@ wensu status       # bridge_ready: true 才表示整条链路通了
 - `mcp__wensu__detail`
 - `mcp__wensu__detail_many`
 - `mcp__wensu__export`
+- `mcp__wensu__page_read`
+- `mcp__wensu__snapshot`
 - `mcp__wensu__status`
 
 ## 验证
 
 重启后调用 `mcp__wensu__status`。返回 `bridge_ready: true` 即表示 MCP 客户端已启动并能
-连到浏览器宿主。
+连到浏览器宿主；`brief` 现在也带 `extension_version` 与 `extension_version_mismatch`——
+两者同时对上，才说明"你更新的那份"就是"正在跑的那份"。
 
 ## 卸载/回滚
 

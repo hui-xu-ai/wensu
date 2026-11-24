@@ -46,7 +46,7 @@
               records_from=1, records_to=150, min_impact_factor=6)
 2) 筛  detail(url=…, include_abstract=True)          # 只读摘要，决定读哪三篇
 3) 读  page_read(doi="10.1038/s41586-020-2649-2")     # → page.mhtml
-       python tools/page2md.py page.mhtml             # → page.md + index.json（文献地图）
+       wensu page2md --in page.mhtml --out out            # → page.md + index.json（文献地图）
 4) 引  export(records=…, format="ris")                # 手动导入 Zotero / EndNote
 ```
 
@@ -63,7 +63,7 @@
   不再靠"排除已读"反复重检
 - **排序**：相关度 / 发表时间降序 / 被引降序；WoS 还带影响因子，可在本地筛选排序
 
-**读 · 全文精读**（`page_read` + `tools/page2md.py`）
+**读 · 全文精读**（`page_read` + `wensu page2md` 子命令）
 
 - **打开页面**：`page_read(doi=…)` 在浏览器里直接打开文章地址，存成 `<home>/pages/<slug>/page.mhtml`，
   并给出 `status`（`ok` / `no_html` / `unsupported_site` / `blocked`）与原因
@@ -126,7 +126,7 @@ MCP 客户端 ──stdio / HTTP──▶ MCP server
                                                         ▼
                       内核写盘 <home>/pages/<slug>/page.mhtml
                                                         │
-                    tools/page2md.py ──▶ page.md + index.json（文献地图）
+                    wensu page2md ──▶ page.md + index.json（文献地图）
 ```
 
 你不需要开调试端口，也不需要交出浏览器控制权。
@@ -290,7 +290,7 @@ wensu setup            # 刷新资源副本 + 重写宿主清单与注册表项
 | **WoS 影响因子** | 通过（记录自带 `impact_factor`，本地筛选/排序零请求） |
 | **WoS 摘要按需取** | 通过（检索时播种缓存，`detail` 零网络动作） |
 | **文献通读 `page_read`** | 通过（Nature `10.1038/s41586-020-2649-2` → `ok`；遇到人机校验 → `blocked`/`challenge`，不重试、不绕过） |
-| **文献地图 `tools/page2md.py`** | 通过（`page.md` 全文 + `index.json` 地图，约原文体积的 45%，验收 9/10） |
+| **文献地图 `wensu page2md`** | 通过（`page.md` 全文 + `index.json` 地图，约原文体积的 45%，验收 9/10） |
 
 ## 检索失败了？先看这三条
 

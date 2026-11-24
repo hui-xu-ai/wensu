@@ -6,6 +6,51 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed — the bundle's own metadata described a smaller tool than it is
+
+`packages/dsh-wensu/package.json` still said "read-only … bibliographic search", and its
+README called itself seven tools while listing five and ending with "不下载全文，只出题录" —
+a sentence that stopped being true when `page_read` + `page2md` landed. Both now name the
+full-text path (`page_read` in the signed-in browser, `wensu page2md` for the Markdown) and
+list all seven tool ids. npm metadata is immutable per version, so this text ships with the
+next `pnpm publish`, not with the current 0.14.2 listing.
+
+### Fixed — `status(brief)` hid the one field that answers "which build is this"
+
+`brief` is the cheap payload a planning caller reads; it returned this package's version and
+said nothing about the copy the browser actually loads. On 2026-11-24 a machine answered
+`version: 0.13.2` while the market bundle and the extension were both 0.14.2: the guard
+(`extension_version_mismatch`) existed, but only in the ~500-token full payload, so the skew
+went unnoticed for a whole session. Both extension fields now ride along in `brief`, read
+once and shared with `browser_profile`. Pinned by a case in
+`tests/unit/test_extension_version_reported.py`.
+
+### Fixed — `page_read` pointed wheel users at a file they never received
+
+The hint said "run `tools/page2md.py`", a path that exists only in a source checkout: the
+wheel ships `src/scholar_search` and `tools/` is not in the sdist either, so every
+`pip install wensu` user was told to run something they did not have (2026-11-24).
+
+The converter moved to `src/scholar_search/page2md.py` and ships with the package;
+`wensu page2md --in <mhtml> --out <dir>` is the command, `tools/page2md.py` stays as a thin
+shim for the docs that still call it, and the hint now names the command. `mypy` keeps its
+25 pre-existing warnings via a `scholar_search.page2md` override — fixing them is its own
+change, and relocating a file must not turn the `types` gate red. Pinned by
+`tests/unit/test_page2md_cli.py` (CLI wiring, a real MHTML → `page.md`, and the hint text).
+
+### Fixed — the browser accumulated one work tab per extension reload
+
+`workTab()` remembered its tab in `storage.session`, which is emptied when the extension
+reloads, while the tab it named survives: every reload opened one more `about:blank` and
+nothing ever closed the old one. 2026-11-24, reported as the browser slowing down; visible
+in the tab strip rather than in the audit log, because opening a tab is not an action.
+
+The id now lives in `storage.local`; every tab this extension created is listed in
+`wensuOwnedTabs`; a forgotten id is adopted with the spares closed, so the count can only go
+down. The work tab also moved into a window of its own (`wensuWorkWindowId`, `focused: false`)
+and is pinned, so it no longer takes a slot in the user's tab strip. Pinned by
+`tests/js/tab_lifecycle_probe.js` and 11 cases in `tests/unit/test_extension_tab_lifecycle.py`.
+
 ## [0.14.2] - 2026-11-22
 
 ### Fixed — the CNKI record range lost records, then overshot, then failed on small sets
