@@ -29,6 +29,16 @@ VERIFY_URL_MARKERS: tuple[str, ...] = (
 # 数据主权" cost a whole day of cooldown for reading a paper. A title now has to be
 # one of these exactly, or start with one and continue with the site's own name.
 RISK_TITLE_MARKERS: tuple[str, ...] = (
+    # Cloudflare's interstitial. These were missing, and that is the whole reason a 73 KB
+    # wall was captured as if it were an article: `inspect()` found nothing suspicious in
+    # the `goto` outcome, so the plan went on to sleep and snapshots (measured 2026-11-24 on
+    # Wiley: title 「请稍候…」, `headings: 0`, `signal: body:ray id` only after the fact).
+    "just a moment",
+    "请稍候",
+    "verifying you are human",
+    "checking your browser",
+    "attention required",
+    "正在进行安全验证",
     "安全验证",
     "验证中心",
     "session expired",

@@ -843,7 +843,10 @@ def build_server(service: ScholarService) -> FastMCP:
         such rather than passed off as the article.
         """
 
-        return service.read_page(url=url, doi=doi)
+        try:
+            return service.read_page(url=url, doi=doi)
+        except (RiskBlocked, ScholarSearchError, OSError, ValueError) as error:
+            return _payload(error)
 
     @mcp.tool()
     def snapshot() -> dict[str, Any]:
@@ -859,7 +862,10 @@ def build_server(service: ScholarService) -> FastMCP:
         reports `bridge_ready`; a false value means the extension is not connected.
         """
 
-        return service.snapshot()
+        try:
+            return service.snapshot()
+        except (RiskBlocked, ScholarSearchError, OSError, ValueError) as error:
+            return _payload(error)
 
     @mcp.tool()
     def page2md(mhtml_path: str, out_dir: str = "") -> dict[str, Any]:

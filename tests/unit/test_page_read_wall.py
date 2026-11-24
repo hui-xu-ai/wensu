@@ -42,15 +42,90 @@ def test_page_read_stops_at_the_wall_and_captures_nothing(tmp_path: Path) -> Non
     result = service.read_page(doi=DOI)
 
     assert result["status"] == "blocked", result
-    assert result["signal"] == "title:请稍候", result
+    # The wall is named by the risk rules (a gate title), so the answer carries the signal
+    # and the cooldown ADR 0004 requires — not just a friendly message.
+    assert result["signal"], result
+    assert result.get("cooldown_until"), result
     assert result["mhtml_path"] is None, result
     assert result["quota_charged"] == 1, result
     assert "snapshot" in result["next"]
     assert not list(tmp_path.rglob("page.mhtml")), "a wall must not be saved as a page"
 
 
+def test_a_blocked_wall_cools_the_page_channel_down(tmp_path: Path) -> None:
+    """ADR 0004: a risk signal stops traffic, not just the current plan.
+
+    The second call answers `blocked` without navigating: the empty second script would make
+    any action raise, so reaching the assertion proves nothing was executed.
+    """
+
+    from test_page_read import build_service
+
+    service = build_service(tmp_path, [_goto("Just a moment..."), []])
+    service.read_page(doi=DOI)
+
+    again = service.read_page(doi=DOI)
+
+    assert again["status"] == "blocked", again
+    assert again.get("cooldown_until"), again
+
+
+def _snapshot_reply(blob: bytes, title: str, *, captcha: bool) -> dict[str, object]:
+    return {
+        "verb": "snapshot",
+        "data": {
+            "token": "t1",
+            "total": len(blob),
+            "base64": base64.b64encode(blob).decode("ascii"),
+            "url": URL,
+            "title": title,
+            "captcha_visible": captcha,
+        },
+    }
+
+
+def test_snapshot_refuses_to_save_a_wall(tmp_path: Path) -> None:
+    """`snapshot` is user-driven, so it does not cool down — but it must not save a wall."""
+
+    from test_page_read import build_service
+
+    blob = b"<html>please wait</html>"
+    service = build_service(tmp_path, [[_snapshot_reply(blob, "请稍候…", captcha=True)]])
+
+    result = service.snapshot()
+
+    assert result["status"] == "blocked", result
+    assert result["path"] is None, result
+    assert result["bytes"] == 0 and result["discarded_bytes"] == len(blob), result
+    assert not list(tmp_path.rglob("page.mhtml")), "a wall must not reach the disk"
+
+
+def test_snapshot_still_works_while_the_page_channel_cools_down(tmp_path: Path) -> None:
+    """The recovery path is "solve it, then snapshot" — a cooldown must not close it."""
+
+    from test_page_read import build_service
+
+    html = (
+        "<html><body><article><h1>A paper</h1><section id='s1'>"
+        "<h2>1. Introduction</h2><p>Body text.</p></section></article></body></html>"
+    )
+    service = build_service(
+        tmp_path,
+        [
+            _goto("请稍候…"),
+            [_snapshot_reply(html.encode("utf-8"), "Directional Confinement", captcha=False)],
+        ],
+    )
+    assert service.read_page(doi=DOI)["status"] == "blocked"
+
+    result = service.snapshot()
+
+    assert result.get("status") != "blocked", result
+    assert result["path"], result
+    assert Path(result["path"]).is_file()
+
+
 def test_an_ordinary_page_still_goes_through_the_capture(tmp_path: Path) -> None:
-    """The wall check must not skip the capture for a normal article page."""
 
     from test_page_read import build_service
 

@@ -33,7 +33,14 @@ from .contracts import (
     SearchPage,
     SearchQuery,
 )
-from .errors import ActionError, ChannelError, ParseError, PolicyError, ScholarSearchError
+from .errors import (
+    ActionError,
+    ChannelError,
+    ParseError,
+    PolicyError,
+    RiskBlocked,
+    ScholarSearchError,
+)
 from .export import to_csv, to_endnote, to_markdown, to_ris
 from .locking import interprocess_lock
 from .pageprobe import challenge_in_title, classify_mhtml
@@ -755,17 +762,33 @@ class ScholarService:
         # else may happen at all: on a wall (ADR 0004) the tool must not sleep, capture or
         # look again. The title arrives with the `goto` reply, so this check is free.
         with self._browser_transaction():
-            outcomes = self._run(
-                Plan(
-                    channel=f"page:{publisher.name}",
-                    purpose="detail",
-                    actions=(
-                        # A deep link: the article URL is opened as given.
-                        Action("goto", {"url": target}),
+            try:
+                outcomes = self._run(
+                    Plan(
+                        channel=f"page:{publisher.name}",
+                        purpose="detail",
+                        actions=(
+                            # A deep link: the article URL is opened as given.
+                            Action("goto", {"url": target}),
+                        ),
                     ),
-                ),
-                spec,
-            )
+                    spec,
+                )
+            except RiskBlocked as blocked:
+                # The wall was named by the `goto` outcome itself (gate title / captcha /
+                # verify redirect), so the planner stopped before the next action: nothing
+                # was captured, nothing was written (ADR 0004).
+                return {
+                    **blocked.to_payload(),
+                    "doi": identifier,
+                    "publisher": publisher.name,
+                    "final_url": target,
+                    "mhtml_path": None,
+                    "bytes": 0,
+                    # The navigation itself ran and was charged; the capture never did.
+                    "quota_charged": 1,
+                    "next": _page_next({"status": "blocked", "reason": "challenge"}),
+                }
             final_url = outcomes[-1].url or target
             wall_title = ""
             for outcome in outcomes:
@@ -824,15 +847,16 @@ class ScholarService:
             readable = Path(str(saved.get("path") or ""))
             if saved.get("status") == "blocked" or probe.get("status") == "blocked":
                 # The site asked for a person (extension-level challenge or the probe's own
-                # marker match). Nothing more may be fetched; the two navigations are what
-                # the quota paid for, so report that honestly rather than 0.
+                # marker match). Nothing more may be fetched; the captured bytes were
+                # discarded by `_snapshot_locked`, so there is no file to point at.
+                stored = saved.get("path")
                 return {
                     **(probe if probe.get("status") == "blocked" else {}),
                     **saved,
                     "doi": identifier,
                     "publisher": publisher.name,
                     "final_url": final_url,
-                    "mhtml_path": str(readable),
+                    "mhtml_path": str(stored) if stored else None,
                     "quota_charged": PAGE_READ_QUOTA,
                     "next": _page_next({"status": "blocked", "reason": "challenge"}),
                 }
@@ -961,7 +985,6 @@ class ScholarService:
         never completes (ADR 0018, amendment 2).
         """
 
-        self._ensure_ready()
         self._ensure_bridge()
         adapter = self._transaction_adapter()
         action = Action("snapshot", {"tab": tab}) if tab != "active" else Action("snapshot")
@@ -979,6 +1002,28 @@ class ScholarService:
             "title": str(data.get("title") or ""),
         }
         payload = self._collect_chunks(adapter, data)
+        # A wall is decided here, before the bytes reach the disk: saving one would leave a
+        # file that looks like an article, overwrite nothing useful, and invite a caller to
+        # convert 73 KB of "please wait" into Markdown (2026-11-24, report D1/D2).
+        wall = data.get("captcha_visible") is True or challenge_in_title(meta["title"])
+        if wall:
+            marker = challenge_in_title(meta["title"]) or "captcha_visible"
+            return {
+                "status": "blocked",
+                "reason": "challenge",
+                "signal": f"title:{marker}" if marker != "captcha_visible" else marker,
+                "code": "RISK_CAPTCHA",
+                "retryable": False,
+                "path": None,
+                "bytes": 0,
+                "discarded_bytes": len(payload),
+                **meta,
+                "hint": (
+                    "the tab is showing a human-verification challenge, so nothing was "
+                    "saved: solve it in the browser yourself, then ask again — do not retry "
+                    "automatically."
+                ),
+            }
         stored = self._write_page(payload, meta)
 
         result: dict[str, Any] = {
@@ -986,21 +1031,6 @@ class ScholarService:
             "bytes": len(payload),
             **meta,
         }
-        # A human-verification wall is the one page this verb must not hand back as if it
-        # were the article. Nothing was automated here — the user is looking at their own
-        # tab — so the 24 h cooldown in ADR 0004 does not apply and no retry is invited;
-        # the honest answer is "stop, and let the person solve it".
-        if data.get("captcha_visible") is True:
-            result.update(
-                status="blocked",
-                code="RISK_CAPTCHA",
-                retryable=False,
-                hint=(
-                    "the tab is showing a human-verification challenge, so the saved file "
-                    "is the challenge page and nothing was read. Solve it in the browser "
-                    "yourself, then ask again — do not retry automatically."
-                ),
-            )
         return result
 
     # -- internals ------------------------------------------------------
