@@ -843,7 +843,7 @@ def build_server(service: ScholarService) -> FastMCP:
         This is the "read this paper" entry point for pages outside the two channels:
         the user opens the article in the browser, `snapshot` writes
         `wensu-pages/<title> [<host>] <time>.mhtml` into the download folder, and
-        `wensu page2md --in <mhtml_path> --out <dir>` turns that file into Markdown.
+        `page2md` turns that file into Markdown.
 
         It issues no request of its own — it reads the tab that is already open — so it
         spends **no quota** and is not limited to the channel domains. `status` still
@@ -851,6 +851,22 @@ def build_server(service: ScholarService) -> FastMCP:
         """
 
         return service.snapshot()
+
+    @mcp.tool()
+    def page2md(mhtml_path: str, out_dir: str = "") -> dict[str, Any]:
+        """Turn a page saved by `page_read` or `snapshot` into Markdown an agent can read.
+
+        Runs **inside the server**: no command line, no permission to provision, **0
+        quota**. `out_dir` defaults to `md/` beside the saved page.
+
+        Answers `page_md` (full text with headings, tables and formulae), `index_json` (the
+        paper as a map: per-section points, key sentences, and each number with the sentence
+        it came from), plus `engine`, `math_engine` and `warnings`. Read `warnings` first —
+        they name the places where fidelity was lost (formulae that did not convert, images
+        that were missing), which is what should trigger "open the PDF" advice.
+        """
+
+        return service.page2md(mhtml_path=mhtml_path, out_dir=out_dir)
 
     @mcp.tool()
     def status(brief: bool = False) -> dict[str, Any]:

@@ -95,7 +95,7 @@ def _page_next(probe: dict[str, Any]) -> str:
     status = probe.get("status")
     reason = probe.get("reason")
     if status == "ok":
-        return "run `wensu page2md --in <mhtml_path> --out <dir>` to get Markdown"
+        return "call `page2md` with this `mhtml_path` (0 quota, runs inside the server)"
     if status == "blocked":
         return (
             "the publisher answered with a human-verification challenge: ask the user to "
@@ -802,6 +802,35 @@ class ScholarService:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(_strip_scripts(payload))
         return target
+
+    def page2md(self, *, mhtml_path: str, out_dir: str = "") -> dict[str, Any]:
+        """Turn a saved article page into Markdown: local, free, and no shell involved.
+
+        This is the last link of "read the paper", and it used to be a command line only —
+        so any session whose shell could not be provisioned lost the whole chain after the
+        page had already been captured (`docs/publishing.md` §2, 2026-11-24 report D3/D7).
+        The converter ships inside this package, so it can be called in-process.
+        """
+
+        from .. import page2md as converter
+
+        source = Path(mhtml_path).expanduser()
+        if not source.is_file():
+            raise FileNotFoundError(f"no such saved page: {source}")
+        if source.suffix.lower() not in {".html", ".htm", ".mhtml", ".mht"}:
+            raise ValueError("expected a saved .html or .mhtml page")
+        target = Path(out_dir).expanduser() if out_dir else source.parent / "md"
+        meta = converter.convert(source, target)
+        return {
+            "status": "ok",
+            "page_md": str(target / "page.md"),
+            "index_json": str(target / "index.json"),
+            "bytes_md": meta.get("bytes_md"),
+            "engine": meta.get("engine"),
+            "math_engine": meta.get("math_engine"),
+            "math_failed": meta.get("math_failed"),
+            "warnings": meta.get("warnings") or [],
+        }
 
     def snapshot(self) -> dict[str, Any]:
         """Save the page the user has open as MHTML, next to the other snapshots.

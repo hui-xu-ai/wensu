@@ -62,8 +62,10 @@ def test_page2md_turns_a_saved_page_into_markdown(tmp_path: Path) -> None:
     assert "Ionic transport decides" in text, text
 
 
-def test_the_hint_names_the_command_not_a_checkout_path() -> None:
+def test_the_hint_names_the_tool_not_a_checkout_path() -> None:
+    """The next step has to be something the caller can actually do."""
+
     hint = _page_next({"status": "ok"})
 
-    assert "wensu page2md" in hint, hint
+    assert "page2md" in hint, hint
     assert "tools/page2md.py" not in hint, hint

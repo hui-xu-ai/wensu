@@ -34,8 +34,10 @@ def schemas() -> dict[str, dict[str, Any]]:
     return _schemas()
 
 
-def test_the_seven_tools_are_advertised(schemas: dict[str, dict[str, Any]]) -> None:
+def test_the_eight_tools_are_advertised(schemas: dict[str, dict[str, Any]]) -> None:
     # `snapshot` is the sixth: it saves the open tab and spends no quota (ADR 0018).
+    # `page2md` is the eighth: it converts that capture in-process, so the last link of
+    # "read the paper" no longer needs a shell (2026-11-24).
     assert set(schemas) == {
         "search",
         "detail",
@@ -43,6 +45,7 @@ def test_the_seven_tools_are_advertised(schemas: dict[str, dict[str, Any]]) -> N
         "export",
         "page_read",
         "snapshot",
+        "page2md",
         "status",
     }
 

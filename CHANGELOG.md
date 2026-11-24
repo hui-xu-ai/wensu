@@ -6,6 +6,18 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — `page2md` is a tool, not a command line
+
+The last link of "read the paper" was a CLI call, so a session whose shell could not be
+provisioned lost the chain *after* the page had been captured — and, since the shell needs a
+workspace grant, it looked like the plugin demanding full access (2026-11-24 report, D3 + D7).
+`page2md(mhtml_path, out_dir)` now runs the converter inside the server: **0 quota**, no
+shell, no permission to provision. It answers `page_md`, `index_json`, `engine`,
+`math_engine` and `warnings`; `page_read`'s `next` names it instead of a command. The
+`paper-page` skill gained the same rule plus the order that actually works when a publisher
+challenges the browser: **never re-call `page_read`** — let the human solve it, then
+`snapshot`, then `page2md` (D1/D2).
+
 ### Changed — a formula can no longer inflate the Markdown
 
 `page2md`'s builtin MathML path fell back to the flattened text of the whole tree, so a

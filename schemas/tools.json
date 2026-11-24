@@ -453,7 +453,7 @@
     },
     {
       "name": "snapshot",
-      "description": "Save the page the user has open as MHTML — one file with its images and CSS.\n\nThis is the \"read this paper\" entry point for pages outside the two channels:\nthe user opens the article in the browser, `snapshot` writes\n`wensu-pages/<title> [<host>] <time>.mhtml` into the download folder, and\n`wensu page2md --in <mhtml_path> --out <dir>` turns that file into Markdown.\n\nIt issues no request of its own — it reads the tab that is already open — so it\nspends **no quota** and is not limited to the channel domains. `status` still\nreports `bridge_ready`; a false value means the extension is not connected.",
+      "description": "Save the page the user has open as MHTML — one file with its images and CSS.\n\nThis is the \"read this paper\" entry point for pages outside the two channels:\nthe user opens the article in the browser, `snapshot` writes\n`wensu-pages/<title> [<host>] <time>.mhtml` into the download folder, and\n`page2md` turns that file into Markdown.\n\nIt issues no request of its own — it reads the tab that is already open — so it\nspends **no quota** and is not limited to the channel domains. `status` still\nreports `bridge_ready`; a false value means the extension is not connected.",
       "inputSchema": {
         "properties": {},
         "title": "snapshotArguments",
@@ -463,6 +463,34 @@
       "outputSchema": {
         "additionalProperties": true,
         "title": "snapshotDictOutput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "page2md",
+      "description": "Turn a page saved by `page_read` or `snapshot` into Markdown an agent can read.\n\nRuns **inside the server**: no command line, no permission to provision, **0\nquota**. `out_dir` defaults to `md/` beside the saved page.\n\nAnswers `page_md` (full text with headings, tables and formulae), `index_json` (the\npaper as a map: per-section points, key sentences, and each number with the sentence\nit came from), plus `engine`, `math_engine` and `warnings`. Read `warnings` first —\nthey name the places where fidelity was lost (formulae that did not convert, images\nthat were missing), which is what should trigger \"open the PDF\" advice.",
+      "inputSchema": {
+        "properties": {
+          "mhtml_path": {
+            "title": "Mhtml Path",
+            "type": "string"
+          },
+          "out_dir": {
+            "default": "",
+            "title": "Out Dir",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mhtml_path"
+        ],
+        "title": "page2mdArguments",
+        "type": "object",
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "page2mdDictOutput",
         "type": "object"
       }
     },
