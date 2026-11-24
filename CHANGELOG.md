@@ -6,6 +6,34 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — after a wall, `page_read` reads the tab the reader is on
+
+A wall is now remembered for 30 minutes as a marker (no file, no capture). The next attempt for
+the same URL looks at the person's own tab first: if it already holds the article — they solved
+the challenge by hand — that capture is reused with `quota_charged: 0` and **no navigation**; if
+it is still the wall, the answer is `blocked` without touching the browser. A capture that turns
+out to be some other page is deleted rather than left behind. `snapshot` also stopped raising
+`policy.url_scheme` for a browser-internal tab: it answers `status: "no_page"` with a sentence a
+person can act on. `wensu doctor` reports `bridge_host` (endpoint, pid, alive) — reloading the
+extension restarts the native host on a new port, and "no native host is serving the profile"
+never said so.
+
+### Fixed — MathJax pages were reported as failing formulas
+
+`page2md` counted the empty MathML that MathJax keeps in `mjx-assistive-mml` for screen readers
+as real formulas, so a Wiley article said "6 formulas failed" while the Markdown could never
+contain a marker for any of them — nothing was there to convert (each node is
+`<math data-semantic-type="empty"/>`, and the drawn formula lives in `mjx-container` as an SVG).
+Those nodes are removed before counting, `mjx-container` is counted as `mathjax_graphics`, and
+the warning names the drawings ("look at the PDF") instead of a conversion failure.
+
+### Changed — `page2md` is type-checked like the rest of the package
+
+Its 25 pre-existing warnings are fixed (annotations on the lxml helpers, `Any` for the
+duck-typed meta dict, casts where a dict value is really an int), and the `ignore_errors`
+exemption in `pyproject.toml` is gone. Only third-party modules without stubs or without being
+installed (`lxml`, `trafilatura`, `markitdown`) keep `ignore_missing_imports`.
+
 ### Changed — WoS round trip: interval 1200 → 900 ms, shorter settles, smaller dwell
 
 Measured live (3 records, 7 charged actions): a round takes **44.8 s**, down from 48.2 s, and the
