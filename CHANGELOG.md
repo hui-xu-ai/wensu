@@ -6,6 +6,8 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.14.3] - 2026-11-24
+
 ### Changed — the bundle's own metadata described a smaller tool than it is
 
 `packages/dsh-wensu/package.json` still said "read-only … bibliographic search", and its
