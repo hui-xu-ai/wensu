@@ -363,7 +363,7 @@ class ScholarService:
                     # in microseconds (2026-11-24). Run the tail first instead: it waits for
                     # the result list, which is the site's own "the query ran" signal. If the
                     # page still is not a results route afterwards, the click did nothing.
-                    tail_outcomes = self._run(tail, spec)
+                    tail_outcomes = self._run_tail(channel, spec, tail)
                     proof = _last_url(tail_outcomes) or landed
                     if not is_results(proof):
                         raise ActionError(
@@ -383,13 +383,21 @@ class ScholarService:
                     self._cache.set(key, _page_to(empty))
                     return empty
             outcomes = heads + (
-                tail_outcomes if tail_outcomes is not None else self._run(tail, spec)
+                tail_outcomes if tail_outcomes is not None else self._run_tail(channel, spec, tail)
             )
         else:
             plan = channel.plan_search(query)
             try:
                 outcomes = self._run(plan, spec)
             except ActionError as error:
+                # Only a failure to see the *result list* can be the site refusing to run the
+                # query. A capture timeout has its own diagnostics probe and must keep it: an
+                # extra `read_text` here would spend the step that probe needs.
+                refusal, nothing_matched = (
+                    self._site_diagnosis(channel, spec)
+                    if error.stage == "wait.result-list"
+                    else (None, False)
+                )
                 # A record range asks for N pages; a result set smaller than the range has
                 # no next page, and the turn then fails with `not_found`. That is not a
                 # failed search: the first page is already on screen, so read it and answer
@@ -403,9 +411,14 @@ class ScholarService:
                         ),
                         spec,
                     )
-                # Channels without a splittable plan can still say "nothing matched"
-                # by their own wording; ask the page before calling it a failure.
-                elif self._looks_empty(channel, spec):
+                # Channels without a splittable plan can still say "nothing matched" — or
+                # "your expression is wrong" — in their own wording; ask the page once
+                # before calling it a failure.
+                elif refusal or nothing_matched:
+                    if refusal:
+                        raise ChannelError(
+                            f"the site refused this query (query.rejected): {refusal}"
+                        ) from None
                     empty = SearchPage(
                         records=(),
                         total=0,
@@ -1391,19 +1404,45 @@ class ScholarService:
                 self._pinned_adapter.close()
             self._pinned_adapter = None
 
-    def _looks_empty(self, impl: Channel, spec: ChannelSpec) -> bool:
-        """Ask the page whether the query matched nothing.
+    def _run_tail(self, impl: Channel, spec: ChannelSpec, tail: Plan) -> tuple[ActionOutcome, ...]:
+        """Run the part of a split plan that reads the result, translating a refusal.
 
-        Run only after a readiness wait timed out. A zero-result search sends no
-        data stream on either site, so the wait can never succeed — without this
-        probe every empty search surfaced as `wait_for failed: timeout`, which costs
-        quota and tells the caller nothing. `read_text` is not a network verb, so the
-        probe itself is free.
+        A bad expression is answered with an alert instead of a result list, so this wait can
+        only time out. The site says what is wrong in a sentence; reporting that is the
+        difference between "your expression is invalid" and "nothing happened" (measured
+        2026-11-24: `TS=(ionic OR electroactive) AND actuator` → 「布尔运算符的使用无效」).
         """
 
-        checker = getattr(impl, "is_empty_page", None)
-        if checker is None:
-            return False
+        try:
+            return self._run(tail, spec)
+        except ActionError as error:
+            # Only "the result list never appeared" can be the site refusing the query. An
+            # export that produced no file is a different failure with its own message, and it
+            # must not spend a step on a probe that cannot describe it.
+            if error.stage != "wait.result-list":
+                raise
+            refusal, _ = self._site_diagnosis(impl, spec)
+            if refusal is not None:
+                raise ChannelError(
+                    f"the site refused this query (query.rejected): {refusal}"
+                ) from None
+            raise
+
+    def _site_diagnosis(self, impl: Channel, spec: ChannelSpec) -> tuple[str | None, bool]:
+        """One free look at the page: was the expression refused, or did it match nothing?
+
+        Both answers need the same `read_text` (not a network verb, so free), and asking twice
+        would spend two actions on a failure path — the older tests caught exactly that.
+
+        * a refusal is the site's own sentence ("布尔运算符的使用无效…"); before this probe the
+          caller was told the result list never appeared, which is true and useless;
+        * "no results" is not a refusal: both render the same alert, so the wording decides.
+        """
+
+        refusal_checker = getattr(impl, "query_error", None)
+        empty_checker = getattr(impl, "is_empty_page", None)
+        if refusal_checker is None and empty_checker is None:
+            return (None, False)
         probe = Plan(
             channel=spec.name,
             purpose="probe",
@@ -1412,13 +1451,22 @@ class ScholarService:
         try:
             outcomes = self._run(probe, spec)
         except ActionError:
-            return False
+            return (None, False)
+        text = ""
         for outcome in outcomes:
             if outcome.action.verb == "read_text" and isinstance(outcome.data, dict):
-                text = outcome.data.get("text")
-                if isinstance(text, str) and checker(text):
-                    return True
-        return False
+                candidate = outcome.data.get("text")
+                if isinstance(candidate, str):
+                    text = candidate
+        if not text:
+            return (None, False)
+        if refusal_checker is not None:
+            message = refusal_checker(text)
+            if isinstance(message, str) and message.strip():
+                return (message.strip(), False)
+        if empty_checker is not None and empty_checker(text):
+            return (None, True)
+        return (None, False)
 
 
 # -- cache serialisation ---------------------------------------------------

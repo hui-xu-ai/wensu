@@ -26,7 +26,10 @@ const DEFAULT_DOMAINS = [  "kns.cnki.net",
 function downloadBudget(params) {
   const declared = Number(params && params.timeout_ms);
   const base = Number.isFinite(declared) && declared > 0 ? declared : 8_000;
-  return Math.min(Math.max(base - 3_000, 3_000), 14_000);
+  // 55 s, not 14: a 1000-record export file does not arrive inside the old ceiling, so the
+  // wait gave up and the caller was told "no file" for a download that was still coming
+  // (ADR 0024). Small exports still finish in a second or two — this is a ceiling, not a wait.
+  return Math.min(Math.max(base - 3_000, 3_000), 55_000);
 }
 
 function isBibtexDownload(item) {

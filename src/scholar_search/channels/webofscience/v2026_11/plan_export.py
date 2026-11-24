@@ -31,7 +31,11 @@ from .plan_search import (
 # The confirm click both submits and waits for the file, so its budget is the download
 # budget. `MAX_TIMEOUT_MS` caps one action at 15 s; the extension reserves what is left
 # after the click itself returns.
-EXPORT_TIMEOUT_MS = 15_000
+# A file of 500 records arrived inside 15 s (2026-11-22), which is why the range cap used to be
+# 500. Clarivate carries 1000 records per export and that file needs longer, so the click that
+# waits for it gets the download ceiling instead (ADR 0024). The wait ends when the file lands;
+# this is a ceiling, not a pause.
+EXPORT_TIMEOUT_MS = 55_000
 
 
 def _range_actions(query: SearchQuery) -> tuple[Action, ...]:

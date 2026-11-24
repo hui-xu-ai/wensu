@@ -34,6 +34,11 @@ class HardLimits:
     cooldown_hours: int = 24
     concurrency: int = 1
     max_actions_per_plan: int = 40
+    # Ordinary actions must answer inside 15 s. A click that waits for a *download* may wait
+    # longer: Clarivate will carry 1000 records in one file, and measured 2026-11-24 that file
+    # needs well past 15 s to arrive. Nothing else is allowed to run that long (ADR 0024).
+    max_action_ms: int = 15_000
+    max_download_ms: int = 60_000
     # Wall-clock ceiling for one plan, checked as the sum of every action's declared
     # timeout *before* the plan runs.
     #

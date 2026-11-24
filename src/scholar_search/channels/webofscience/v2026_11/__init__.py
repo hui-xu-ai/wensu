@@ -80,8 +80,10 @@ class _CaptureState:
 
 @dataclass
 class WebOfScienceChannel:
-    # The export dialog carries up to 1000 records; ours stops at 500 because the
-    # download has to arrive inside one action's 15 s budget (measured).
+    # 500, not the site's 1000: two 500-record exports are faster than one 1000-record file and
+    # far less likely to fail on the download, which is the failure mode that matters here
+    # (ADR 0024). The click that waits for a file has its own 55 s ceiling, so a slow
+    # 500-record export is not lost either. Going deeper is `records_from=501`.
     record_range_max = 500
     manifest: ChannelManifest
 
@@ -142,6 +144,10 @@ class WebOfScienceChannel:
     def is_empty_page(self, text: str) -> bool:
         """Whether the page itself says the query matched nothing."""
         return parse_records.is_empty_page(text)
+
+    def query_error(self, text: str) -> str | None:
+        """The site's own sentence when it refused the expression (not "no results")."""
+        return parse_records.query_error(text)
 
     def effective_query(self, query: SearchQuery) -> str:
         """The expression this channel will actually type.

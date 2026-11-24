@@ -68,8 +68,19 @@ def test_only_the_start_means_a_single_record() -> None:
 
 
 def test_a_span_over_the_site_cap_is_refused() -> None:
-    with pytest.raises(ValueError, match="at most 500"):
+    with pytest.raises(ValueError, match=f"at most {MAX_RECORDS}"):
         _query(records_from=1, records_to=MAX_RECORDS + 1).validate()
+
+
+def test_the_cap_stays_at_five_hundred() -> None:
+    """500, on purpose: two 500-record exports beat one 1000-record file (ADR 0024).
+
+    The site carries 1000 per file, but the failure mode that matters is the download, so the
+    smaller file wins even though the download click may now wait 55 s for it.
+    """
+
+    assert MAX_RECORDS == 500
+    _query(records_from=1, records_to=500).validate()
 
 
 def test_a_range_and_a_page_turn_are_alternatives() -> None:

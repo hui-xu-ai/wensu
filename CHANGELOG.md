@@ -6,6 +6,24 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — a refused search expression now says why
+
+Web of Science answers a bad expression with an alert instead of a result list, so the tool
+waited out its 15 s readiness budget and then reported "the result list never appeared".
+Measured 2026-11-24 with `TS=(ionic OR electroactive) AND actuator`: the site had already said
+「检索错误: 布尔运算符的使用无效。请检查您的检索式…」 and nothing read it. The failure path now takes
+one free look at the page (`read_text`, not a network action) and, when the alert is a refusal
+rather than a zero-result message, raises `ChannelError` quoting the site's own sentence
+(`query.rejected`). Zero-result pages keep their own wording, and a capture timeout keeps the
+diagnostics it already had.
+
+### Changed — waiting for a download got its own budget
+
+A click that waits for a file may now wait 55 s instead of 15 s. It is a ceiling, not a pause:
+the wait ends when the file lands. Every other action keeps the 15 s limit, and the record-range
+cap stays at **500** — two 500-record exports are faster than one 1000-record file and much less
+likely to fail on the download (ADR 0024).
+
 ### Added — after a wall, `page_read` reads the tab the reader is on
 
 A wall is now remembered for 30 minutes as a marker (no file, no capture). The next attempt for

@@ -137,7 +137,9 @@ def serve_client(
             except (TypeError, ValueError):
                 connection.sendall(b'{"ok":false,"error":"policy.params"}\n')
                 continue
-            if not 0 < timeout_ms <= 15_000:
+            # 60 s fits a click that waits for a 1000-record export file (ADR 0024); every
+            # other action is still capped at 15 s by the kernel and the params validator.
+            if not 0 < timeout_ms <= 60_000:
                 connection.sendall(b'{"ok":false,"error":"policy.deadline"}\n')
                 continue
             if not isinstance(action, str) or not isinstance(params, dict):

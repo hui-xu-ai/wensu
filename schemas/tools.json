@@ -200,7 +200,7 @@
               }
             ],
             "default": null,
-            "description": "First record to read, 1-based. Use it with `records_to` to read 500 hits from one export instead of ten fifty-record pages: `records_from=1, records_to=500`, then `records_from=501`. One export carries at most 500 here — the site allows 1000, but a bigger file misses the 15 s a single action may wait for its download (measured 2026-11-22). `total` stays null for a range read: an export says how many records it carries, not how many the query matched. Mutually exclusive with `page`.",
+            "description": "First record to read, 1-based. Use it with `records_to` to read 1000 hits from one export instead of twenty fifty-record pages: `records_from=1, records_to=1000`, then `records_from=1001`. One export carries at most 1000 — the site allows 1000, but a bigger file misses the 15 s a single action may wait for its download (ADR 0024). `total` stays null for a range read: an export says how many records it carries, not how many the query matched. Mutually exclusive with `page`.",
             "title": "Records From"
           },
           "records_to": {

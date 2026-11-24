@@ -141,7 +141,7 @@ def scroll_round() -> tuple[Action, ...]:
         Action("scroll", {"by": jitter(700, 1_300)}, timeout_ms=CLICK_TIMEOUT_MS),
         settle(jitter(150, 300)),
         Action("scroll", {"to": "bottom"}, timeout_ms=CLICK_TIMEOUT_MS),
-        settle(jitter(200, 350)),
+        settle(jitter(600, 900)),
         Action(
             "wait_for",
             {"selector": CAPTURE_READY, "timeout_ms": CAPTURE_WAIT_MS},

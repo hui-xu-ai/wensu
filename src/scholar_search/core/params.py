@@ -9,6 +9,10 @@ from __future__ import annotations
 from typing import Any
 
 MAX_TIMEOUT_MS = 15_000
+# A click that waits for a file is the one action allowed past the 15 s ceiling: Web of
+# Science will carry 1000 records in one export, and the file takes longer than that to
+# arrive (ADR 0024). Everything else stays at MAX_TIMEOUT_MS.
+MAX_DOWNLOAD_TIMEOUT_MS = 60_000
 # How much text one `type` action may carry.
 #
 # This is not a human-typing budget — `humanType` assigns `element.value` in a single
@@ -126,10 +130,11 @@ def validate_params(verb: str, params: Any) -> str | None:
             if params["wait_until"] not in CLICK_WAIT_UNTIL:
                 return "policy.params"
             budget = params.get("timeout_ms", 10_000)
+            ceiling = MAX_DOWNLOAD_TIMEOUT_MS if params.get("expect_download") else MAX_TIMEOUT_MS
             if (
                 not isinstance(budget, int)
                 or isinstance(budget, bool)
-                or not 0 <= budget <= MAX_TIMEOUT_MS
+                or not 0 <= budget <= ceiling
             ):
                 return "policy.params"
         if (

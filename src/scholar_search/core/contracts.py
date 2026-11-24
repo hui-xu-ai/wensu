@@ -116,10 +116,10 @@ MAX_LIMIT = 50
 # 500+ DOIs through the site, so length is not the constraint; this cap exists so a
 # single request cannot grow without bound as a caller accumulates pages.
 MAX_EXCLUDE_UT = 500
-# The site exports up to 1000 records for a full record (Clarivate support centre, "Limit
-# on exporting"). Ours stops at 500 because a bigger file does not arrive inside the 15 s
-# one action may wait for its download: measured 2026-11-22 — 500 records arrived, the
-# same query asking for 1000 produced no file at all. Going deeper is the next range.
+# The site exports up to 1000 records per file, but we stop at 500 on purpose: two 500-record
+# exports are faster than one of 1000 and far less likely to fail on the download (user's
+# measurement, 2026-11-24: what matters is the per-file size, not the total). "read the next
+# range instead" is the documented way to go deeper (ADR 0024).
 MAX_RECORDS = 500
 
 

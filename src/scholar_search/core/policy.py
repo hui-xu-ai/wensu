@@ -195,9 +195,14 @@ class PolicyEngine:
                 f"channel {manifest.channel!r} does not allow {action.verb!r}",
                 rule="verb.not_allowed",
             )
-        if action.timeout_ms < 0 or action.timeout_ms > 15_000:
+        ceiling = (
+            HARD.max_download_ms
+            if action.verb == "click" and action.params.get("expect_download")
+            else HARD.max_action_ms
+        )
+        if action.timeout_ms < 0 or action.timeout_ms > ceiling:
             raise PolicyError(
-                f"timeout {action.timeout_ms}ms is outside 0..15000",
+                f"timeout {action.timeout_ms}ms is outside 0..{ceiling}",
                 rule="action.timeout",
             )
 

@@ -44,6 +44,58 @@ EMPTY_MARKERS = (
     "found no records",
 )
 
+# The site answers a bad query with an alert instead of a result list. Two different things use
+# the same container (`role="alert" class="search-error"`): "your search found no results" and
+# a refusal of the expression itself. Measured 2026-11-24 with
+# `TS=(ionic OR electroactive) AND actuator` — the site said, in so many words,
+# 「检索错误: 布尔运算符的使用无效。请检查您的检索式…」, our plan waited 15 s for a result list
+# and then reported "click did not start a query". Reporting the site's own sentence costs
+# nothing and is the difference between "nothing happened" and "your expression is wrong".
+QUERY_ERROR_MARKERS: tuple[str, ...] = (
+    "检索错误",
+    "布尔运算符",
+    "请检查您的检索式",
+    "检索式有误",
+    "search error",
+    "invalid boolean",
+    "invalid query",
+    "query syntax",
+    "check your search query",
+    "your query contains",
+)
+
+
+def query_error(text: str) -> str | None:
+    """The site's own refusal message, when the expression itself was rejected.
+
+    `None` means "no refusal found" — either the page says the search matched nothing, or there
+    is nothing to report. A zero-result page must never be reported as a bad query: both use the
+    same alert, so the empty-result wording is checked first.
+    """
+
+    flat = " ".join(text.split())
+    if not flat:
+        return None
+    lowered = flat.casefold()
+    if any(marker in lowered for marker in EMPTY_MARKERS):
+        return None
+    for marker in QUERY_ERROR_MARKERS:
+        index = lowered.find(marker.casefold())
+        if index < 0:
+            continue
+        # Start at the marker and stop at the end of its sentence: the surrounding text is the
+        # search form's own labels ("Science 核心合集引文索引:All 字段检索 …"), and quoting them
+        # buries the sentence the person needs to read.
+        tail = flat[index:]
+        cut = len(tail)
+        for stop in ("。", "！", "!", "?", "！"):
+            position = tail.find(stop)
+            if 0 <= position < cut:
+                cut = position + 1
+        return tail[:cut].strip()[:200]
+    return None
+
+
 DETAIL_PREFIX = selectors.DETAIL_PREFIX
 
 # WoS document types are a small English vocabulary; anything outside it is
