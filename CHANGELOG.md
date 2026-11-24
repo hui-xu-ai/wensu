@@ -6,6 +6,16 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — `page_read` no longer navigates the same article twice
+
+Re-navigating is what replaced a good capture with a challenge page (2026-11-24 report,
+D1/D2), and it charged two quota points for a page already on disk. A successful capture is
+now remembered for an hour (`<home>/state/page-read.json`); asking again for the same URL
+answers from it with `cached: true` and `quota_charged: 0`, and a capture whose file has
+disappeared is not reused. The `blocked` hint also stopped advising the one action that makes
+it worse: it names `snapshot` + `page2md` and says, in as many words, not to call
+`page_read` again.
+
 ### Added — `page2md` is a tool, not a command line
 
 The last link of "read the paper" was a CLI call, so a session whose shell could not be

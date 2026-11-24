@@ -10,6 +10,7 @@ import base64
 import hashlib
 import json
 import re
+import time
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, suppress
 from dataclasses import replace
@@ -98,9 +99,10 @@ def _page_next(probe: dict[str, Any]) -> str:
         return "call `page2md` with this `mhtml_path` (0 quota, runs inside the server)"
     if status == "blocked":
         return (
-            "the publisher answered with a human-verification challenge: ask the user to "
-            "finish it in that browser window, then call page_read again. Do not retry by "
-            "yourself."
+            "the publisher challenged this browser, and this call has already navigated the "
+            "tab to the challenge page: ask the user to finish it in that window, then call "
+            "`snapshot` (0 quota) and `page2md`. Do NOT call page_read again — it re-navigates "
+            "and would replace a body that had already been captured."
         )
     if status == "no_html" and reason in {"paywall", "abstract_only"}:
         return (
@@ -652,6 +654,53 @@ class ScholarService:
             # Providers written before `brief` existed take no argument.
             return dict(provider())
 
+    # A captured article is reused for this long instead of navigating again. Re-navigating
+    # is what turned a good capture into a challenge page (2026-11-24 report, D1/D2), and it
+    # is also the only reason a second look at the same DOI cost another two quota points.
+    _PAGE_CACHE_TTL_S = 3600.0
+
+    def _page_cache_path(self) -> Path:
+        state_dir = Path(self._policy.state_dir) if self._policy else Path.cwd()
+        return state_dir / "page-read.json"
+
+    def _page_cache_get(self, url: str) -> dict[str, Any] | None:
+        """A capture of this URL that is still on disk and still fresh, if there is one."""
+
+        try:
+            payload = json.loads(self._page_cache_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        entry = payload.get(url) if isinstance(payload, dict) else None
+        if not isinstance(entry, dict):
+            return None
+        if not Path(str(entry.get("mhtml_path") or "")).is_file():
+            return None
+        if time.time() - float(entry.get("at") or 0.0) > self._PAGE_CACHE_TTL_S:
+            return None
+        return entry
+
+    def _page_cache_put(self, url: str, payload: dict[str, Any]) -> None:
+        """Best effort: a cache that cannot be written must never fail a read."""
+
+        target = self._page_cache_path()
+        try:
+            stored: dict[str, Any] = {}
+            if target.is_file():
+                existing = json.loads(target.read_text(encoding="utf-8"))
+                if isinstance(existing, dict):
+                    stored = existing
+            stored[url] = {
+                "mhtml_path": payload.get("mhtml_path"),
+                "bytes": payload.get("bytes"),
+                "headings": payload.get("headings"),
+                "title": payload.get("title"),
+                "at": time.time(),
+            }
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(json.dumps(stored, ensure_ascii=False, indent=2), encoding="utf-8")
+        except (OSError, ValueError):
+            return
+
     def read_page(self, *, url: str = "", doi: str = "") -> dict[str, Any]:
         """Open the article a reader asked for, then say what is on it.
 
@@ -682,6 +731,24 @@ class ScholarService:
             }
         if not target:
             target = f"https://doi.org/{identifier}"
+
+        cached = self._page_cache_get(target)
+        if cached is not None:
+            # Idempotent on purpose: the page is already on disk, so navigating again could
+            # only replace a good capture with whatever the publisher serves now.
+            return {
+                "status": "ok",
+                "cached": True,
+                "doi": identifier,
+                "publisher": publisher.name,
+                "final_url": target,
+                "mhtml_path": str(cached.get("mhtml_path") or ""),
+                "bytes": cached.get("bytes"),
+                "headings": cached.get("headings"),
+                "title": str(cached.get("title") or ""),
+                "quota_charged": 0,
+                "next": _page_next({"status": "ok"}),
+            }
 
         spec = _page_spec(publisher)
         plan = Plan(
@@ -732,7 +799,7 @@ class ScholarService:
                     "next": _page_next({"status": "blocked", "reason": "challenge"}),
                 }
 
-            return {
+            result = {
                 **probe,
                 "doi": identifier,
                 "publisher": publisher.name,
@@ -743,6 +810,9 @@ class ScholarService:
                 "quota_charged": PAGE_READ_QUOTA,
                 "next": _page_next(probe),
             }
+            if probe.get("status") == "ok":
+                self._page_cache_put(target, result)
+            return result
 
     def _collect_chunks(self, adapter: Any, first: dict[str, Any]) -> bytes:
         """Assemble the capture from base64 chunks the extension hands out on request."""
