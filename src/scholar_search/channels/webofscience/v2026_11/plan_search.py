@@ -139,9 +139,9 @@ def scroll_round() -> tuple[Action, ...]:
 
     return (
         Action("scroll", {"by": jitter(700, 1_300)}, timeout_ms=CLICK_TIMEOUT_MS),
-        settle(jitter(400, 900)),
+        settle(jitter(150, 300)),
         Action("scroll", {"to": "bottom"}, timeout_ms=CLICK_TIMEOUT_MS),
-        settle(jitter(1_400, 2_000)),
+        settle(jitter(200, 350)),
         Action(
             "wait_for",
             {"selector": CAPTURE_READY, "timeout_ms": CAPTURE_WAIT_MS},
@@ -167,7 +167,7 @@ def sort_actions(order: str, *, capture: bool = True) -> tuple[Action, ...]:
         Action("click", {"selector": SORT_OPEN}, timeout_ms=CLICK_TIMEOUT_MS),
         settle(jitter(700, 1_300)),
         Action("click", {"selector": selector}, timeout_ms=CLICK_TIMEOUT_MS),
-        settle(jitter(1_000, 1_600)),
+        settle(jitter(250, 400)),
     )
     return (*actions, *capture_wait()) if capture else actions
 
@@ -250,7 +250,7 @@ def build_until_click(query: SearchQuery, *, today: dt.date | None = None) -> Pl
         purpose="search",
         actions=(
             Action("goto", {"url": ADVANCED_SEARCH}, timeout_ms=NAV_TIMEOUT_MS),
-            settle(jitter(1_000, 1_600)),
+            settle(jitter(250, 400)),
             Action(
                 "wait_for",
                 {"selector": QUERY_INPUT, "timeout_ms": WAIT_TIMEOUT_MS},
@@ -263,7 +263,7 @@ def build_until_click(query: SearchQuery, *, today: dt.date | None = None) -> Pl
                 {"selector": QUERY_INPUT, "text": text, "clear": True},
                 timeout_ms=INPUT_TIMEOUT_MS,
             ),
-            settle(jitter(1_200, 2_200)),
+            settle(jitter(300, 500)),
             # A plain click. The site used to be given a `wait_until` hint here so it could
             # tell us when the query had started, but the transition it waits for
             # ("the submit button goes busy and comes back") does not happen on this site:
@@ -273,7 +273,7 @@ def build_until_click(query: SearchQuery, *, today: dt.date | None = None) -> Pl
             # that (see `_search_locked`) instead of before it.
             Action("click", {"selector": SUBMIT}, timeout_ms=CLICK_TIMEOUT_MS),
             # Give the in-page route change a moment to land before the URL is read.
-            settle(jitter(400, 900)),
+            settle(jitter(150, 300)),
         ),
     )
 
