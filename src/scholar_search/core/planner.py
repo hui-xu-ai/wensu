@@ -26,15 +26,20 @@ from .locking import interprocess_lock
 from .policy import NETWORK_VERBS, PolicyEngine
 from .risk import RiskGuard
 
-# Signals a person can clear in seconds, and which a publisher serves to any automated
-# browser. Stopping the plan is right; cooling the whole tool down is not (ADR 0022).
-_SOFT_SIGNALS = frozenset({RiskSignal.CAPTCHA, RiskSignal.VERIFY_REDIRECT})
+# Signals a person clears in seconds by acting in the browser: tick the box, slide the
+# puzzle, sign back in. CNKI's `/verify/home` and Web of Science's Cloudflare interstitial
+# are the same wall as a publisher's, so the channel does not decide this — the signal does.
+# Stopping the plan is right; cooling the whole tool down turns one click into a day of
+# downtime (ADR 0022).
+_SOFT_SIGNALS = frozenset(
+    {RiskSignal.CAPTCHA, RiskSignal.VERIFY_REDIRECT, RiskSignal.LOGIN_REDIRECT}
+)
 
 
-def _stops_without_cooldown(channel: str, signal: RiskSignal) -> bool:
-    """A page read that meets a wall stops there — no cooldown, just ask the person."""
+def _stops_without_cooldown(signal: RiskSignal) -> bool:
+    """A signal a human clears: stop, ask, do not punish the machine."""
 
-    return channel.startswith("page:") and signal in _SOFT_SIGNALS
+    return signal in _SOFT_SIGNALS
 
 
 def _risk_reason(signal: object, action: Action, outcome: ActionOutcome) -> str:
@@ -116,8 +121,8 @@ class Planner:
 
             signal = self.risk.inspect(outcome)
             if signal is not None:
-                if _stops_without_cooldown(plan.channel, signal):
-                    # A publisher's verification wall: stop the plan, save nothing, and let
+                if _stops_without_cooldown(signal):
+                    # A verification wall: stop the plan, save nothing, and let
                     # the person click through it. Cooling the machine down for a day would
                     # turn one click into an outage (ADR 0022) — and the wall is expected
                     # traffic, not abuse.

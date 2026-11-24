@@ -100,8 +100,8 @@ _RISK_ADVICE: dict[str, str] = {
     "login_redirect": (
         "The browser profile's session ended: the site sent the tab to a sign-in URL. "
         "Sign in to the site in that same browser window, confirm a search works there, "
-        "then run `wensu reset --confirm`. Waiting will not help — nothing is wrong with "
-        "the network, only with the session."
+        "then ask again. No cool-down is recorded for this — waiting never helped, because "
+        "nothing was wrong with the network, only with the session (ADR 0022)."
     ),
     "captcha": (
         "Solve the captcha in that browser window yourself. Never automate it, and do not "

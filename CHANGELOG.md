@@ -9,13 +9,15 @@ Versioning: [Semantic Versioning](https://semver.org/).
 ### Changed — a verification wall stops the plan but no longer cools the tool down (ADR 0022)
 
 ADR 0004 cooled everything for 24 h on any risk signal. With page reading (ADR 0019) that turned
-one expected event — Cloudflare asking a human to click once — into a day of downtime for the
-whole tool, including unrelated CNKI/Web of Science searching, and it closed the very recovery
-path it left open: `snapshot` also consulted the guard, so "solve it, then snapshot" was
-refused. Now the reaction depends on the signal: a `captcha`/`verify_redirect` on a `page:*`
-plan stops the plan, writes an audit entry with `cooldown_until: null` and returns `blocked`
-with advice to solve it and call `snapshot`; `http_403`, `rate_limited`, `login_redirect` and
-`text_marker` still cool down 24 h, because those do mean "stop coming back".
+one expected event — a site asking a human to click once — into a day of downtime for the whole
+tool, and it closed the very recovery path it left open: `snapshot` also consulted the guard, so
+"solve it, then snapshot" was refused. **Revised the same day (revision 1): the channel is
+irrelevant.** CNKI's `/verify/home` slider and Web of Science's Cloudflare interstitial are the
+same event as a publisher's wall, and restricting the exemption to `page:*` meant a solved slider
+still locked the tool. Now the signal decides: `captcha`, `verify_redirect` and `login_redirect`
+stop the plan, write an audit entry with `cooldown_until: null` and return `blocked` with advice
+for the person in front of the browser; `http_403`, `rate_limited` and `text_marker` still cool
+down 24 h, because those do mean "stop coming back".
 
 ### Fixed — the risk rules now name Cloudflare's interstitial
 
