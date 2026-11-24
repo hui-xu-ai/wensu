@@ -93,3 +93,30 @@ def test_an_unreadable_copy_reports_unknown_rather_than_a_verdict(
     assert summary is not None
     assert summary["extension_version"] is None
     assert summary["extension_version_mismatch"] is None
+
+
+def test_brief_carries_the_mismatch_too(tmp_path: Path, monkeypatch) -> None:
+    """The cheapest health check has to answer "is the copy I updated the one running".
+
+    2026-11-24: a machine answered `version: 0.13.2` while the market bundle and the
+    extension were both 0.14.2. `brief` is the payload a planning caller reads, and it
+    said nothing about the extension, so the skew stayed invisible for a whole session.
+    """
+
+    from scholar_search.adapters.bridge import BridgeAdapter
+    from scholar_search.bootstrap import build_service
+
+    directory = _extension(tmp_path, "0.12.53")
+    recorded = BrowserConfig(
+        browser="edge",
+        executable="msedge.exe",
+        profile_dir=str(tmp_path / "profile"),
+        extension_dir=str(directory),
+    )
+    monkeypatch.setattr("scholar_search.core.browser.load", lambda: recorded)
+    monkeypatch.setattr(BridgeAdapter, "probe", classmethod(lambda cls: True))
+
+    brief = build_service().status(brief=True)
+
+    assert brief["extension_version"] == "0.12.53"
+    assert brief["extension_version_mismatch"] is True

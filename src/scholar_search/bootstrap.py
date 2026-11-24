@@ -192,6 +192,13 @@ def build_service() -> ScholarService:
         # `brief` exists because a health check cost about 500 tokens, more than a
         # search. The three static blocks below are constants; a caller checking
         # whether it can proceed does not need them on every poll.
+        # One read of the recorded browser config, used by both shapes. Which copy of the
+        # extension the browser loads — and whether it matches this build — is the field
+        # that answers "is the thing I updated the thing that is running", and the caller
+        # that needs it most polls `brief` (2026-11-24: a machine ran 0.13.2 while the
+        # market plugin and the extension were 0.14.2, and `brief` said nothing).
+        browser = _browser_summary()
+
         if brief:
             return {
                 "version": __version__,
@@ -203,6 +210,8 @@ def build_service() -> ScholarService:
                 "bridge_next_action": None if bridge_up else _bridge_remediation(last_seen),
                 "quota_remaining": policy.remaining_today,
                 "cooldown_until": until.isoformat() if until else None,
+                "extension_version": (browser or {}).get("extension_version"),
+                "extension_version_mismatch": (browser or {}).get("extension_version_mismatch"),
             }
 
         return {
@@ -247,7 +256,7 @@ def build_service() -> ScholarService:
             # Which browser profile wensu owns, so "the extension is not connected"
             # has an actionable answer other than "figure out which window it is in".
             # None until `wensu setup --browser` has run.
-            "browser_profile": _browser_summary(),
+            "browser_profile": browser,
         }
 
     return ScholarService(

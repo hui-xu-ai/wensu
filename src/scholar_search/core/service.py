@@ -95,7 +95,7 @@ def _page_next(probe: dict[str, Any]) -> str:
     status = probe.get("status")
     reason = probe.get("reason")
     if status == "ok":
-        return "run tools/page2md.py on mhtml_path to get Markdown"
+        return "run `wensu page2md --in <mhtml_path> --out <dir>` to get Markdown"
     if status == "blocked":
         return (
             "the publisher answered with a human-verification challenge: ask the user to "

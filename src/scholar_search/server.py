@@ -822,7 +822,7 @@ def build_server(service: ScholarService) -> FastMCP:
 
         Read `status` before anything else:
 
-        * `ok` — `mhtml_path` holds the article; run `tools/page2md.py` on it for Markdown;
+        * `ok` — `mhtml_path` holds the article; run `wensu page2md --in <path> --out <dir>`;
         * `no_html` — the page has no full text; `reason` says `paywall`, `abstract_only`,
           `pdf_only` or `unparsable`, and `pdf_url` may offer the PDF route;
         * `unsupported_site` — the DOI belongs to a publisher this build does not visit
@@ -843,7 +843,7 @@ def build_server(service: ScholarService) -> FastMCP:
         This is the "read this paper" entry point for pages outside the two channels:
         the user opens the article in the browser, `snapshot` writes
         `wensu-pages/<title> [<host>] <time>.mhtml` into the download folder, and
-        `tools/page2md.py` turns that file into Markdown an agent can read.
+        `wensu page2md --in <mhtml_path> --out <dir>` turns that file into Markdown.
 
         It issues no request of its own — it reads the tab that is already open — so it
         spends **no quota** and is not limited to the channel domains. `status` still
@@ -856,11 +856,13 @@ def build_server(service: ScholarService) -> FastMCP:
     def status(brief: bool = False) -> dict[str, Any]:
         """Session state: channels, cooldown, quota, bridge readiness.
 
-        `brief` returns only `version`, `bridge_ready`, `bridge_last_seen`,
-        `quota_remaining` and `cooldown_until`. The full payload is about 500 tokens,
-        more than a search, and three of its blocks — `channel_capabilities`,
-        `detail_capabilities`, `action_cost` — are static. Poll `brief` while planning
-        and read the full answer once.
+        `brief` returns `version`, `bridge_ready`, `bridge_last_seen`, `quota_remaining`,
+        `cooldown_until`, and the two extension fields (`extension_version`,
+        `extension_version_mismatch`) — the cheapest way to see whether the build that
+        answers is the build that was installed. The full payload is about 500 tokens, more
+        than a search, and three of its blocks — `channel_capabilities`,
+        `detail_capabilities`, `action_cost` — are static. Poll `brief` while planning and
+        read the full answer once.
         """
 
         return service.status(brief=brief)

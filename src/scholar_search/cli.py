@@ -195,6 +195,22 @@ def build_parser() -> argparse.ArgumentParser:
     adopt.add_argument("--executable", default=None, help="browser executable if not auto-detected")
     adopt.add_argument("--extension-id", default=None)
 
+    # `page_read` answers with `mhtml_path` and a hint to turn it into Markdown; that hint
+    # named a file only this checkout has, so the converter ships with the package and this
+    # subcommand is how a `pip install wensu` user reaches it (2026-11-24).
+    page2md_cmd = sub.add_parser(
+        "page2md", help="turn a saved article page (mhtml/html) into Markdown"
+    )
+    page2md_cmd.add_argument(
+        "--in", dest="source", required=True, help="saved .html/.mhtml file, or a directory"
+    )
+    page2md_cmd.add_argument("--out", dest="out", required=True, help="where page.md goes")
+    page2md_cmd.add_argument(
+        "--mode", choices=("full", "core"), default="full", help="core also writes page.core.md"
+    )
+    page2md_cmd.add_argument("--query", default="", help="export only paragraphs matching this")
+    page2md_cmd.add_argument("--slice", dest="window", default="", help="paragraph range, 12:30")
+
     return parser
 
 
@@ -214,6 +230,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command is None:
         build_parser().print_help()
         return 0
+
+    if args.command == "page2md":
+        from .page2md import main as page2md_main
+
+        forwarded = ["--in", args.source, "--out", args.out, "--mode", args.mode]
+        if args.query:
+            forwarded += ["--query", args.query]
+        if args.window:
+            forwarded += ["--slice", args.window]
+        return page2md_main(forwarded)
 
     if args.command == "jcr":
         from .core.jcr import JcrDatabase

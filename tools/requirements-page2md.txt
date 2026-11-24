@@ -1,4 +1,5 @@
-# tools/page2md.py 的运行依赖（装在独立 venv 里，别污染主环境）
+# `wensu page2md`（实现已搬进包里：src/scholar_search/page2md.py）的可选依赖
+# 装在独立 venv 里，别污染主环境
 #
 #   py -m venv work\tools\.venv
 #   work\tools\.venv\Scripts\python.exe -m pip install -r tools\requirements-page2md.txt

@@ -1,7 +1,10 @@
-"""`tools/page2md.py` 的单元测试。
+"""`scholar_search/page2md.py` 的单元测试。
 
 夹具全部是**自造的极简 HTML**，不含任何出版商内容（AGENTS.md：fixture 必须脱敏）。
 不依赖 trafilatura：`_extract_body` 内部才 import 它，测试里只调纯 lxml 的部分。
+
+（2026-11-24）转换器从 `tools/page2md.py` 搬进包里，随 wheel 一起发货；`tools/page2md.py`
+只剩一层薄壳，所以这里改成直接 import 包内模块。
 """
 
 from __future__ import annotations
@@ -15,9 +18,7 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
-
-import page2md
+from scholar_search import page2md
 
 SECTION_HTML = """<!DOCTYPE html>
 <html><head><title>Test paper</title></head><body>
