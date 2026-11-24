@@ -101,6 +101,11 @@ include = [
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# `work/` holds local probe scripts and past acceptance runs, and `tools/proj` is the pydev
+# scaffolding copied in from the preset: neither is shipped code. Linting them made
+# `ruff check .` red for files no release touches (2026-11-24, CI failed on every push
+# since the scaffolding landed). Shipped code stays fully linted.
+extend-exclude = ["work", "tools/proj"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]

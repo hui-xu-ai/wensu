@@ -7,7 +7,7 @@
 用法：
     python tools/bootstrap-project.py . --check          # 初始化门（只读，缺什么报什么）
     python tools/bootstrap-project.py . --apply          # 建最小集（不覆盖已有文件）
-    python tools/bootstrap-project.py . --apply --full   # 最小集 + PROJECT/SUMMARY/LESSONS/DECISIONS/EXPERIENCE
+    python tools/bootstrap-project.py . --apply --full   # 最小集 + 项目/总结/长期记忆文件
 
 模板来源：优先用脚本同级的 `templates/.dsh-memory`（预设分发形态）；
 找不到就用脚本内置骨架（任意项目可独立运行）。
@@ -15,16 +15,17 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 for _stream in (sys.stdout, sys.stderr):
-    try:  # Windows 控制台默认 cp936；统一 UTF-8，避免中文乱码
+    # Windows 控制台默认 cp936；统一 UTF-8，避免中文乱码。老 Python / 非标准流会抛错，
+    # 控制台编码失败不影响功能，所以静默跳过。
+    with contextlib.suppress(Exception):
         _stream.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:  # noqa: BLE001, S110 - 老 Python / 非标准流  # silent-ok: 控制台编码失败不影响功能
-        pass
 
 LIMITS = {
     "HANDOFF.md": 80,
@@ -234,7 +235,9 @@ def ensure_gitignore(root: Path, created: list[str], skipped: list[str]) -> None
         created.append(str(p))
 
 
-def ensure_agents(root: Path, templates: Path | None, created: list[str], skipped: list[str]) -> None:
+def ensure_agents(
+    root: Path, templates: Path | None, created: list[str], skipped: list[str]
+) -> None:
     p = root / "AGENTS.md"
     if not p.exists():
         p.write_text(template_text(templates, "project-AGENTS.md"), encoding="utf-8")
@@ -357,7 +360,7 @@ def main() -> int:
     ap.add_argument("root", nargs="?", default=".", help="项目根（默认当前目录）")
     ap.add_argument("--check", action="store_true", help="只检查（初始化门），不写文件")
     ap.add_argument("--apply", action="store_true", help="创建缺失文件（不覆盖已有）")
-    ap.add_argument("--full", action="store_true", help="同时建 PROJECT/SUMMARY/LESSONS/DECISIONS/EXPERIENCE")
+    ap.add_argument("--full", action="store_true", help="同时建 PROJECT/SUMMARY 等长期记忆文件")
     ap.add_argument("--templates", default=None, help="模板目录（默认自动探测）")
     args = ap.parse_args()
     root = Path(args.root).resolve()

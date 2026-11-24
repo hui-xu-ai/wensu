@@ -6,6 +6,15 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — `ruff check .` was red for files no release touches
+
+CI runs `ruff check .`, but `work/` (local probe scripts and past acceptance runs) and
+`tools/proj` (pydev scaffolding copied in from the preset) are not shipped code and were
+failing it on every push since the scaffolding landed. Both are excluded now, and the four
+remaining findings in the repo's own `tools/bootstrap-project.py` are fixed properly
+(`contextlib.suppress` instead of `try/except/pass`, a stale `noqa`, two wrapped lines).
+Shipped code is still linted in full.
+
 ## [0.14.3] - 2026-11-24
 
 ### Changed — the bundle's own metadata described a smaller tool than it is
