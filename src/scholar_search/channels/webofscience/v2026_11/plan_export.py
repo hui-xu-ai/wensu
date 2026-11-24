@@ -125,10 +125,8 @@ def build_after_click(query: SearchQuery, *, today: dt.date | None = None) -> Pl
             timeout_ms=EXPORT_TIMEOUT_MS,
         ),
     ]
-        # Every action here drives controls on a page that is already open: the dialog answers
+    # Every action here drives controls on a page that is already open: the dialog answers
     # in milliseconds, so this plan takes the UI slot instead of the network floor
     # (ADR 0023). Measured 2026-11-24: the whole dialog flow is ~1-3 s by hand, while 900 ms
     # per action made it ~14 s.
-    return Plan(
-        channel="webofscience", purpose="search", actions=tuple(actions), pacing="ui"
-    )
+    return Plan(channel="webofscience", purpose="search", actions=tuple(actions), pacing="ui")

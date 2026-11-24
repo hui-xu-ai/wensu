@@ -20,6 +20,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from .config import app_home
+
 BUNDLE_NAME = "@hui-xu-ai/dsh-wensu"
 
 OK = "ok"
@@ -90,6 +92,53 @@ def verdict(*, cli: str | None, extension: str | None, bundle: str | None) -> st
     if len(known) < 3:
         return PARTIAL
     return OK
+
+
+def bridge_state(home: Path | None = None) -> dict[str, Any]:
+    """The recorded native-host endpoint, and whether its process is still there.
+
+    Measured 2026-11-24: reloading the extension restarts the native host on a new port, so a
+    CLI run against the old endpoint answers "no native host is serving the profile" — true,
+    but it names neither the endpoint nor the fact that it moved. This is what `doctor` shows
+    next to the version verdict.
+    """
+
+    base = home if home is not None else app_home()
+    endpoint = Path(base) / "host" / "bridge.json"
+    try:
+        payload = json.loads(endpoint.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"endpoint": str(endpoint), "pid": None, "port": None, "alive": False}
+    pid = payload.get("pid") if isinstance(payload, dict) else None
+    port = payload.get("port") if isinstance(payload, dict) else None
+    alive = _process_alive(pid)
+    return {"endpoint": str(endpoint), "pid": pid, "port": port, "alive": alive}
+
+
+def _process_alive(pid: object) -> bool:
+    """Whether `pid` names a live process. Windows needs OpenProcess, not `os.kill(pid, 0)`.
+
+    On Windows `os.kill(pid, 0)` is not a probe: signal 0 goes through TerminateProcess, so it
+    can either lie or kill. Query the handle instead (measured 2026-11-24: the host was alive
+    and `os.kill` said otherwise).
+    """
+
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        kernel32.CloseHandle(handle)
+        return True
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
 
 
 def pandoc_version() -> str | None:

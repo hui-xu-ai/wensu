@@ -154,19 +154,24 @@ def test_service_reports_a_verification_wall_instead_of_reading_it(tmp_path: Pat
     assert "solve it in the browser" in result["hint"].lower()
 
 
-def test_service_raises_a_specific_error_when_the_page_cannot_be_saved(tmp_path: Path) -> None:
+def test_a_non_web_tab_is_reported_as_having_no_page(tmp_path: Path) -> None:
+    """`snapshot` reads the tab the user is on — which is not always a web page.
+
+    `policy.url_scheme` was raised for an `edge://` or blank tab, which says "you broke a
+    rule" about a tab that simply holds no page. Measured 2026-11-24 by calling `snapshot`
+    with the browser on a browser-internal page.
+    """
+
     scripts: list[list[dict[str, object]]] = [
         [{"verb": "snapshot", "ok": False, "error": "policy.url_scheme"}],
     ]
     service = build_service(tmp_path, scripts)
 
-    try:
-        service.snapshot()
-    except Exception as error:  # ActionError
-        assert getattr(error, "code", "") == "policy.url_scheme"
-        assert getattr(error, "verb", "") == "snapshot"
-    else:  # pragma: no cover - the raise above is the expected path
-        raise AssertionError("snapshot should have raised")
+    result = service.snapshot()
+
+    assert result["status"] == "no_page", result
+    assert result["code"] == "policy.url_scheme", result
+    assert "not a web page" in result["hint"], result
 
 
 def test_snapshot_assembles_chunks_and_strips_scripts(tmp_path: Path) -> None:

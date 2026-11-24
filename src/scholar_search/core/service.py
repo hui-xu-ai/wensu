@@ -677,6 +677,10 @@ class ScholarService:
     # is what turned a good capture into a challenge page (2026-11-24 report, D1/D2), and it
     # is also the only reason a second look at the same DOI cost another two quota points.
     _PAGE_CACHE_TTL_S = 3600.0
+    # How long "this URL hit a wall" is remembered. Long enough to cover "the reader is
+    # clicking through the challenge right now", short enough that a later attempt is not
+    # second-guessed by a stale marker.
+    _PAGE_WALL_TTL_S = 1800.0
 
     def _page_cache_path(self) -> Path:
         state_dir = Path(self._policy.state_dir) if self._policy else Path.cwd()
@@ -690,13 +694,31 @@ class ScholarService:
         except (OSError, ValueError):
             return None
         entry = payload.get(url) if isinstance(payload, dict) else None
-        if not isinstance(entry, dict):
+        if not isinstance(entry, dict) or entry.get("status", "ok") != "ok":
             return None
         if not Path(str(entry.get("mhtml_path") or "")).is_file():
             return None
         if time.time() - float(entry.get("at") or 0.0) > self._PAGE_CACHE_TTL_S:
             return None
         return entry
+
+    def _page_cache_walled(self, url: str) -> bool:
+        """Did this exact URL meet a verification wall recently?
+
+        A wall is remembered as a marker rather than a capture: it has no file, it expires on
+        its own (`_PAGE_WALL_TTL_S`), and its only job is to make the *next* attempt look at
+        the tab the person is on before navigating — they may have solved the challenge by
+        hand, and navigating again is what replaces a body already on screen.
+        """
+
+        try:
+            payload = json.loads(self._page_cache_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        entry = payload.get(url) if isinstance(payload, dict) else None
+        if not isinstance(entry, dict) or entry.get("status") != "blocked":
+            return False
+        return time.time() - float(entry.get("at") or 0.0) <= self._PAGE_WALL_TTL_S
 
     def _page_cache_put(self, url: str, payload: dict[str, Any]) -> None:
         """Best effort: a cache that cannot be written must never fail a read."""
@@ -709,6 +731,9 @@ class ScholarService:
                 if isinstance(existing, dict):
                     stored = existing
             stored[url] = {
+                # `blocked` entries are markers, not captures: no file, and `_page_cache_get`
+                # refuses them (only `ok` can be served as a capture).
+                "status": payload.get("status") or "ok",
                 "mhtml_path": payload.get("mhtml_path"),
                 "bytes": payload.get("bytes"),
                 "headings": payload.get("headings"),
@@ -769,6 +794,43 @@ class ScholarService:
                 "next": _page_next({"status": "ok"}),
             }
 
+        if self._page_cache_walled(target):
+            # This URL hit a wall recently. Before navigating again — which is what replaces
+            # a body the reader already captured — look at the tab the person is on: if they
+            # solved the challenge by hand, the article is right there and `snapshot` costs
+            # nothing and issues no request (ADR 0018/0022).
+            open_tab = self._snapshot_locked(tab="active")
+            if open_tab.get("status") == "blocked":
+                return {
+                    "status": "blocked",
+                    "reason": "challenge",
+                    "signal": "title:active-tab",
+                    "doi": identifier,
+                    "publisher": publisher.name,
+                    "final_url": open_tab.get("url") or target,
+                    "mhtml_path": None,
+                    "bytes": 0,
+                    "quota_charged": 0,
+                    "next": _page_next({"status": "blocked", "reason": "challenge"}),
+                }
+            if identifier and identifier in str(open_tab.get("url") or ""):
+                return {
+                    "status": "ok",
+                    "source": "open-tab",
+                    "doi": identifier,
+                    "publisher": publisher.name,
+                    "final_url": open_tab.get("url"),
+                    "mhtml_path": open_tab.get("path"),
+                    "bytes": open_tab.get("bytes"),
+                    "title": open_tab.get("title"),
+                    # It was already open: nothing was navigated, nothing was charged.
+                    "quota_charged": 0,
+                    "next": _page_next({"status": "ok"}),
+                }
+            # Not the article: that capture was a guess, so it must not become a file.
+            with suppress(OSError):
+                Path(str(open_tab.get("path") or "")).unlink()
+
         spec = _page_spec(publisher)
         # The navigation is its own plan, because what it returns decides whether anything
         # else may happen at all: on a wall (ADR 0004) the tool must not sleep, capture or
@@ -789,7 +851,9 @@ class ScholarService:
             except RiskBlocked as blocked:
                 # The wall was named by the `goto` outcome itself (gate title / captcha /
                 # verify redirect), so the planner stopped before the next action: nothing
-                # was captured, nothing was written (ADR 0004).
+                # was captured, nothing was written (ADR 0004). Remembered so the next
+                # attempt looks at the reader's own tab first instead of navigating again.
+                self._page_cache_put(target, {"status": "blocked", "title": target})
                 return {
                     **blocked.to_payload(),
                     "doi": identifier,
@@ -812,6 +876,7 @@ class ScholarService:
                 # Capturing the wall (the old order) cost a quota point, saved bytes that are
                 # not the article, and replaced a body already captured — measured on Wiley
                 # 2026-11-24: title 「请稍候…」, 73 KB of wall (report D1/D2).
+                self._page_cache_put(target, {"status": "blocked", "title": wall_title})
                 return {
                     "status": "blocked",
                     "reason": "challenge",
@@ -861,6 +926,7 @@ class ScholarService:
                 # The site asked for a person (extension-level challenge or the probe's own
                 # marker match). Nothing more may be fetched; the captured bytes were
                 # discarded by `_snapshot_locked`, so there is no file to point at.
+                self._page_cache_put(target, {"status": "blocked", "title": saved.get("title")})
                 stored = saved.get("path")
                 return {
                     **(probe if probe.get("status") == "blocked" else {}),
@@ -1002,6 +1068,20 @@ class ScholarService:
         action = Action("snapshot", {"tab": tab}) if tab != "active" else Action("snapshot")
         first = adapter.execute(action, timeout_ms=SNAPSHOT_TIMEOUT_MS)
         if not first.ok:
+            if str(first.error or "").startswith("policy."):
+                # `snapshot` reads "the tab the user is looking at", and a browser tab is not
+                # always a web page — `edge://settings`, a blank new tab, the downloads list.
+                # Reporting `policy.url_scheme` for that is a policy error where the honest
+                # answer is "there is no page here".
+                return {
+                    "status": "no_page",
+                    "code": first.error,
+                    "retryable": True,
+                    "hint": (
+                        "the tab you are on is not a web page (browser-internal or blank): "
+                        "open the article in this window, then ask again."
+                    ),
+                }
             raise ActionError(
                 f"the page could not be saved ({first.error or 'action.failed'})",
                 verb="snapshot",
@@ -1722,6 +1802,7 @@ def _last_url(outcomes: Sequence[ActionOutcome]) -> str | None:
         if isinstance(candidate, str) and candidate:
             return candidate
     return None
+
 
 def _click_landing(outcomes: Sequence[ActionOutcome]) -> tuple[str | None, bool]:
     """Where the tab was after the click, and whether the site acknowledged it.

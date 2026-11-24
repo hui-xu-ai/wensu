@@ -56,20 +56,39 @@ def test_page_read_stops_at_the_wall_and_captures_nothing(tmp_path: Path) -> Non
 def test_a_wall_stops_the_plan_without_cooling_anything_down(tmp_path: Path) -> None:
     """A verification wall is expected traffic, not abuse (ADR 0022).
 
-    The second `page_read` runs: its script is consumed, so "no cooldown" is proven by the
-    fact that a navigation was attempted rather than refused.
+    The second call is answered from the reader's own tab (0 quota, no navigation), which is
+    the whole point: nothing is cooled down, and nothing navigates again.
     """
 
     from test_page_read import build_service
 
-    service = build_service(tmp_path, [_goto("Just a moment..."), _goto("请稍候…")])
+    wall = b"<html>please wait</html>"
+    service = build_service(
+        tmp_path,
+        [
+            _goto("Just a moment..."),
+            [
+                {
+                    "verb": "snapshot",
+                    "data": {
+                        "token": "t1",
+                        "total": len(wall),
+                        "base64": base64.b64encode(wall).decode("ascii"),
+                        "url": URL,
+                        "title": "请稍候…",
+                        "captcha_visible": True,
+                    },
+                }
+            ],
+        ],
+    )
     service.read_page(doi=DOI)
 
     again = service.read_page(doi=DOI)
 
     assert again["status"] == "blocked", again
     assert not again.get("cooldown_until"), again
-    assert again["quota_charged"] == 1, again
+    assert again["quota_charged"] == 0, again
 
 
 def _snapshot_reply(blob: bytes, title: str, *, captcha: bool) -> dict[str, object]:

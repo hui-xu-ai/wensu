@@ -609,7 +609,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         from . import __version__ as cli_version
         from .bootstrap import build_service
-        from .core.doctor import MISMATCH, PANDOC_HINT, find_bundle, pandoc_version, verdict
+        from .core.doctor import (
+            MISMATCH,
+            PANDOC_HINT,
+            bridge_state,
+            find_bundle,
+            pandoc_version,
+            verdict,
+        )
 
         status = build_service().status(brief=True)
         found = find_bundle([_Path(args.dsh_home)] if args.dsh_home else None)
@@ -623,6 +630,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "bundle_profile": found["profile"],
             "bundle_path": found["path"],
             "pandoc": pandoc,
+            "bridge_host": bridge_state(),
             "bridge_ready": status.get("bridge_ready"),
             "quota_remaining": status.get("quota_remaining"),
             "cooldown_until": status.get("cooldown_until"),
