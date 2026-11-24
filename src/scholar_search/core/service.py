@@ -353,26 +353,38 @@ class ScholarService:
             # not a sample taken mid-flight. A tab on anything other than a results
             # route means the query matched nothing: that is where the "no results"
             # answer lives, and reloading it would erase the evidence.
+            tail_outcomes: tuple[ActionOutcome, ...] | None = None
             if landed and is_results is not None and not is_results(landed):
                 if not settled:
-                    # The button never went busy, so the site may never have started
-                    # the query at all. Reporting "no results" here would hide a
-                    # failed click behind a confident answer.
-                    raise ActionError(
-                        "click did not start a query (the submit control never became busy)",
-                        verb="click",
-                        code="click.not_started",
+                    # The URL has not moved *yet*. It used to be judged here, right after the
+                    # click, and the plan therefore had to buy the site time by asking the
+                    # extension to wait for the submit button to come back — a transition
+                    # this site never makes, so it burned 10 s to protect a check that runs
+                    # in microseconds (2026-11-24). Run the tail first instead: it waits for
+                    # the result list, which is the site's own "the query ran" signal. If the
+                    # page still is not a results route afterwards, the click did nothing.
+                    tail_outcomes = self._run(tail, spec)
+                    proof = _last_url(tail_outcomes) or landed
+                    if not is_results(proof):
+                        raise ActionError(
+                            "click did not start a query (the result list never appeared)",
+                            verb="click",
+                            code="click.not_started",
+                        )
+                    landed = proof
+                else:
+                    empty = SearchPage(
+                        records=(),
+                        total=0,
+                        page=None,
+                        empty_reason="no_match",
+                        query_effective=self._effective_query(channel, query),
                     )
-                empty = SearchPage(
-                    records=(),
-                    total=0,
-                    page=None,
-                    empty_reason="no_match",
-                    query_effective=self._effective_query(channel, query),
-                )
-                self._cache.set(key, _page_to(empty))
-                return empty
-            outcomes = heads + self._run(tail, spec)
+                    self._cache.set(key, _page_to(empty))
+                    return empty
+            outcomes = heads + (
+                tail_outcomes if tail_outcomes is not None else self._run(tail, spec)
+            )
         else:
             plan = channel.plan_search(query)
             try:
@@ -1701,6 +1713,16 @@ def _present(page: SearchPage, query: SearchQuery) -> SearchPage:
     )
 
 
+def _last_url(outcomes: Sequence[ActionOutcome]) -> str | None:
+    """The most recent URL any action reported, for judging where the tab ended up."""
+
+    for outcome in reversed(outcomes):
+        data = outcome.data if isinstance(outcome.data, dict) else {}
+        candidate = outcome.url or data.get("url")
+        if isinstance(candidate, str) and candidate:
+            return candidate
+    return None
+
 def _click_landing(outcomes: Sequence[ActionOutcome]) -> tuple[str | None, bool]:
     """Where the tab was after the click, and whether the site acknowledged it.
 
@@ -1717,7 +1739,11 @@ def _click_landing(outcomes: Sequence[ActionOutcome]) -> tuple[str | None, bool]
         if not isinstance(data, dict):
             continue
         url = data.get("url")
-        settled = bool(data.get("settled"))
+        # Two ways the extension reports that the click was taken: the control went busy and
+        # came back (`settled`, the old "enabled" wait), or the tab's URL moved (`url_changed`,
+        # the cheaper wait that WoS actually answers — 2026-11-24). Either is proof the site
+        # started the query.
+        settled = bool(data.get("settled")) or bool(data.get("url_changed"))
         return (url if isinstance(url, str) and url else None), settled
     return None, False
 

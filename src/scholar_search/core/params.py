@@ -58,7 +58,10 @@ GOTO_CLOSE = frozenset({"disposable"})
 READ_TEXT_MODES = frozenset({"inner", "text"})
 # Which tab a capture reads: the dedicated work tab, or whatever the user is looking at.
 SNAPSHOT_TABS = frozenset({"work", "active"})
-CLICK_WAIT_UNTIL = frozenset({"enabled"})
+# What a click can wait for before answering: `enabled` = the control went busy and came
+# back; `url` = the tab's address moved. Web of Science never leaves `enabled` on submit but
+# moves the route in 1–3 s, so `url` is both faster and truer there (2026-11-24, ADR 0023).
+CLICK_WAIT_UNTIL = frozenset({"enabled", "url"})
 
 
 def _selector(value: Any) -> bool:

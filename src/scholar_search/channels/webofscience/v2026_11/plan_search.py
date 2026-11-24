@@ -264,13 +264,13 @@ def build_until_click(query: SearchQuery, *, today: dt.date | None = None) -> Pl
                 timeout_ms=INPUT_TIMEOUT_MS,
             ),
             settle(jitter(1_200, 2_200)),
-            # The click is a click. It used to ask the extension for
-            # `wait_until: "enabled"` — "the button goes disabled while the site computes
-            # and comes back when it is done" — but measured 2026-11-24 that transition
-            # never arrives on this site: the click burned its whole 10 s budget while the
-            # very next step (`wait_for` on the result list) answered in **5 ms**. What the
-            # site actually says when it is done is the result list itself, and the plan
-            # already waits for exactly that (`RESULT_READY`, `RESULT_TIMEOUT_MS`).
+            # A plain click. The site used to be given a `wait_until` hint here so it could
+            # tell us when the query had started, but the transition it waits for
+            # ("the submit button goes busy and comes back") does not happen on this site:
+            # the click burned its whole 10 s budget while the result list was already up
+            # (measured 2026-11-24). What the site actually answers is the result list, which
+            # the tail plan waits for, and the kernel judges "did the query start" after
+            # that (see `_search_locked`) instead of before it.
             Action("click", {"selector": SUBMIT}, timeout_ms=CLICK_TIMEOUT_MS),
             # Give the in-page route change a moment to land before the URL is read.
             settle(jitter(400, 900)),
