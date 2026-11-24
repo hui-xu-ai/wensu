@@ -12,12 +12,12 @@ from scholar_search.core.contracts import Record, SearchPage, SearchQuery
 from scholar_search.core.service import _present
 
 
-def _record(index: int) -> Record:
+def _record(index: int, *, year: int = 2026) -> Record:
     return Record(
         title=f"Paper {index}",
         authors=("A. Author",),
         source="Advanced Materials",
-        year=2026,
+        year=year,
         channel="webofscience",
         url=f"https://www.webofscience.com/wos/woscc/full-record/WOS:000{index}",
     )
@@ -27,19 +27,49 @@ def _page(count: int, total: int | None) -> SearchPage:
     return SearchPage(records=tuple(_record(i) for i in range(count)), total=total)
 
 
-def test_a_page_that_filled_its_limit_says_there_may_be_more() -> None:
+def test_a_page_that_holds_less_than_the_site_matched_says_there_is_more() -> None:
     query = SearchQuery(text="ionic actuator", channel="webofscience", limit=50)
 
-    presented = _present(_page(50, 50), query)
+    presented = _present(_page(50, 6304), query)
 
     assert presented.returned == 50
     assert presented.truncated is True
 
 
-def test_a_shorter_page_is_not_truncated() -> None:
+def test_a_page_that_holds_everything_the_site_matched_is_whole() -> None:
+    """`total: 50` with 50 records is a complete answer, not a truncated one.
+
+    The report read that shape as ambiguous and paid for a second search (2026-11-24, D4);
+    measured live, `total` is the site's own count, so the two cases are distinguishable.
+    """
+
     query = SearchQuery(text="ionic actuator", channel="webofscience", limit=50)
 
-    presented = _present(_page(49, 49), query)
+    presented = _present(_page(50, 50), query)
+
+    assert presented.returned == 50
+    assert presented.truncated is False
+
+
+def test_a_small_limit_against_a_big_result_set_is_truncated() -> None:
+    query = SearchQuery(text="ionic actuator", channel="webofscience", limit=3)
+
+    presented = _present(_page(3, 50), query)
+
+    assert presented.returned == 3
+    assert presented.truncated is True
+
+
+def test_a_year_filter_does_not_make_a_complete_fetch_look_truncated() -> None:
+    """The fetch brought back all 50 the site matched; the year filter then showed 49."""
+
+    query = SearchQuery(text="ionic actuator", channel="webofscience", limit=50, year_from=2026)
+    page = SearchPage(
+        records=(*(_record(i) for i in range(49)), _record(2025, year=2025)),
+        total=50,
+    )
+
+    presented = _present(page, query)
 
     assert presented.returned == 49
     assert presented.truncated is False

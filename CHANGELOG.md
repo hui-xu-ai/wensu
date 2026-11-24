@@ -8,12 +8,21 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Fixed — `total == limit` no longer needs a second search to interpret
 
-Web of Science's page path reports the number it returned as `total`, so "the site has exactly
-this many" and "cut at my own limit" looked identical; one caller spent a second search — 8
-quota points and a whole cycle — resolving that doubt (2026-11-24 report, D4). Every search
-answer now carries `returned` (what it actually holds) and `truncated` ("you got exactly what
-you asked for, so there may be more"), and a `records_from`/`records_to` range reports
-`truncated: false` because its size is part of its contract.
+`total == limit` could not distinguish "the site matched exactly this many" from "cut at my
+own limit"; one caller spent a second search — 8 quota points and a whole cycle — resolving
+that doubt (2026-11-24 report, D4). Measured live, `total` *is* the site's count (`limit: 3`
+returned 3 of `total: 50`), so every answer now carries `returned` and `truncated`, where
+`truncated` compares the **fetched** count against `total` — a later year/impact filter that
+drops records cannot make a complete fetch look truncated. A `records_from`/`records_to` range
+reports `truncated: false`: its size is part of its contract.
+
+### Not a bug — the quota charge matches the metered file
+
+The report's D5 (`quota_charged: 8` while `remaining` dropped 9) does not reproduce. One
+controlled Web of Science search: response `quota_charged: 8`, `quota_remaining: 233`, quota
+counter `used` 59 → 67 = **+8**, and the audit shows 8 charged verbs (`wait_for`/`sleep` are
+not charged). The tool measures the delta itself (`before - after` around the call), so the
+9 was a reading taken at a different moment, not an accounting error.
 
 ### Fixed — `page_read` no longer navigates the same article twice
 

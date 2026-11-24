@@ -1576,6 +1576,10 @@ def _present(page: SearchPage, query: SearchQuery) -> SearchPage:
     """
 
     records = page.records
+    # Counted before any local filter: `truncated` asks whether the *fetch* stopped short,
+    # and a year/impact filter that drops records afterwards must not make a complete page
+    # look truncated.
+    fetched = len(records)
     dropped_year = 0
     if query.year_from is not None or query.year_to is not None:
         # The site's year control is unreliable, so filter what we fetched.
@@ -1622,8 +1626,12 @@ def _present(page: SearchPage, query: SearchQuery) -> SearchPage:
     return replace(
         page,
         returned=len(records),
+        # Compared against the *fetched* count, before the local year/impact filters: those
+        # drop records the site did match, so comparing `total` with the presented count
+        # would call a filtered page truncated and a complete one whole (measured
+        # 2026-11-24: `limit: 3` returned 3 of a `total: 50`, and a 50/50 page is complete).
         truncated=bool(
-            query.records_span is None and page.total is not None and len(records) >= query.limit
+            query.records_span is None and page.total is not None and fetched < page.total
         ),
     )
 
