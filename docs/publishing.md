@@ -85,6 +85,14 @@ Set-Location packages\dsh-wensu
   `rows: [mcp-scholar-search]`、**没有 `error`**；`remove_bundle` 会把它置为 `enabled: false`，
   需要 `set_bundle enabled=true` 再启用一次。
 
+  用 `plugin_manager install_bundle` 换版本会报 `already-installed`（它按包名判断），它的
+  `nextStep` 就是正解：**先 `remove_bundle`，再 `install_bundle @<新版本>`**——两条都
+  `application: applied`，装完自动 `enabled: true`，不用再手动启用。
+
+  装完用 **`wensu doctor`** 一条命令核对三方（CLI / bundle / 扩展）：`verdict: ok` 且 exit 0
+  才算真的同号；`partial` 说明有一个没找到（例如本机没有 DSH profile），`mismatch` 会 exit 1
+  并指出是哪一个落后。
+
 ## 3. 发布前检查的细节
 
 `release-check.py` 之外，这几条仍需人看：

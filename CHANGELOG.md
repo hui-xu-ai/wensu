@@ -6,6 +6,15 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — `wensu doctor` answers "is the build that answers the build that was installed"
+
+The three versions live in three places (this package, a DSH profile's `node_modules`, the
+browser's asset copy), so the check that mattered on 2026-11-24 — CLI `0.13.2` behind a
+`0.14.2` bundle and extension — could only be made by reading a profile manifest by hand.
+`wensu doctor` prints the three versions plus bridge/quota state and a verdict
+(`ok` / `partial` / `mismatch` / `unknown`), exits 1 on a mismatch, and never calls an
+unknown artefact "ok". Pinned by `tests/unit/test_doctor.py`.
+
 ### Fixed — `ruff check .` was red for files no release touches
 
 CI runs `ruff check .`, but `work/` (local probe scripts and past acceptance runs) and

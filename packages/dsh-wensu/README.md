@@ -89,6 +89,12 @@ wensu status       # bridge_ready: true 才表示整条链路通了
 连到浏览器宿主；`brief` 现在也带 `extension_version` 与 `extension_version_mismatch`——
 两者同时对上，才说明"你更新的那份"就是"正在跑的那份"。
 
+命令行里一条命令也能核对（CLI / bundle / 扩展三方）：
+
+```powershell
+wensu doctor        # verdict: ok / partial / mismatch（mismatch 时 exit 1）
+```
+
 ## 卸载/回滚
 
 在插件管理入口卸载 `@hui-xu-ai/dsh-wensu`，重启 DSH 即可。不要直接删除 profile 里的文件。

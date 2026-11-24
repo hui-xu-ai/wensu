@@ -105,6 +105,17 @@ def build_parser() -> argparse.ArgumentParser:
     reset = sub.add_parser("reset", help="clear the risk cooldown after manual verification")
     reset.add_argument("--confirm", action="store_true", help="required to actually clear")
 
+    # The three versions live in three places; asking "which build am I running" by hand
+    # means reading a profile's node_modules and the browser's manifest (see core/doctor.py).
+    doctor = sub.add_parser(
+        "doctor", help="check that the CLI, the DSH bundle and the extension agree"
+    )
+    doctor.add_argument(
+        "--dsh-home",
+        default=None,
+        help="DSH home holding profiles/ (default: $DSH_HOME, else ~/.dsh)",
+    )
+
     jcr = sub.add_parser(
         "jcr",
         help="build and inspect the local journal-metrics database",
@@ -584,6 +595,35 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             print(service.export(page.records, fmt=args.format))
         return 0
+
+    if args.command == "doctor":
+        from pathlib import Path as _Path
+
+        from . import __version__ as cli_version
+        from .bootstrap import build_service
+        from .core.doctor import MISMATCH, find_bundle, verdict
+
+        status = build_service().status(brief=True)
+        found = find_bundle([_Path(args.dsh_home)] if args.dsh_home else None)
+        extension = status.get("extension_version")
+        report = {
+            "cli": cli_version,
+            "extension": extension,
+            "extension_mismatch": status.get("extension_version_mismatch"),
+            "bundle": found["version"],
+            "bundle_profile": found["profile"],
+            "bundle_path": found["path"],
+            "bridge_ready": status.get("bridge_ready"),
+            "quota_remaining": status.get("quota_remaining"),
+            "cooldown_until": status.get("cooldown_until"),
+        }
+        report["verdict"] = verdict(
+            cli=str(cli_version),
+            extension=extension if isinstance(extension, str) else None,
+            bundle=found["version"],
+        )
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 1 if report["verdict"] == MISMATCH else 0
 
     if args.command == "status":
         from .bootstrap import build_service
