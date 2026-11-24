@@ -18,7 +18,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .config import app_home
 
@@ -128,7 +128,9 @@ def _process_alive(pid: object) -> bool:
     if os.name == "nt":
         import ctypes
 
-        kernel32 = ctypes.windll.kernel32
+        # Viewed as `Any`: `windll` only exists on Windows, and CI type-checks on Linux (the
+        # same platform-gated-attribute problem `msvcrt` had — see `core/browser.py`).
+        kernel32 = cast(Any, ctypes).windll.kernel32
         handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
         if not handle:
             return False
