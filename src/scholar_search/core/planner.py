@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from urllib.parse import urlparse
 
 from .audit import AuditLog
+from .config import HARD
 from .contracts import (
     Action,
     ActionOutcome,
@@ -95,7 +96,12 @@ class Planner:
 
             network = action.verb in NETWORK_VERBS
             if network:
-                self.policy.wait_turn()
+                # In-page UI plans get the small slot: the page is already open and its own
+                # code answers in milliseconds (ADR 0023). The quota unit is still debited —
+                # `wait_turn` is where accounting lives — so `quota_charged` does not move.
+                self.policy.wait_turn(
+                    interval_ms=HARD.ui_interval_ms if plan.pacing == "ui" else None
+                )
                 if self.policy.degraded:
                     raise PolicyError(
                         "quota reservation could not be persisted; refusing the action",

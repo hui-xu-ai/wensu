@@ -223,7 +223,11 @@ async function humanClick(element) {
     // Not fatal; the element may not be scrollable.
   }
   const point = aimPoint(element);
-  await sleep(randomBetween(80, 200));
+  // One pause, not four. Chrome clamps timers in a background tab to ~1 s, and this work
+  // tab lives in its own unfocused window on purpose — so each extra `sleep(50..160)` cost a
+  // whole second, and a single click measured ~2 s (2026-11-24, audit). The events below
+  // still arrive in order; only the human-like spacing between them is gone.
+  await sleep(randomBetween(60, 140));
 
   if (typeof element.dispatchEvent === "function") {
     for (const type of [
@@ -238,13 +242,10 @@ async function humanClick(element) {
         type.indexOf("pointer") === 0 ? pointerEvent(type, point) : mouseEvent(type, point)
       );
     }
-    await sleep(randomBetween(60, 160));
     element.dispatchEvent(pointerEvent("pointerdown", point));
     element.dispatchEvent(mouseEvent("mousedown", point));
-    await sleep(randomBetween(50, 120));
     element.dispatchEvent(pointerEvent("pointerup", point));
     element.dispatchEvent(mouseEvent("mouseup", point));
-    await sleep(randomBetween(40, 100));
   }
   clickElement(element);
 }
@@ -259,10 +260,11 @@ async function humanType(element, text, clear) {
   } catch (error) {
     // A non-focusable field is fine; the value assignment below still applies.
   }
-  await sleep(randomBetween(60, 150));
+  // One clamped pause instead of two (see `humanClick`): in a background tab each `sleep`
+  // rounds up to a second, and the field does not need it.
+  await sleep(randomBetween(40, 90));
   element.value = clear === false ? element.value + text : text;
   element.dispatchEvent(new Event("input", { bubbles: true }));
-  await sleep(randomBetween(20, 60));
   element.dispatchEvent(new Event("change", { bubbles: true }));
 }
 

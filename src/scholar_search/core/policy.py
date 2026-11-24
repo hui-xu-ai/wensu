@@ -251,10 +251,21 @@ class PolicyEngine:
                 return True
             return self._write(replace(state, used=new_used))
 
-    def wait_turn(self) -> float:
-        """Reserve one network slot, sleeping for the interval if needed."""
+    def wait_turn(self, *, interval_ms: int | None = None) -> float:
+        """Reserve one network slot, sleeping for the interval if needed.
 
-        required = self._limits.min_interval_ms + self._jitter()
+        `interval_ms` overrides the configured floor for this one slot, and never below
+        `HARD.ui_interval_ms`. It exists for in-page UI work (ADR 0023): a click that only
+        opens a dialog on a page already loaded still costs a quota unit — the accounting is
+        untouched — but it does not need a network-sized pause. The floor stays in force for
+        everything that submits a query or opens a page.
+        """
+
+        base = max(
+            HARD.ui_interval_ms,
+            interval_ms if interval_ms is not None else self._limits.min_interval_ms,
+        )
+        required = base + self._jitter()
         slept = 0.0
         with interprocess_lock(self._lock_path, timeout_s=30.0):
             if self._degraded:

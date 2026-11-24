@@ -22,6 +22,10 @@ class HardLimits:
     """Non-negotiable limits enforced by the kernel."""
 
     min_interval_ms: int = 900
+    # In-page UI work (dialogs, drop-downs, inputs) on a page that is already open: the site
+    # answers in milliseconds, so the network floor is pure waiting there. Still one quota
+    # unit per action — this is pacing, not billing (ADR 0023).
+    ui_interval_ms: int = 150
     default_interval_ms: int = 4_000
     max_interval_ms: int = 6_000
     max_pages_per_call: int = 3

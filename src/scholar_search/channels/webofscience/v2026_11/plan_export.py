@@ -56,10 +56,10 @@ def _range_actions(query: SearchQuery) -> tuple[Action, ...]:
             {"selector": selectors.EXPORT_RANGE_FROM, "state": "visible"},
             timeout_ms=WAIT_TIMEOUT_MS,
         ),
-        settle(jitter(200, 400)),
+        settle(jitter(60, 120)),
         Action("type", {"selector": selectors.EXPORT_RANGE_FROM, "text": str(start)}),
         Action("type", {"selector": selectors.EXPORT_RANGE_TO, "text": str(end)}),
-        settle(jitter(200, 400)),
+        settle(jitter(60, 120)),
     )
 
 
@@ -73,7 +73,6 @@ def build_after_click(query: SearchQuery, *, today: dt.date | None = None) -> Pl
             {"selector": selectors.RESULT_READY, "state": "visible"},
             timeout_ms=RESULT_TIMEOUT_MS,
         ),
-        settle(jitter(600, 900)),
         *sort_actions(query.sort, capture=False),
         Action("click", {"selector": selectors.EXPORT_TRIGGER}, timeout_ms=CLICK_TIMEOUT_MS),
         Action(
@@ -81,14 +80,13 @@ def build_after_click(query: SearchQuery, *, today: dt.date | None = None) -> Pl
             {"selector": selectors.EXPORT_BIBTEX, "state": "visible"},
             timeout_ms=WAIT_TIMEOUT_MS,
         ),
-        settle(jitter(300, 450)),
         Action("click", {"selector": selectors.EXPORT_BIBTEX}, timeout_ms=CLICK_TIMEOUT_MS),
         Action(
             "wait_for",
             {"selector": selectors.EXPORT_CONTENT_COMBO, "state": "visible"},
             timeout_ms=WAIT_TIMEOUT_MS,
         ),
-        settle(jitter(200, 350)),
+        settle(jitter(60, 120)),
         # The dialog opens on its least complete option, which carries neither DOI nor
         # abstract. Selecting 完整记录 is what makes the file usable at all.
         Action(
@@ -112,7 +110,7 @@ def build_after_click(query: SearchQuery, *, today: dt.date | None = None) -> Pl
             {"selector": selectors.EXPORT_CONFIRM, "state": "visible"},
             timeout_ms=WAIT_TIMEOUT_MS,
         ),
-        settle(jitter(200, 350)),
+        settle(jitter(60, 120)),
         # `expect_download` is what turns the reply into a file path; without it the
         # extension reports only that the click happened. `timeout_ms` travels in the
         # params as well as on the action because the download wait is budgeted from the
@@ -127,4 +125,10 @@ def build_after_click(query: SearchQuery, *, today: dt.date | None = None) -> Pl
             timeout_ms=EXPORT_TIMEOUT_MS,
         ),
     ]
-    return Plan(channel="webofscience", purpose="search", actions=tuple(actions))
+        # Every action here drives controls on a page that is already open: the dialog answers
+    # in milliseconds, so this plan takes the UI slot instead of the network floor
+    # (ADR 0023). Measured 2026-11-24: the whole dialog flow is ~1-3 s by hand, while 900 ms
+    # per action made it ~14 s.
+    return Plan(
+        channel="webofscience", purpose="search", actions=tuple(actions), pacing="ui"
+    )

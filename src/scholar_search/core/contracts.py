@@ -91,6 +91,13 @@ class Plan:
     channel: str
     purpose: Purpose
     actions: tuple[Action, ...]
+    # What the spacing between these actions is defending against. `"network"` (the default)
+    # is a plan that submits queries or opens pages: the 900 ms floor there is ADR 0005/0021
+    # territory. `"ui"` is a plan that only drives controls on a page that is already open —
+    # a dialog, a drop-down, a range input — where the site's own code answers in
+    # milliseconds and a network-sized pause is pure waiting (ADR 0023; measured 3 s of
+    # dialog work turning into 14 s because every click carried the floor).
+    pacing: Literal["network", "ui"] = "network"
 
 
 # --------------------------------------------------------------------------
