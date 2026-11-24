@@ -124,11 +124,15 @@ warn_unused_ignores = true
 mypy_path = "src"
 
 # `page2md` lived in `tools/` (never type-checked) and moved into the package so the wheel
-# ships it. It carries 25 pre-existing warnings, left as they were on purpose: fixing them
-# is its own change, and relocating a file must not turn the `types` gate red.
+# ships it. It used to be exempt from `mypy --strict` because of 25 pre-existing warnings;
+# they are fixed now (annotations on the lxml helpers, `Any` on the duck-typed meta dict,
+# casts where a dict value is really an int), so the exemption is gone and the converter is
+# checked like the rest of the package. What remains below is about *dependencies*, not about
+# our code: `lxml` ships no stubs here, and `trafilatura`/`markitdown` are optional extras
+# that may not be installed at all.
 [[tool.mypy.overrides]]
-module = "scholar_search.page2md"
-ignore_errors = true
+module = ["lxml", "lxml.*", "trafilatura", "trafilatura.*", "markitdown", "markitdown.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

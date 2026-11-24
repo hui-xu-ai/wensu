@@ -36,6 +36,7 @@ import tempfile
 from collections.abc import Sequence
 from email import policy
 from pathlib import Path
+from typing import Any, cast
 
 TOOL_VERSION = "0.3.0-m1"
 SUFFIXES = {".html", ".htm", ".mhtml", ".mht"}
@@ -145,7 +146,8 @@ def _read_html(path: Path) -> tuple[str, str]:
             if part.get_content_type() == "text/html":
                 payload = part.get_payload(decode=True) or b""
                 charset = part.get_content_charset() or "utf-8"
-                return payload.decode(charset, errors="replace"), "mhtml"
+                raw = payload if isinstance(payload, bytes) else str(payload).encode("utf-8")
+                return raw.decode(charset, errors="replace"), "mhtml"
         raise SystemExit(f"page2md: {path.name} 里没有 text/html 部分")
     return path.read_text(encoding="utf-8", errors="replace"), "html"
 
@@ -153,11 +155,11 @@ def _read_html(path: Path) -> tuple[str, str]:
 # ------------------------------------------------------------------- 公式与行内渲染
 
 
-def _text(node) -> str:
+def _text(node: Any) -> str:
     return " ".join(node.text_content().split())
 
 
-def _mathml_to_latex(node) -> str:
+def _mathml_to_latex(node: Any) -> str:
     """MathML → LaTeX 子集。
 
     覆盖 mrow/mi/mn/mo/msup/msub/msubsup/mfrac/msqrt/mroot/mfenced/mtext/mtable。
@@ -165,7 +167,7 @@ def _mathml_to_latex(node) -> str:
 
     tag = node.tag if isinstance(node.tag, str) else ""
 
-    def children_latex(element) -> str:
+    def children_latex(element: Any) -> str:
         return "".join(_mathml_to_latex(child) for child in element if isinstance(child.tag, str))
 
     if tag in {"math", "mrow", "semantics", "mstyle", "mpadded", "menclose"}:
@@ -218,7 +220,7 @@ def _mathml_to_latex(node) -> str:
     return children_latex(node)
 
 
-def _latex_from_math_element(element) -> str:
+def _latex_from_math_element(element: Any) -> str:
     """把一个公式节点变成 LaTeX；转换不出来时返回空串，由调用方给一个短标记。
 
     优先用 pandoc 批量转换的结果（实测在积分上下限、矩阵、括号尺寸上准确得多）；
@@ -253,7 +255,7 @@ def _strip_math_delimiters(text: str) -> str:
     return cleaned
 
 
-def _prime_pandoc(doc, limit: int = 500) -> int:
+def _prime_pandoc(doc: Any, limit: int = 500) -> int:
     """一次 pandoc 调用把整页 MathML 批量转成 LaTeX，填进 `_MATH_PANDOC`。返回转换成功的条数。"""
 
     from lxml import etree
@@ -311,12 +313,12 @@ def _prime_pandoc(doc, limit: int = 500) -> int:
     return len(_MATH_PANDOC)
 
 
-def _render_inline(element, counters: dict[str, int]) -> str:
+def _render_inline(element: Any, counters: dict[str, int]) -> str:
     """把节点渲染成 markdown 行内文本：公式成 `$…$`，强调/上下标保留。"""
 
     pieces: list[str] = []
 
-    def walk(node) -> None:
+    def walk(node: Any) -> None:
         if isinstance(node.tag, str) and node.tag == "math":
             latex = _latex_from_math_element(node)
             counters["math_total"] += 1
@@ -398,7 +400,7 @@ def _render_inline(element, counters: dict[str, int]) -> str:
     return text.strip()
 
 
-def _table_markdown(table, counters: dict[str, int]) -> str:
+def _table_markdown(table: Any, counters: dict[str, int]) -> str:
     """`<table>` → GFM 管道表；`<math>` 等行内元素照常转换。"""
 
     rows: list[list[str]] = []
@@ -434,7 +436,7 @@ def _table_markdown(table, counters: dict[str, int]) -> str:
 BLOCK_CONTAINER_XPATH = "./div|./p|./section|./table|./ol|./ul|./figure|./figcaption|./dl"
 
 
-def _own_blocks(section) -> list[str]:
+def _own_blocks(section: Any) -> list[str]:
     """按文档顺序把 section 变成 markdown 块；跳过嵌套 section（外层不吞子节）。
 
     为什么不能只扫 `<p>`：实测这份 Elsevier 全文里 `<p>` 只有 13 个、**0 个含公式**，
@@ -451,7 +453,7 @@ def _own_blocks(section) -> list[str]:
     }
     blocks: list[str] = []
 
-    def walk(element) -> None:
+    def walk(element: Any) -> None:
         for child in element:
             if not isinstance(child.tag, str):
                 continue
@@ -509,7 +511,7 @@ _OWN_COUNTERS: dict[str, int] = {}
 _LAST_SECTIONS: list[tuple[str, int, list[str]]] = []
 
 
-def _section_entries(doc) -> list[tuple[str, int, list[str]]]:
+def _section_entries(doc: Any) -> list[tuple[str, int, list[str]]]:
     entries: list[tuple[str, int, list[str]]] = []
     seen_titles: set[str] = set()
 
@@ -622,7 +624,7 @@ def _similar(left: str, right: str) -> bool:
     )
 
 
-def _collect_sections(doc) -> list[tuple[str, int, list[str]]]:
+def _collect_sections(doc: Any) -> list[tuple[str, int, list[str]]]:
     """Sections in document order, backmatter cut, near-duplicate paragraphs removed."""
 
     collected: list[tuple[str, int, list[str]]] = []
@@ -766,6 +768,17 @@ def _section_markdown(html: str) -> tuple[str, int, dict[str, int]]:
             parent.remove(junk)
 
     _OWN_COUNTERS["math_pandoc"] = _prime_pandoc(doc)
+    # MathJax keeps a machine-readable copy of each formula in `mjx-assistive-mml` for screen
+    # readers — and on the Wiley sample (2026-11-24) those copies are **empty**
+    # (`data-semantic-type="empty"`, no children) while the real formula is drawn inside
+    # `mjx-container` as an SVG. Counting them said "6 formulas failed" when nothing was
+    # there to convert, and no marker could ever appear in the Markdown. Count what is real,
+    # and count the drawings separately so the warning can say which case it is.
+    for assistive in doc.xpath("//mjx-assistive-mml"):
+        parent = assistive.getparent()
+        if parent is not None:
+            parent.remove(assistive)
+    _OWN_COUNTERS["mathjax_graphics"] = len(doc.xpath("//mjx-container"))
 
     sections = _collect_sections(doc)
     _LAST_SECTIONS.clear()
@@ -781,7 +794,7 @@ def _section_markdown(html: str) -> tuple[str, int, dict[str, int]]:
 # ------------------------------------------------------------------------ 图片
 
 
-def _figure_block(figure) -> str:
+def _figure_block(figure: Any) -> str:
     """单个 `<figure>` → 一行 `![caption](src)`。位置由调用方决定（正文里就地插入）。"""
 
     images = figure.xpath(".//img")
@@ -882,7 +895,7 @@ def _extract_body(html: str) -> tuple[str | None, dict[str, object]]:
         )
         info["bytes_trafilatura"] = len(main_body.encode("utf-8")) if main_body else 0
 
-    sections, counters = "", {}
+    sections, counters = "", dict[str, int]()
     try:
         sections, _section_chars, counters = _section_markdown(html)
     except Exception as error:
@@ -984,7 +997,7 @@ def _localise_images(
 # --------------------------------------------------------------------- 主流程
 
 
-def _warnings(meta: dict[str, object]) -> list[str]:
+def _warnings(meta: dict[str, Any]) -> list[str]:
     """保真度告警：有这些情况时，细节问题应提示用户拿 PDF 复核。"""
 
     found: list[str] = []
@@ -998,8 +1011,15 @@ def _warnings(meta: dict[str, object]) -> list[str]:
     truncated = int(meta.get("math_truncated") or 0)
     if truncated:
         found.append(f"{truncated} 个公式过长，已在 {MATH_MAX_CHARS} 字符处截断")
+    graphics = int(meta.get("mathjax_graphics") or 0)
+    if graphics:
+        found.append(
+            f"{graphics} 个公式由 MathJax 画成图形，Markdown 里没有对应 LaTeX"
+            "（要看公式请用 PDF，或让页面以原始 MathML 呈现）"
+        )
     if not meta.get("math_total"):
-        found.append("页面没有 MathML 公式；公式可能是图片，需看 PDF 或 OCR")
+        if not graphics:
+            found.append("页面没有 MathML 公式；公式可能是图片，需看 PDF 或 OCR")
     elif not meta.get("math_pandoc"):
         found.append("公式由自研转换器渲染（未找到 pandoc），复杂公式可能失真")
     if int(meta.get("tables_skipped_inline") or 0):
@@ -1426,7 +1446,7 @@ def _write_chunks(out: Path, sections: list[tuple[str, int, list[str]]]) -> dict
         )
     payload = {
         "sections": entries,
-        "total_tokens": sum(int(entry["tokens"]) for entry in entries),
+        "total_tokens": sum(int(cast(int, entry["tokens"])) for entry in entries),
         "core_tokens": core_tokens,
         "figures": figures,
     }
@@ -1472,7 +1492,7 @@ def convert(
         header += "> " + " · ".join(str(fact) for fact in facts) + "\n\n"
     (out / "page.md").write_text(header + (markdown or ""), encoding="utf-8")
 
-    meta: dict[str, object] = {
+    meta: dict[str, Any] = {
         **info,
         "source": str(source),
         "form": form,
@@ -1482,7 +1502,7 @@ def convert(
         "bytes_md": len(markdown.encode("utf-8")),
         "headings": len(re.findall(r"(?m)^#{1,6} ", markdown)),
         "table_rows": len(re.findall(r"(?m)^\|", markdown)),
-        "math_inline": int(info.get("math_total") or 0),
+        "math_inline": int(cast(int, info.get("math_total") or 0)),
         "math_engine": "pandoc" if info.get("math_pandoc") else "builtin",
         "math_blocks": len(re.findall(r"\$\$", markdown)),
         "noise_hits": sorted({word for word in NOISE if word in markdown.lower()}),
@@ -1495,7 +1515,7 @@ def convert(
         _write_selection(out, sections, query=query, window=window)
     if mode == "core":
         (out / "page.core.md").write_text(_core_markdown(list(_LAST_SECTIONS)), encoding="utf-8")
-    meta["sections_total"] = len(chunks["sections"])
+    meta["sections_total"] = len(cast(list[Any], chunks["sections"]))
     meta["tokens_total"] = chunks["total_tokens"]
     meta["tokens_core"] = chunks["core_tokens"]
     (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -1539,7 +1559,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"{meta.get('images_copied', 0)}/{meta.get('images_missing', 0)} 缺 · "
             f"噪声 {meta['noise_hits'] or '无'} · 引擎 {meta['engine']}"
         )
-        for warning in meta["warnings"]:
+        for warning in cast(list[str], meta["warnings"]):
             print(f"    ! {warning}")
     return 0
 
