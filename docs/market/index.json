@@ -49,8 +49,8 @@
         "zh": "文溯 · 知网与 Web of Science 检索"
       },
       "description": {
-        "en": "Wensu over stdio MCP gives an agent two things: finding papers and reading them. Search covers CNKI and Web of Science (search / detail / detail_many / export) and can read a whole stretch in one call (150 records on CNKI, 500 on WoS); WoS records carry journal impact factors and filtering/sorting run locally. Reading opens the article in the browser you are already signed in to (page_read) and produces Markdown plus a document map at about 45% of the full-text size (page2md); snapshot captures the page you have open. Read-only, 25-publisher allowlist, stops at any human-verification wall, 300 network actions a day, no PDF downloads. Needs Windows, Python 3.11+, the wensu command on PATH, plus the browser extension and native host.",
-        "zh": "接入文溯 stdio MCP，给 agent 两件事：检索与精读。检索覆盖知网与 Web of Science（search / detail / detail_many / export），一次调用可读一整段（知网 150 条、WoS 500 条），WoS 自带期刊影响因子、筛选排序本地完成；精读在你已登录的浏览器里打开文章页（page_read），产出 Markdown 全文与约 45% 体积的文献地图（page2md），也可用 snapshot 贯读手上那页。只读、25 家出版社白名单、遇人机验证即停、300 次/天，不下载 PDF。需要 Windows、Python 3.11+、PATH 中的 wensu 命令，并另行配置 Edge/Chrome 扩展和原生宿主。"
+        "en": "Ask the AI to find papers and read them, end to end. Find: search CNKI and Web of Science and pull a whole batch in one go. Read: give it an article link or DOI and it reads the full text, then tells you what each section says and which sentence every key number comes from. Use: export the citation straight into your reference manager. Read-only, no PDF downloads, and it stops at a captcha for you to handle. Needs Windows, Python 3.11+, the wensu command on PATH, plus the browser extension and native host.",
+        "zh": "让 AI 帮你找文献、读全文，一条路走完。找：在知网、Web of Science 里检索，一次翻出一大段结果；读：给一篇论文的链接或 DOI，它读完全文，告诉你每节讲了什么、关键数据出自哪句话；用：导出引文信息，直接导入文献管理软件。只读，不下载 PDF；遇到验证码会停下来等你处理。需要 Windows、Python 3.11+、PATH 中的 wensu 命令，并另行配置浏览器扩展和原生宿主。"
       },
       "icon": "icons/wensu.svg",
       "author": "hui-xu-ai",

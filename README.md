@@ -3,17 +3,13 @@
 ！！！  注意不要用机构或大学的IP自动化访问这些网站，可能面临来自他们的处罚  ！！！
 
 
-给 AI 客户端用的**文献检索 + 全文精读**服务：MCP 工具，也可按需用 CLI。微内核 + 渠道插件。
+**一句话：让 AI 帮你找文献、读全文，从检索到引用一条路走完。**
 
-- **找得到**：知网与 Web of Science 双渠道，一次调用读一整段（知网 150 条 / WoS 500 条），
-  WoS 记录自带期刊影响因子，筛选与排序在本地完成、零额外请求
-- **读得完**：给一个 DOI，就在你**已登录的浏览器**里打开文章页，存成 MHTML，再由本地转换产出
-  Markdown 全文与**文献地图**（每节要点、关键句、带原句的数值，约原文体积的 45%）
-- **交得出**：单篇详情、RIS / EndNote 题录文本——查到的东西能直接落到引用里
+- **找**：在知网、Web of Science 里检索，一句话说清要什么，一次就能翻出一大段结果
+- **读**：给一篇论文的链接或 DOI，它读完全文，告诉你每节讲了什么、关键数据出自哪句话
+- **用**：导出引文信息，直接导入文献管理软件；也可以把结果整理成自己的笔记
 
-每一步都能单用：只查文献就只用检索；手上已有一篇 DOI，就只用精读。
-
-万方、维普等以后按同一契约接入。
+只读，不下载 PDF；遇到验证码会停下来等你处理。以下细节给技术用户和 agent。
 
 > 发行名 **wensu**（中文名「文溯」）。命令是 `wensu`，旧的 `scholar-search` 保留为兼容别名；
 > Python 模块名仍是 `scholar_search`，运行期目录仍是 `%LOCALAPPDATA%\scholar-search`，老配置无需改动。
@@ -22,7 +18,11 @@
 
 [![开放插件市场](https://img.shields.io/endpoint?url=https%3A%2F%2Fdshopen.org%2Fbadge%2F%40hui-xu-ai%2Fdsh-wensu.json)](https://dshopen.org/zh/plugins/@hui-xu-ai/dsh-wensu/)
 
-## 一条链怎么走
+## 细节（给技术用户和 agent）
+
+万方、维普等以后按同一契约接入。
+
+### 一条链怎么走
 
 ```text
 1) 找  search(channel="webofscience", query="TS=(ionic polymer actuator) AND PY=(2024-2026)",
