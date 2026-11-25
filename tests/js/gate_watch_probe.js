@@ -171,6 +171,59 @@ async function drive(params, schedule) {
   };
 }
 
+async function scenarioAlreadyThere() {
+  // Navigating to the document the tab is already on: the URL does not change, and that is not a
+  // stalled navigation — a search re-opens the advanced-search page and `page_read` re-reads the
+  // same article all the time. (Found by the diagnostic trail itself: the first version of the
+  // stall check called this `navigation.stalled`.)
+  return drive({ url: ARTICLE, dwell_ms: 0 }, (tab, browser) => {
+    tab.url = ARTICLE;
+    tab.status = "complete";
+    tab.title = ARTICLE_TITLE;
+    browser.chrome.tabs.update = async () => ({ ...tab });
+  });
+}
+
+async function scenarioStaysBlank() {
+  // The update is *accepted* and nothing happens: the work tab stays on `about:blank`, which is
+  // what the live run showed right after a browser start (`policy.domain` in 330 ms with
+  // `url: "about:blank"`). A tab that is not on an http(s) page after the navigation has not been
+  // navigated at all, so the answer must be one more attempt — not a policy verdict.
+  return drive({ url: ARTICLE, dwell_ms: 0 }, (tab, browser) => {
+    const update = browser.chrome.tabs.update;
+    tab.status = "complete";
+    tab.title = "about:blank";
+    // This tab never navigates, whatever it is asked to do — the state the live run showed.
+    browser.chrome.tabs.update = async (id, opts) => {
+      if (opts && opts.url && id === tab.id) return { ...tab };
+      return update(id, opts);
+    };
+  });
+}
+
+async function scenarioRejectedUpdate() {
+  // Edge answers `tabs.update` on a work tab the previous run left behind with
+  // "Navigation rejected.". The tab is ours and the target is in scope, so one retry is the
+  // right answer — this is the second half of the 2026-11-25 symptom ("first search after a
+  // browser start fails, the retry works"), reproduced here as a rejected first update.
+  return drive({ url: ARTICLE, dwell_ms: 0 }, (tab, browser) => {
+    let navigations = 0;
+    const update = browser.chrome.tabs.update;
+    browser.chrome.tabs.update = async (id, opts) => {
+      // Only the *navigation* is rejected: `tabs.update` also pins and moves tabs, and a retry
+      // that swallowed those would be a different bug.
+      if (opts && opts.url) {
+        navigations += 1;
+        if (navigations === 1) throw new Error("Navigation rejected.");
+      }
+      const answered = await update(id, opts);
+      tab.status = "complete";
+      tab.title = ARTICLE_TITLE;
+      return answered;
+    };
+  });
+}
+
 async function scenarioLateCommit() {
   // A navigation commits a moment after it is asked for, and the old page is still what the
   // tab reports. With no gate markers there is nothing to watch, and the first version of the
@@ -234,6 +287,9 @@ async function scenarioPlain() {
     process.exit(0);
   }, 30000);
   try {
+    observations.already_there = await scenarioAlreadyThere();
+    observations.stays_blank = await scenarioStaysBlank();
+    observations.rejected = await scenarioRejectedUpdate();
     observations.late_commit = await scenarioLateCommit();
     observations.wall = await scenarioWall();
     observations.solved = await scenarioSolvedItself();

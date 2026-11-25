@@ -37,7 +37,10 @@ from scholar_search.core.service import ScholarService
 DOI_URL = "https://onlinelibrary.wiley.com/doi/10.1002/adma.75384"
 ROOT = Path(__file__).resolve().parents[2]
 PROBE = ROOT / "tests" / "js" / "gate_watch_probe.js"
-BACKGROUND = ROOT / "extension" / "background.js"
+# The worker's file name carries the version (it is the browser's cache key), so it is read from
+# the manifest instead of being repeated here.
+_MANIFEST = json.loads((ROOT / "extension" / "manifest.json").read_text(encoding="utf-8"))
+BACKGROUND = ROOT / "extension" / _MANIFEST["background"]["service_worker"]
 
 
 def test_the_goto_action_carries_the_kernels_own_gate_markers() -> None:
@@ -107,6 +110,45 @@ def probe() -> dict[str, Any]:
     payload = json.loads(completed.stdout.strip().splitlines()[-1])
     assert "error" not in payload, payload
     return payload
+
+
+def test_navigating_to_the_page_already_open_is_not_a_stall(probe: dict[str, Any]) -> None:
+    """Search re-opens the advanced-search page, `page_read` re-reads the same article.
+
+    The URL is unchanged in both, which the first version of the stall check reported as
+    `navigation.stalled`.
+    """
+
+    there = probe["already_there"]
+
+    assert there["ok"] is True, there
+
+
+def test_a_tab_that_never_moved_is_navigated_again(probe: dict[str, Any]) -> None:
+    """An accepted-but-ignored update must not be reported as a domain violation.
+
+    Live, right after a browser start: `policy.domain` in 330 ms with `url: "about:blank"`. The
+    target was in scope, so this was never a policy question — the tab had simply not navigated.
+    """
+
+    blank = probe["stays_blank"]
+
+    assert blank["ok"] is True, blank
+    assert "wiley.com" in (blank["url"] or ""), blank
+
+
+def test_a_rejected_update_is_retried_once(probe: dict[str, Any]) -> None:
+    """Edge rejects an update on a work tab the previous run left behind.
+
+    Measured 2026-11-25, right after a browser start: the first `goto` of a search answered
+    `policy.domain` (the tab never moved off `about:blank`) and the immediate retry answered
+    `Navigation rejected.` — the tab is ours and the target is in scope, so one retry is right.
+    """
+
+    rejected = probe["rejected"]
+
+    assert rejected["ok"] is True, rejected
+    assert "wiley.com" in (rejected["url"] or ""), rejected
 
 
 def test_a_navigation_that_commits_late_is_not_reported_as_a_domain_violation(

@@ -623,6 +623,8 @@ async function onHostMessage(message, channel) {
       }
       let blanked = [];
       let halted = false;
+      // Where the tab was before this action navigated it ("" for the `open: "new"` branch).
+      let before = "";
       if (params.close === "disposable") blanked = await closeDisposableTabs();
       const tab = await workTab(domains);
       if (!tab || !tab.id) throw new Error("no_active_tab");
@@ -648,42 +650,105 @@ async function onHostMessage(message, channel) {
         if (url.protocol !== "https:" || !allowedHost(url.hostname, domains)) {
           throw new Error("policy.domain");
         }
-        const before = tab.url || "";
-        await chrome.tabs.update(tab.id, { url: params.url });
-        // Read the tab back only once it has moved: `tabs.get` immediately after
-        // `update` can return the previous URL, which looked like a redirect out of scope.
-        //
-        // Bounded on purpose: a human-verification interstitial ("just a moment…") never
-        // fires the load event, and the unbounded waits here outlasted the kernel's 15 s
-        // budget — the caller was told `bridge.timeout` while the tab already showed the
-        // challenge page. Reporting whatever is on screen lets the kernel classify it
-        // (`blocked`), which is the honest answer and the one the risk rules describe
-        // (2026-11-24, reproduced four times on a Cloudflare interstitial).
-        const started = Date.now();
-        // The gate watch runs beside both waits: an interstitial can be up before the URL moves
-        // (the `waitNavigated` case) or after it moved but without ever finishing (`waitComplete`
-        // case), and neither of those waits can see it. Whichever arrives first decides.
-        const watch = gateWatch(tab.id, params);
-        const navigated = (async () => {
-          await within(waitNavigated(tab.id, before, domains), 10_000);
-          // Whatever is left of a 13 s budget: heavy publisher pages genuinely need past 10 s
-          // (Wiley measured 13.3 s), so this trims the tail of the *wait*, not the page.
-          await within(waitComplete(tab.id), Math.max(1_000, 13_000 - (Date.now() - started)));
-          return false;
-        })();
-        halted =
-          watch.promise === null
-            ? await navigated
-            : await Promise.race([watch.promise, navigated]);
-        watch.stop();
+        // The URL the tab was on when this action started. Kept out here because the read-back
+        // below has to tell "a redirect took us somewhere else" (a policy event) apart from
+        // "nothing moved yet" (not a policy event).
+        before = tab.url || "";
+        // Issue the navigation, then wait for it the way the page actually behaves. Wrapped in a
+        // closure because Edge rejects the update on a work tab the previous run left behind
+        // ("Navigation rejected."), and that is exactly the first navigation after a browser
+        // start — measured 2026-11-25: the first search failed and the immediate retry worked.
+        const navigate = async () => {
+          await chrome.tabs.update(tab.id, { url: params.url });
+          // Read the tab back only once it has moved: `tabs.get` immediately after
+          // `update` can return the previous URL, which looked like a redirect out of scope.
+          //
+          // Bounded on purpose: a human-verification interstitial ("just a moment…") never
+          // fires the load event, and the unbounded waits here outlasted the kernel's 15 s
+          // budget — the caller was told `bridge.timeout` while the tab already showed the
+          // challenge page. Reporting whatever is on screen lets the kernel classify it
+          // (`blocked`), which is the honest answer and the one the risk rules describe
+          // (2026-11-24, reproduced four times on a Cloudflare interstitial).
+          const started = Date.now();
+          // The gate watch runs beside both waits: an interstitial can be up before the URL moves
+          // (the `waitNavigated` case) or after it moved but without ever finishing (`waitComplete`
+          // case), and neither of those waits can see it. Whichever arrives first decides. With no
+          // markers there is nothing to watch, and racing an already-resolved promise would throw
+          // the waits away — that is why `gateWatch` returns `promise: null` there.
+          const watch = gateWatch(tab.id, params);
+          const navigated = (async () => {
+            await within(waitNavigated(tab.id, before, domains), 10_000);
+            // Whatever is left of a 13 s budget: heavy publisher pages genuinely need past 10 s
+            // (Wiley measured 13.3 s), so this trims the tail of the *wait*, not the page.
+            await within(waitComplete(tab.id), Math.max(1_000, 13_000 - (Date.now() - started)));
+            return false;
+          })();
+          try {
+            halted =
+              watch.promise === null
+                ? await navigated
+                : await Promise.race([watch.promise, navigated]);
+          } finally {
+            watch.stop();
+          }
+        };
+        try {
+          await navigate();
+        } catch (error) {
+          // Only a rejected *update* is retried, not a failed wait: a page that did not load is
+          // the site's business, while an update Edge refused on our own tab is ours. The caller
+          // never sees this attempt, so a second one costs it nothing.
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          await navigate();
+        }
       }
       if (params.reload === true) await within(waitComplete(tab.id), 3_000);
       await new Promise((resolve) => setTimeout(resolve, dwellFor(params)));
 
-      const updated = await chrome.tabs.get(tab.id);
-      const finalUrl = updated.url || params.url;
+      let updated = await chrome.tabs.get(tab.id);
+      let finalUrl = updated.url || params.url;
+      // A tab that is not on an http(s) page after the navigation was not navigated at all. The
+      // work tab can be in that state: the id remembered from the previous browser session points
+      // at a blank tab Edge accepts `tabs.update` on and then does nothing with (measured
+      // 2026-11-25, right after `wensu browser start`: `url: "about:blank"`, and the same request
+      // worked a second later). Open a tab of our own instead of insisting — that is also what a
+      // person does when a tab stops responding.
+      const trail = { before, first: finalUrl, opened: null, after: finalUrl };
+      if (params.reload !== true && !/^https?:/i.test(finalUrl)) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        const opened = await chrome.tabs
+          .create({ url: params.url, active: true })
+          .catch(() => null);
+        trail.opened = (opened && opened.id) || null;
+        const target = opened && opened.id ? opened.id : tab.id;
+        await within(waitNavigated(target, "", domains), 8_000);
+        await within(waitComplete(target), 6_000);
+        updated = await chrome.tabs.get(target).catch(() => updated);
+        finalUrl = updated.url || params.url;
+        trail.after = finalUrl;
+      }
       const meta = await pageMeta(updated.id);
       const status = Number(meta.status || 0);
+      // A URL that never left http(s) is not a domain violation: nothing was navigated. A
+      // *changed* URL outside the scope still is a policy event (a login or verify redirect).
+      //
+      // "Unchanged" on its own is not enough: navigating to the document the tab is already on
+      // (a search re-opening the advanced-search page, `page_read` re-reading the same article)
+      // leaves the URL exactly as it was and is perfectly normal.
+      const sameDoc = (one, two) => {
+        try {
+          const from = new URL(one);
+          const to = new URL(two);
+          return from.origin === to.origin && from.pathname === to.pathname;
+        } catch {
+          return false;
+        }
+      };
+      const stalled =
+        params.reload !== true &&
+        before !== "" &&
+        finalUrl === before &&
+        !sameDoc(before, params.url);
       const outOfScope = !allowedHost(new URL(finalUrl).hostname, domains);
       const data = {
         ...meta,
@@ -697,13 +762,20 @@ async function onHostMessage(message, channel) {
         // and replaced by a new one.
         blanked,
       };
+      if (stalled) {
+        return reply({
+          ok: false,
+          error: "navigation.stalled",
+          data: { ...data, diagnostics: trail },
+        });
+      }
       if (outOfScope || status >= 400) {
         // Refuse the navigation, but keep the final URL so the kernel can see
         // a login/verify redirect and persist the cooldown.
         return reply({
           ok: false,
           error: outOfScope ? "policy.domain" : `HTTP ${status}`,
-          data,
+          data: { ...data, diagnostics: trail },
         });
       }
       boundTabId = updated.id;

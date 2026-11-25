@@ -1,6 +1,6 @@
 """The extension must keep one tab of its own, and must not touch anyone else's.
 
-Three behaviours were pinned by reading `extension/background.js` and then reproduced with
+Three behaviours were pinned by reading `extension/background-<version>.js` and then reproduced with
 `tests/js/tab_lifecycle_probe.js` (real script, fake `chrome`), 2026-11-22:
 
 1. `workTab()` adopted **any** tab whose host was in scope — a tab the user opened himself —
@@ -31,7 +31,10 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 PROBE = ROOT / "tests" / "js" / "tab_lifecycle_probe.js"
-BACKGROUND = ROOT / "extension" / "background.js"
+# The worker's file name carries the version (it is the browser's cache key), so it is read from
+# the manifest instead of being repeated here.
+_MANIFEST = json.loads((ROOT / "extension" / "manifest.json").read_text(encoding="utf-8"))
+BACKGROUND = ROOT / "extension" / _MANIFEST["background"]["service_worker"]
 
 _FIX = "defect 3 (0.13.2): the transient tab was closed instead of blanked and reused"
 

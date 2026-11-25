@@ -4,6 +4,35 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.14.7] - 2026-11-25
+
+### Fixed — the first navigation after a browser start no longer fails
+
+Three separate things made `goto` answer `policy.domain` for a tab that had simply not navigated
+yet. All three are fixed, and the service worker's file name now carries the version.
+
+1. **The wait was abandoned** (0.14.5's regression). `gateWatch` returns an already-resolved
+   promise when it has no gate markers, and racing the real navigation wait against it completed
+   instantly — both `waitNavigated` and `waitComplete` were dropped and the tab was read back
+   before the document arrived. It now returns `promise: null` and the goto awaits the real wait.
+2. **A rejected update was final.** Edge answers `tabs.update` on a work tab a previous session
+   left behind with "Navigation rejected."; the action now retries once. The retry is the update's,
+   not the wait's: a page that did not load is the site's business, an update Edge refused on our
+   own tab is ours.
+3. **An accepted-but-ignored update was misread.** If the tab is still not on an http(s) page
+   after the navigation, nothing was navigated — the extension now opens a tab of its own instead
+   of insisting (and reports `navigation.stalled` with a `diagnostics` trail if even that fails).
+   `navigation.stalled` deliberately does not fire when the tab is *already* on the requested
+   document: navigating to the page you are on leaves the URL unchanged and is entirely normal.
+
+### Changed — the service worker's file name carries the version
+
+Edge keeps serving the cached copy of a service worker whose file name did not change. On
+2026-11-25 that meant five fixes in a row were tested against a script nobody was executing, with
+the repository and the assets directory both holding the new code. The worker is now
+`background-<version>.js` and `tests/unit/test_service_worker_cache_busting.py` fails when the
+name and the version disagree — a version bump without a rename is exactly that.
+
 ## [0.14.6] - 2026-11-25
 
 ### Fixed — a `goto` no longer skips its own navigation wait
