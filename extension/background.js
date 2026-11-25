@@ -462,14 +462,18 @@ function looksLikeGate(tab, markers) {
 
 function gateWatch(tabId, params) {
   // Resolves `true` once a gate marker has persisted for the grace period, `false` otherwise.
-  // A `goto` without markers resolves immediately, which is exactly the old behaviour.
+  // **`promise: null` means "there is nothing to watch"** — not "already false". A resolved
+  // `false` looks the same to `await`, and the first version of this returned exactly that: the
+  // race below then won instantly, both navigation waits were abandoned, and the read-back
+  // answered `policy.domain` for a page that was merely still loading (measured 2026-11-25:
+  // the first search after `wensu browser start` failed once and then worked).
   const markers = gateMarkers(params);
   let stopped = false;
   const stop = () => {
     stopped = true;
   };
   if (!markers.urls.length && !markers.titles.length) {
-    return { promise: Promise.resolve(false), stop };
+    return { promise: null, stop };
   }
   const promise = (async () => {
     const deadline = Date.now() + GATE_WATCH_MS;
@@ -667,7 +671,10 @@ async function onHostMessage(message, channel) {
           await within(waitComplete(tab.id), Math.max(1_000, 13_000 - (Date.now() - started)));
           return false;
         })();
-        halted = await Promise.race([watch.promise, navigated]);
+        halted =
+          watch.promise === null
+            ? await navigated
+            : await Promise.race([watch.promise, navigated]);
         watch.stop();
       }
       if (params.reload === true) await within(waitComplete(tab.id), 3_000);

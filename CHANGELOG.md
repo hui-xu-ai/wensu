@@ -4,6 +4,26 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.14.6] - 2026-11-25
+
+### Fixed — a `goto` no longer skips its own navigation wait
+
+0.14.5's gate watch raced the navigation wait against a "there is no gate to watch for" promise
+that was **already resolved**. The gate watch is only armed by `page_read`, so every other
+navigation — every search — won that race instantly, abandoned both waits (`waitNavigated`,
+`waitComplete`) and read the tab back while the previous page was still on screen. When that page
+was off the channel's domain (`about:blank` right after `wensu browser start`, or `doi.org` after a
+failed `page_read`) the answer was `policy.domain` for a navigation that had merely not committed
+yet: one unit spent and a retry needed. Seen on the 0.14.5 install check — the first search after a
+browser start failed once, then worked.
+
+`gateWatch` now returns `promise: null` when it has nothing to watch and the `goto` awaits the real
+wait instead of racing it. The fake-browser probe pins both directions
+(`tests/js/gate_watch_probe.js`, new `late_commit` case): a navigation whose document arrives 2.5 s
+late used to answer `policy.domain` in **19 ms**, and now answers `ok` when the document lands;
+a wall (never completes) still ends the wait at 1.5 s. Live: the first search after a browser
+restart succeeds on the first attempt.
+
 ## [0.14.5] - 2026-11-25
 
 ### Fixed — a zero-hit search is no longer reported as a refused expression

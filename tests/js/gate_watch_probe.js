@@ -151,7 +151,7 @@ async function drive(params, schedule) {
   await sleep(25);
   const work = await context.workTab(DOMAINS);
   const tabId = work.id;
-  schedule(browser.tabs.get(tabId));
+  schedule(browser.tabs.get(tabId), browser);
   const replies = [];
   const channel = { postMessage: (payload) => replies.push(payload) };
   const began = Date.now();
@@ -169,6 +169,31 @@ async function drive(params, schedule) {
     title: (reply.data && reply.data.title) || null,
     url: (reply.data && reply.data.url) || null,
   };
+}
+
+async function scenarioLateCommit() {
+  // A navigation commits a moment after it is asked for, and the old page is still what the
+  // tab reports. With no gate markers there is nothing to watch, and the first version of the
+  // gate watch raced the real wait against an already-resolved "no gate" promise: the race
+  // won instantly, both waits were abandoned, and the read-back answered `policy.domain` for a
+  // page that was simply still loading (measured 2026-11-25: the first search after
+  // `wensu browser start` failed once and then worked).
+  return drive({ url: ARTICLE, dwell_ms: 0 }, (tab, browser) => {
+    const update = browser.chrome.tabs.update;
+    tab.title = "";
+    tab.status = "loading";
+    // Issue the navigation at once and let the document arrive later, the way a real browser
+    // does: `tabs.update` answers immediately, the commit is the network's business. The old
+    // page stays what the tab reports until then.
+    browser.chrome.tabs.update = (id, opts) => {
+      setTimeout(() => {
+        tab.url = opts.url;
+        tab.status = "complete";
+        tab.title = ARTICLE_TITLE;
+      }, 2_500);
+      return Promise.resolve({ ...tab });
+    };
+  });
 }
 
 async function scenarioWall() {
@@ -209,6 +234,7 @@ async function scenarioPlain() {
     process.exit(0);
   }, 30000);
   try {
+    observations.late_commit = await scenarioLateCommit();
     observations.wall = await scenarioWall();
     observations.solved = await scenarioSolvedItself();
     observations.plain = await scenarioPlain();

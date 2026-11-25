@@ -109,6 +109,25 @@ def probe() -> dict[str, Any]:
     return payload
 
 
+def test_a_navigation_that_commits_late_is_not_reported_as_a_domain_violation(
+    probe: dict[str, Any],
+) -> None:
+    """The wait must not be abandoned just because there is no gate to watch for.
+
+    The first version of the gate watch raced the real navigation wait against an
+    already-resolved "no gate" promise. The race won instantly, both waits were dropped, and
+    the read-back found the previous page — `policy.domain` for a navigation that was simply
+    still in flight (measured 2026-11-25: the first search after `wensu browser start` failed
+    once, then worked).
+    """
+
+    late = probe["late_commit"]
+
+    assert late["ok"] is True, late
+    assert "wiley.com" in (late["url"] or ""), late
+    assert late["halted"] is False, late
+
+
 def test_a_wall_stops_the_wait_instead_of_using_the_whole_budget(probe: dict[str, Any]) -> None:
     """12.12 s was the old cost (2026-11-25). The grace period is 1.5 s; nothing else may run."""
 
