@@ -994,6 +994,38 @@ def _localise_images(
     return re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", rewrite, markdown), copied, missing
 
 
+def _adopt_figure_assets(source: Path, out: Path) -> dict[str, str]:
+    """Copy the debugger-captured figures next to the Markdown and return their link map.
+
+    `page_read(..., figures=True)` writes `<page_dir>/assets/NN.ext` plus an `index.json` that maps
+    each publisher URL to that file (ADR 0026). The MHTML itself never carried those images — its
+    `<img src>` still points at the CDN — so without this the Markdown loses them offline.
+    """
+
+    index = source.parent / "assets" / "index.json"
+    if not index.is_file():
+        return {}
+    try:
+        mapping = json.loads(index.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(mapping, dict):
+        return {}
+    target = out / "assets"
+    adopted: dict[str, str] = {}
+    for url, relative in mapping.items():
+        if not isinstance(url, str) or not isinstance(relative, str):
+            continue
+        name = Path(relative).name
+        origin = source.parent / "assets" / name
+        if not origin.is_file():
+            continue
+        target.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(origin, target / name)
+        adopted[url] = f"assets/{name}"
+    return adopted
+
+
 # --------------------------------------------------------------------- 主流程
 
 
@@ -1481,8 +1513,19 @@ def convert(
     markdown = ""
     if body:
         markdown, copied, missing = _localise_images(body, source, out, _mhtml_parts(source))
+        # Figures the browser captured through the debugger (ADR 0026) sit beside the page with a
+        # URL → file map, because the MHTML never carried them: its `<img src>` still points at the
+        # publisher's CDN. Adopting them makes the Markdown directory self-contained.
+        adopted = _adopt_figure_assets(source, out)
+        if adopted:
+            resolved = sum(1 for url in adopted if f"]({url})" in markdown)
+            for url, relative in adopted.items():
+                markdown = markdown.replace(f"]({url})", f"]({relative})")
+            copied += resolved
+            missing = max(0, missing - resolved)
         info["images_copied"] = copied
         info["images_missing"] = missing
+        info["figures_adopted"] = len(adopted)
     title = info.get("title") or source.stem
     header = f"# {title}\n\n"
     facts = [

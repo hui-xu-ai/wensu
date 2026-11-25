@@ -4,6 +4,35 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.14.12] - 2026-11-25
+
+### Added — `page_read(figures=true)` saves the article's images
+
+The capture never carried them: measured on two real pages, 36 `<img>` tags produced **zero** image
+parts (every `cid:` was a stylesheet), because `pageCapture` skips cross-origin CDN images. The
+Markdown kept the publisher's URLs, so reading offline had text and no figures.
+
+Since no extension API hands back a response body, and every alternative either re-requests the
+image or is blocked (canvas tainting, `webRequest`, disk cache, MITM — all rejected in ADR 0026),
+the images are read out of what the browser **already downloaded**, through the same protocol the
+DevTools Network panel uses:
+
+* the debugger attaches **before** the navigation (`goto` carries `assets`), because
+  `Network.getResponseBody` only knows requests made while attached;
+* only image responses are kept; 12 figures / 1.2 MB each / 8 MB total, and anything skipped is
+  named in `figures.skipped` with a reason;
+* the reply carries a manifest and no bytes — each figure is read back in chunks over the existing
+  `snapshot` token path, because a frame is capped at 2 MB;
+* the debugger detaches in a `finally`, so the browser's notice does not outlive the capture;
+* `page2md` adopts `<page_dir>/assets/`, copies it beside the Markdown and rewrites the links, so
+  the output directory stays self-contained.
+
+Off by default: without `figures` the debugger is never touched. `manifest.json` gains the
+`debugger` permission, which is the largest permission change this project has made — the site sees
+**no new request** (the notice is only local to the browser).
+
+`background-0.14.12.js`, as the cache-busting rule requires.
+
 ## [0.14.11] - 2026-11-25
 
 ### Fixed — every search paid 8.5 s for host endpoints that no longer existed
