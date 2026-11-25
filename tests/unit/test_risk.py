@@ -51,8 +51,24 @@ def test_account_verification_gate_is_a_login_wall(tmp_path: Path) -> None:
 
 
 def test_detects_verify_redirect(tmp_path: Path) -> None:
-    signal = guard(tmp_path).inspect(outcome(url="https://kns.cnki.net/verify/home?x=1"))
+    # The URL alone is not evidence: a page that *lands* on a verification URL and shows the
+    # interstitial in its title is the wall (the title is what the reader sees).
+    signal = guard(tmp_path).inspect(
+        outcome(url="https://kns.cnki.net/verify/home?x=1", data={"title": "验证中心"})
+    )
     assert signal is RiskSignal.VERIFY_REDIRECT
+
+
+def test_a_verification_looking_url_with_an_article_title_is_not_a_wall(tmp_path: Path) -> None:
+    """ACS hops through `…?captcha=…` and lands on the article; the reader sees no challenge."""
+
+    signal = guard(tmp_path).inspect(
+        outcome(
+            url="https://pubs.acs.org/inocaj/article/60/22/16922?captcha=1",
+            data={"title": "Hydrolysis-Promoted Building Block Assembly | Inorganic Chemistry"},
+        )
+    )
+    assert signal is None
 
 
 def test_detects_http_403(tmp_path: Path) -> None:

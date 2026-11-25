@@ -36,6 +36,24 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.22] - 2026-11-25
+
+### Fixed — a URL that *looks* like a challenge no longer stops the read
+
+`10.1021/acs.inorgchem.1c03019` was reported `blocked` while the reader saw no captcha at all. The
+audit shows why: `signal: verify_redirect`, produced by matching `captcha` inside the URL. ACS hops
+through such a URL and lands on the article, so the plan was dropped for a wall that did not exist —
+and a 30-minute wall marker made the next attempts answer from that memory instead of navigating.
+
+Stopping now requires evidence the reader can also see: a gate title (`just a moment`, `请稍候`,
+`验证中心`, …) or `captcha_visible` from the content script. A verification-looking URL on its own
+is ignored; if the page really is a wall, the capture's own body markers (`Body.ray id`, challenge
+text) still report `blocked` a step later, and that verdict *is* based on the page.
+
+`VERIFY_URL_MARKERS` stays in the module, retired, with the reason next to it.
+
+`background-0.14.22.js`, as the cache-busting rule requires (worker unchanged).
+
 ## [0.14.21] - 2026-11-25
 
 ### Fixed — a full Wiley article was reported as a paywall

@@ -202,8 +202,6 @@ class RiskGuard:
         if not url:
             nested = outcome.data.get("url")
             url = nested.casefold() if isinstance(nested, str) else ""
-        if any(marker in url for marker in VERIFY_URL_MARKERS):
-            return RiskSignal.VERIFY_REDIRECT
         if any(marker in url for marker in LOGIN_URL_MARKERS):
             return RiskSignal.LOGIN_REDIRECT
 
@@ -224,10 +222,17 @@ class RiskGuard:
         if outcome.data.get("auth_required") is True:
             return RiskSignal.LOGIN_REDIRECT
 
-        # Verification interstitials keep a short, distinctive document title.
+        # Verification interstitials keep a short, distinctive document title. This — and the
+        # visible-captcha flag above — is the only evidence that stops a plan.
         title = outcome.data.get("title")
         if isinstance(title, str) and _title_is_gate(title):
             return RiskSignal.VERIFY_REDIRECT
+        # A URL that merely *looks* like a verification hop is not a wall. ACS redirects through
+        # `/inocaj/article/…?captcha=…` and lands on the article; the reader sees no challenge, and
+        # `verify_redirect` used to drop the read and remember a 30-minute wall marker for it
+        # (measured 2026-11-25, `10.1021/acs.inorgchem.1c03019`). Stopping without a visible
+        # signal is worse than not stopping: the rule from ADR 0004 is "a human solves the check in
+        # the browser", which requires there to *be* a check on screen.
         return None
 
     # -- tripping ------------------------------------------------------
