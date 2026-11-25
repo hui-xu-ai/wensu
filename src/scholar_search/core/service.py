@@ -92,7 +92,9 @@ def _still_rendering(probe: dict[str, Any]) -> bool:
         probe.get("status") == "no_html"
         and probe.get("reason") in {"abstract_only", "paywall"}
         and not probe.get("headings")
-        and not probe.get("paywall_hits")
+        # A blocking marker means the body is behind a wall, so no amount of waiting helps;
+        # a soft one ("institutional access") is printed on pages that are still painting.
+        and not probe.get("blocking_hits")
     )
 
 

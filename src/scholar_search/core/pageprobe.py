@@ -120,6 +120,19 @@ SECTION_MARKERS: tuple[str, ...] = ('class="section-title"', "<section id=")
 FULL_TEXT_SECTIONS = 6
 # The Nature-style shape: an `<article>` element and several unnumbered headings.
 BODY_HEADINGS = 6
+
+# Section names a real article body has. Two of them in the prose is the cheapest honest evidence
+# that the page is the paper and not a landing page with headings.
+ARTICLE_SECTION_NAMES: tuple[str, ...] = (
+    "introduction",
+    "experimental section",
+    "results and discussion",
+    "results",
+    "discussion",
+    "conclusion",
+    "materials and methods",
+    "methods",
+)
 _ARTICLE_TAG = re.compile(r"<article[ >]", re.IGNORECASE)
 _BODY_HEADING = re.compile(r"<h[23][ >]", re.IGNORECASE)
 # `<h2>1. Introduction</h2>` / `<h3><span>2.3</span> Method</h3>`: the article's own numbering.
@@ -181,12 +194,18 @@ def classify_mhtml(path: Path, *, url: str = "") -> dict[str, object]:
     doc_title = _DOC_TITLE.search(raw)
     document_title = _text_of(doc_title.group(1))[:300] if doc_title else ""
 
+    # Blocking markers mean the body is behind a wall; soft ones ("institutional access") are
+    # printed on pages an entitled reader is already reading. Computed before `counts` because the
+    # reply carries the number.
+    blocking = sum(1 for marker in BLOCKING_PAYWALL_MARKERS if marker in _text_of(lowered))
+
     counts = {
         "sections": sections,
         "headings": headings,
         "article_tags": article_tags,
         "body_headings": body_headings,
         "paywall_hits": hits,
+        "blocking_hits": blocking,
         "pdf_url": pdf_url,
         "title": title,
     }
@@ -213,8 +232,15 @@ def classify_mhtml(path: Path, *, url: str = "") -> dict[str, object]:
     # reported `no_html` / `paywall` because of one such mention, and the reader was told the tool
     # could not capture an article that was right there.
     blocking = sum(1 for marker in BLOCKING_PAYWALL_MARKERS if marker in _text_of(lowered))
+    # A page shell can carry plenty of `<h2>` — navigation, "Supporting Information", "Figures" —
+    # without any of the article's own sections. Measured 2026-11-25 on
+    # `10.1021/acs.inorgchem.1c03019`: `article_tags: 2`, `body_headings: 16`, and zero body, which
+    # the earlier rule happily called `ok`. Requiring two of the article's section names is what
+    # separates a body from a shell.
+    prose = _text_of(lowered)
+    body_sections = sum(1 for name in ARTICLE_SECTION_NAMES if name in prose)
     article_shaped = sections >= FULL_TEXT_SECTIONS or (
-        bool(article_tags) and body_headings >= BODY_HEADINGS
+        bool(article_tags) and body_headings >= BODY_HEADINGS and body_sections >= 3
     )
     if blocking:
         status, reason = "no_html", "paywall"

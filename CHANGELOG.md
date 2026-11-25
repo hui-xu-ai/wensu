@@ -36,6 +36,26 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.23] - 2026-11-25
+
+### Fixed — a page shell is not an article body
+
+ACS `10.1021/acs.inorgchem.1c03019` was reported `ok` while the capture held only Abstract,
+Supporting Information, Figures and the purchase/rent offers — no Introduction, no Results. The
+shape test asked for "an `<article>` element and six headings", and navigation headings satisfied
+it, so the reader was told the article had been captured when the Markdown had no body in it.
+
+The test now also requires **three of the article's own section names** in the prose
+(`introduction`, `experimental section`, `results`/`discussion`, `conclusion`, `methods`), which a
+landing page does not print. Re-judging the saved captures: the Wiley full text stays `ok`, the ACS
+shell becomes `no_html` / `abstract_only` — the honest answer, and the one that tells the reader to
+sign in rather than to read an empty Markdown.
+
+`_still_rendering` also stops treating a soft marker (`institutional access`) as "the page is
+closed": it now looks at `blocking_hits`, so a page that is still painting gets its second look.
+
+`background-0.14.23.js`, as the cache-busting rule requires (worker unchanged).
+
 ## [0.14.22] - 2026-11-25
 
 ### Fixed — a URL that *looks* like a challenge no longer stops the read
