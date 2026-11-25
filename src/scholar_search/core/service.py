@@ -63,6 +63,10 @@ ANSWER_SLICE_MS = 1_200
 # highlights. Both waits are clamped by the extension to 3 s per action.
 _ARTICLE_SETTLE_MS = 1_200
 _SECOND_LOOK_MS = 1_500
+# Figures arrive after the body: the same page captured at 1.2 s held only header logos, and at
+# ~6 s its four article figures were in the network (measured 2026-11-25). One `sleep` may not
+# exceed 3 s (`MAX_SLEEP_MS`), so the wait is two of them.
+_FIGURE_SETTLE_MS = 2_400
 
 
 def _classify_saved(saved: dict[str, Any], *, url: str = "") -> dict[str, Any]:
@@ -141,6 +145,12 @@ def _no_figures() -> dict[str, Any]:
     """The report for a capture that was not asked for figures."""
 
     return {"assets": [], "skipped": [], "bytes": 0}
+
+
+def _no_figures_report() -> dict[str, Any]:
+    """The saved-figures report when a capture was not asked for any."""
+
+    return {"saved": 0, "skipped": [], "bytes": 0, "files": {}}
 
 
 def _write_figures(page: Path, figures: dict[str, Any]) -> dict[str, Any]:
@@ -227,7 +237,10 @@ def _page_spec(publisher: Publisher) -> ChannelSpec:
         schema_version=1,
         min_core=__version__,
         domains=(*publisher.hosts(), "doi.org"),
-        verbs=("goto", "read_html", "wait_for", "sleep"),
+        # `scroll` is here for one reason: article images are lazy, and walking the page is what
+        # makes the browser download them so the debugger can read them (ADR 0026). It is a UI
+        # action on a page the reader could scroll themselves, and it issues no request of ours.
+        verbs=("goto", "read_html", "wait_for", "sleep", "scroll"),
         capabilities=(),
     )
     return ChannelSpec(name=manifest.channel, site_version="v1", manifest=manifest, package="")
@@ -932,7 +945,10 @@ class ScholarService:
                     "quota_charged": 0,
                     "next": _page_next({"status": "blocked", "reason": "challenge"}),
                 }
-            if identifier and identifier in str(open_tab.get("url") or ""):
+            # Figures are read out of responses that arrive *while the debugger is attached*, so
+            # reusing a tab that was loaded before the request cannot yield any: with `figures`
+            # the page is always navigated again (ADR 0026).
+            if identifier and identifier in str(open_tab.get("url") or "") and not figures:
                 return {
                     "status": "ok",
                     "source": "open-tab",
@@ -1017,11 +1033,20 @@ class ScholarService:
             # Publisher article bodies render after the load event: capturing straight after
             # `goto` returned 1.8 KB of "Highlights" from a ScienceDirect article page that
             # was fully accessible (0.12.59, real run after signing in).
+            #
+            # With `figures` the extension brings the work window back for the duration of the
+            # capture, and the page gets longer to fetch its images: article figures arrive a few
+            # seconds after the body, and capturing at 1.2 s found only the header logos
+            # (measured 2026-11-25 — with ~6 s the same page's four figures were in the network).
+            settle: list[Action] = [Action("sleep", {"ms": _ARTICLE_SETTLE_MS})]
+            if figures:
+                for _ in range(2):
+                    settle.append(Action("sleep", {"ms": _FIGURE_SETTLE_MS}))
             self._run(
                 Plan(
                     channel=f"page:{publisher.name}",
                     purpose="detail",
-                    actions=(Action("sleep", {"ms": _ARTICLE_SETTLE_MS}),),
+                    actions=tuple(settle),
                 ),
                 spec,
             )
@@ -1067,6 +1092,7 @@ class ScholarService:
                 "final_url": final_url,
                 "mhtml_path": str(readable),
                 "bytes": int(saved.get("bytes") or 0),
+                "figures": saved.get("figures") or _no_figures_report(),
                 "title": str(saved.get("title") or probe.get("title") or ""),
                 "quota_charged": PAGE_READ_QUOTA,
                 "next": _page_next(probe),

@@ -207,7 +207,8 @@ async function main() {
       );
     }
   };
-  fire("img-1", "Image", "image/png", "https://mdpi-res.com/a.png", 22);
+  // Comfortably over the 4 KB beacon floor, and under the per-figure cap.
+  fire("img-1", "Image", "image/png", "https://mdpi-res.com/a.png", 24_000);
   fire("img-2", "Image", "image/png", "https://mdpi-res.com/huge.png", HUGE);
   fire("css-1", "Stylesheet", "text/css", "https://mdpi-res.com/a.css", 100);
 

@@ -178,6 +178,13 @@ const MAX_FIGURES = 12;
 const MAX_FIGURE_BYTES = Math.round(1.2 * 1024 * 1024);
 const MAX_FIGURES_TOTAL = 8 * 1024 * 1024;
 const FIGURE_CHUNK_CHARS = 1_200_000;
+// A page's network carries far more images than its figures: consent banners, analytics beacons,
+// tracking pixels and logos all arrive first and ate the whole budget in the first live run
+// (measured 2026-11-25: twelve `uct.service.usercentrics.eu` beacons, zero article figures). So a
+// beacon is dropped by host, and anything smaller than a few kilobytes is kept only if there is
+// room — a 1×1 pixel is not a figure.
+const FIGURE_BLOCK = /(usercentrics|google-analytics|googletagmanager|doubleclick|facebook|hotjar|segment|sentry|newrelic|cloudflareinsights|favicon)/i;
+const FIGURE_MIN_BYTES = 4 * 1024;
 let figureSession = null; // { tabId, images: Map<requestId, {url, mime, size}>, order, skipped }
 
 function onDebuggerEvent(source, method, params) {
@@ -191,11 +198,19 @@ function onDebuggerEvent(source, method, params) {
   if (session.images.has(params.requestId)) return;
   const url = String(response.url || "");
   if (!/^https?:/i.test(url)) return;
+  if (FIGURE_BLOCK.test(url)) {
+    session.skipped.push({ url, reason: "not_a_figure" });
+    return;
+  }
   if (session.order.length >= MAX_FIGURES) {
     session.skipped.push({ url, reason: "too_many" });
     return;
   }
   const size = Number(response.contentLength || response.encodedDataLength || 0);
+  if (size && size < FIGURE_MIN_BYTES) {
+    session.skipped.push({ url, reason: "too_small" });
+    return;
+  }
   if (size > MAX_FIGURE_BYTES) {
     session.skipped.push({ url, reason: "too_large" });
     return;
@@ -210,6 +225,13 @@ async function beginFigures(tabId) {
   await endFigures();
   await chrome.debugger.attach({ tabId }, "1.3");
   figureSession = { tabId, images: new Map(), order: [], skipped: [] };
+  // Article images are lazy, and a minimized window never paints — so nothing is ever downloaded
+  // for the debugger to read. The window is brought back (unfocused: taking focus is exactly what
+  // the quiet windows avoid) and minimized again when the capture ends.
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (tab && tab.windowId) {
+    await within(chrome.windows.update(tab.windowId, { state: "normal" }), 1_000).catch(() => null);
+  }
   // The buffer has to be able to hold what is kept; `getResponseBody` fails once it is evicted.
   await chrome.debugger.sendCommand({ tabId }, "Network.enable", {
     maxTotalBufferSize: MAX_FIGURES_TOTAL + 1024 * 1024,
@@ -222,6 +244,10 @@ async function endFigures() {
   figureSession = null;
   if (!session) return;
   await chrome.debugger.detach({ tabId: session.tabId }).catch(() => null);
+  const tab = await chrome.tabs.get(session.tabId).catch(() => null);
+  if (tab && tab.windowId) {
+    await minimizeWindow(tab.windowId);
+  }
 }
 
 async function collectFigures() {
@@ -233,10 +259,6 @@ async function collectFigures() {
   for (const requestId of session.order) {
     const info = session.images.get(requestId);
     if (!info) continue;
-    if (total + info.size > MAX_FIGURES_TOTAL) {
-      skipped.push({ url: info.url, reason: "total_cap" });
-      continue;
-    }
     try {
       const body = await chrome.debugger.sendCommand({ tabId: session.tabId }, "Network.getResponseBody", {
         requestId,
@@ -246,8 +268,15 @@ async function collectFigures() {
         skipped.push({ url: info.url, reason: "no_body" });
         continue;
       }
-      assets.push({ url: info.url, mime: info.mime, size: info.size, base64 });
-      total += info.size;
+      // The cap has to be checked against the *decoded* size: a response served from the cache
+      // reports `contentLength: 0`, so the header cannot be trusted for accounting.
+      const raw = Math.floor((base64.length * 3) / 4);
+      if (total + raw > MAX_FIGURES_TOTAL) {
+        skipped.push({ url: info.url, reason: "total_cap" });
+        continue;
+      }
+      assets.push({ url: info.url, mime: info.mime, size: raw, base64 });
+      total += raw;
     } catch {
       skipped.push({ url: info.url, reason: "no_body" });
     }

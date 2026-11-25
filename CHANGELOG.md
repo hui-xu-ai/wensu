@@ -4,6 +4,31 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.14.13] - 2026-11-25
+
+### Fixed — the figures a live run found in the browser now land on disk
+
+`page_read(figures=true)` did read real bytes out of the browser (`Network.getResponseBody`
+returned an SVG starting with `<svg data-name="Layer 1"`), but four things kept them from becoming
+files. Each was found by looking at a real MDPI article:
+
+* **captured too early.** At the 1.2 s settle the page had only header logos; the same page six
+  seconds in had its four article figures (`sensors-26-01303-g001…g004.webp`) in the network. Two
+  extra waits of 2.4 s (a single `sleep` may not exceed 3 s) are now taken when figures are asked
+  for — the measured trigger was the reader's own "refresh and wait".
+* **tracking beacons ate the budget.** Twelve `uct.service.usercentrics.eu` beacons filled the
+  12-image cap before any figure was seen. Known analytics/consent hosts are dropped, and images
+  under 4 KB are kept only if there is room.
+* **cached responses report `contentLength: 0`**, so the size cap was never enforced. The cap is
+  now applied to the decoded bytes.
+* **the "article is already open" shortcut skipped the navigation**, and the debugger had never
+  been attached — so no bodies could exist. With `figures` the page is always navigated again.
+
+`figures` is now always present in the reply (`{saved, skipped, bytes, files}`), and
+`tests/unit/test_page_read_figures.py` pins the kernel half with a scripted adapter.
+
+`background-0.14.13.js`, as the cache-busting rule requires.
+
 ## [0.14.12] - 2026-11-25
 
 ### Added — `page_read(figures=true)` saves the article's images
