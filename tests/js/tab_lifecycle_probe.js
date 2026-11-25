@@ -118,7 +118,7 @@ function makeBrowser(seed = []) {
     windows: {
       create: async (opts) => {
         const id = nextWindowId++;
-        windows.set(id, { id });
+        windows.set(id, { id, state: "normal" });
         const tabId = nextId++;
         const tab = {
           id: tabId,
@@ -136,9 +136,17 @@ function makeBrowser(seed = []) {
       },
       get: async (id) => {
         if (!windows.has(id)) throw new Error("no window");
-        return { id };
+        return { ...windows.get(id) };
       },
-      update: async (id) => ({ id }),
+      // The state is recorded, not ignored: the work window is supposed to be minimized so a
+      // search never takes the screen, and the probe has to be able to see that.
+      update: async (id, opts) => {
+        if (!windows.has(id)) throw new Error("no window");
+        const win = windows.get(id);
+        if (opts && opts.state) win.state = opts.state;
+        return { ...win };
+      },
+      getAll: async () => [...windows.values()].map((win) => ({ ...win })),
     },
     downloads: { onCreated: { addListener() {} }, search: async () => [] },
     scripting: { executeScript: async () => [{ result: {} }] },
@@ -294,6 +302,22 @@ async function scenarioTransientTab() {
     url: work && work.url,
     window_id: work && work.windowId,
     pinned: Boolean(browser.tabs.get(work.id) && browser.tabs.get(work.id).pinned),
+    // Keep out of the user's way: the work window is its own window and it stays minimized.
+    window_state: work && work.windowId ? browser.windows.get(work.windowId).state : null,
+  };
+
+  // The boot-time sweep runs once per browser session. A window the user restored by hand must
+  // stay restored: re-minimizing it under them is the sort of thing that makes a tool hated.
+  const first = [...browser.windows.values()].map((win) => win.state);
+  await context.quietWindows();
+  const afterFirst = [...browser.windows.values()].map((win) => win.state);
+  const restored = browser.windows.get(work.windowId);
+  if (restored) restored.state = "normal"; // the user clicked the taskbar
+  await context.quietWindows();
+  observations.quiet = {
+    before: first,
+    after_first_call: afterFirst,
+    after_second_call: [...browser.windows.values()].map((win) => win.state),
   };
 }
 

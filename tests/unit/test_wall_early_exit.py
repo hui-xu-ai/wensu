@@ -170,6 +170,13 @@ def test_a_navigation_that_commits_late_is_not_reported_as_a_domain_violation(
     assert late["halted"] is False, late
 
 
+def test_a_wall_brings_the_window_back_and_a_plain_page_does_not(probe: dict[str, Any]) -> None:
+    """The work window stays minimized, except when a human has to look at a challenge page."""
+
+    assert probe["plain"]["window_state"] == "minimized", probe["plain"]
+    assert probe["wall"]["window_state"] == "normal", probe["wall"]
+
+
 def test_a_wall_stops_the_wait_instead_of_using_the_whole_budget(probe: dict[str, Any]) -> None:
     """12.12 s was the old cost (2026-11-25). The grace period is 1.5 s; nothing else may run."""
 

@@ -4,6 +4,26 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.14.8] - 2026-11-25
+
+### Changed — the browser runs minimized, out of the user's way
+
+`wensu browser start` used to leave two windows on screen: the browser's own and the isolated work
+window (ADR 0018). The profile's windows are now minimized once per browser session, and the work
+window stays minimized when it is created or reused. The one exception is a human-verification
+gate: the window comes back to `normal` (still unfocused) because somebody has to look at it. A
+window the user restores by hand stays restored — the sweep is marked in `storage.session`, so it
+runs once per browser session, not on every service-worker restart.
+
+This is measured, not assumed. With the work window hidden for **5m40s**, an in-page `sleep(150)`
+answered in **155 ms** median — the same as unfocused (156 ms) and as a short minimize (153 ms) —
+so Chromium's hidden-page throttling does not reach this tab and the 150 ms pacing of ADR 0023 is
+untouched. ADR 0018 修订 1 records the decision.
+
+### Changed — the service worker's file name carries the version
+
+`background-0.14.8.js`, as `tests/unit/test_service_worker_cache_busting.py` requires.
+
 ## [0.14.7] - 2026-11-25
 
 ### Fixed — the first navigation after a browser start no longer fails

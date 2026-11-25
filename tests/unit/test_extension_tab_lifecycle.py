@@ -138,6 +138,29 @@ def test_the_work_tab_gets_a_window_of_its_own(probe: dict[str, Any]) -> None:
     assert probe["work_tab"]["window_id"] != 1, probe["work_tab"]
 
 
+def test_the_work_window_stays_minimized(probe: dict[str, Any]) -> None:
+    """Owning a window is not a reason to put it in the user's way.
+
+    Timers keep running at full speed while it is hidden — measured 2026-11-25, `sleep(150)`
+    answered in 155 ms after the window had been minimized for 5m40s — so nothing in the pacing
+    rules depends on it being visible.
+    """
+
+    assert probe["work_tab"]["window_state"] == "minimized", probe["work_tab"]
+
+
+def test_the_boot_sweep_runs_once_per_browser_session(probe: dict[str, Any]) -> None:
+    """A window the user restores by hand stays restored; the sweep does not fight them."""
+
+    quiet = probe["quiet"]
+
+    assert set(quiet["after_first_call"]) == {"minimized"}, quiet
+    assert "normal" in quiet["after_second_call"], (
+        "the second sweep minimized a window the user had just restored",
+        quiet,
+    )
+
+
 def test_stale_tabs_of_ours_are_reused_and_the_spares_removed(probe: dict[str, Any]) -> None:
     """An id this build forgot is no reason to open a second tab."""
 

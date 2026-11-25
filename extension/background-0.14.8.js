@@ -192,6 +192,9 @@ function connect() {
     // action past the kernel's 15 s budget: the page opened, and the caller was told
     // `bridge.timeout` (2026-11-24, reproduced twice on Wiley).
     void workTab([]).catch(() => null);
+    // The profile's windows are the tool's: minimize them (once per browser session) so starting
+    // the browser does not put anything in the user's way.
+    void quietWindows().catch(() => null);
     channel.onDisconnect.addListener(() => {
       if (port === channel) port = null;
       // A host that was never registered fails differently from one that exited.
@@ -243,6 +246,11 @@ const DISPOSABLE_KEY = "wensuDisposableTabs";
 const OWNED_KEY = "wensuOwnedTabs";
 // The window that holds the work tab, so the agent's page stays out of the user's tab strip.
 const WINDOW_KEY = "wensuWorkWindowId";
+// The browser this extension drives belongs to the tool, not to the user: its windows are kept
+// minimized so a search never takes the screen. Timers are not slowed by that — measured
+// 2026-11-25 with the work window hidden for 5m40s, `sleep(150)` answered in 155 ms, the same as
+// unfocused (156 ms) — so the pacing rules in ADR 0023 are untouched.
+const QUIET_KEY = "wensuQuietWindows";
 
 function dwellFor(params) {
   const declared = Number(params && params.dwell_ms);
@@ -360,6 +368,22 @@ async function createWorkTab() {
 // and deadline-bounded: if this browser will not hand out a window, the work tab simply
 // stays where it is and the navigation still happens (a hang here looks exactly like a
 // dead bridge — 2026-11-24, `bridge.timeout` at `navigate.open`).
+async function minimizeWindow(id) {
+  if (!id) return null;
+  return within(chrome.windows.update(id, { state: "minimized" }), 1_000).catch(() => null);
+}
+
+async function quietWindows() {
+  // Once per browser session. `storage.session` is cleared when the browser closes, while the
+  // service worker restarts on its own far more often — a marker there keeps a window the user
+  // restored deliberately from being minimized again a moment later under them.
+  const marked = (await chrome.storage.session.get(QUIET_KEY))[QUIET_KEY];
+  if (marked) return;
+  const opened = await chrome.windows.getAll({ windowTypes: ["normal"] }).catch(() => null);
+  for (const win of Array.isArray(opened) ? opened : []) await minimizeWindow(win && win.id);
+  await chrome.storage.session.set({ [QUIET_KEY]: Date.now() });
+}
+
 async function isolateWorkTab(tab) {
   if (!tab) return tab;
   const stored = (await chrome.storage.local.get(WINDOW_KEY))[WINDOW_KEY];
@@ -370,6 +394,7 @@ async function isolateWorkTab(tab) {
     if (tab.windowId !== win.id) {
       await within(chrome.tabs.move(tab.id, { windowId: win.id, index: -1 }), 2_000);
     }
+    await minimizeWindow(win.id);
     return (await chrome.tabs.get(tab.id).catch(() => null)) || tab;
   }
   const opened = await within(
@@ -384,6 +409,7 @@ async function isolateWorkTab(tab) {
   await within(chrome.tabs.move(tab.id, { windowId: opened.id, index: -1 }), 2_000);
   if (blank && blank.id !== tab.id) await chrome.tabs.remove(blank.id).catch(() => null);
   await chrome.storage.local.set({ [WINDOW_KEY]: opened.id });
+  await minimizeWindow(opened.id);
   return (await chrome.tabs.get(tab.id).catch(() => null)) || tab;
 }
 
@@ -701,6 +727,14 @@ async function onHostMessage(message, channel) {
           await new Promise((resolve) => setTimeout(resolve, 300));
           await navigate();
         }
+      }
+      // A gate is the one thing a human has to look at, so its window comes back to the screen.
+      // Unfocused on purpose: taking focus is exactly what keeps the windows minimized.
+      if (halted) {
+        await within(
+          chrome.windows.update(tab.windowId, { state: "normal" }),
+          1_000,
+        ).catch(() => null);
       }
       if (params.reload === true) await within(waitComplete(tab.id), 3_000);
       await new Promise((resolve) => setTimeout(resolve, dwellFor(params)));

@@ -110,9 +110,15 @@ function makeBrowser() {
       },
     },
     windows: {
-      create: async () => ({ id: 900 }),
-      get: async (id) => ({ id }),
-      update: async (id) => ({ id }),
+      create: async () => ({ id: 900, state: "normal" }),
+      get: async (id) => ({ id, state: windowState.get(id) || "normal" }),
+      // Recorded, because a gate is the one case that brings the window back: a human has to
+      // look at the challenge page, so it may not stay minimized.
+      update: async (id, opts) => {
+        if (opts && opts.state) windowState.set(id, opts.state);
+        return { id, state: windowState.get(id) || "normal" };
+      },
+      getAll: async () => [{ id: 900, state: windowState.get(900) || "normal" }],
     },
     downloads: { onCreated: { addListener() {} }, search: async () => [] },
     scripting: { executeScript: async () => [{ result: {} }] },
@@ -143,6 +149,10 @@ function load(browser) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Window states, keyed by window id. The extension minimizes its work window and brings it back
+// when a gate needs a human, so the probes have to see both.
+const windowState = new Map();
+
 async function drive(params, schedule) {
   const browser = makeBrowser();
   const context = load(browser);
@@ -161,6 +171,7 @@ async function drive(params, schedule) {
   );
   const elapsed = Date.now() - began;
   const reply = replies[replies.length - 1] || {};
+  const winId = work && work.windowId;
   return {
     elapsed_ms: elapsed,
     ok: reply.ok !== false,
@@ -168,6 +179,8 @@ async function drive(params, schedule) {
     halted: Boolean(reply.data && reply.data.halted),
     title: (reply.data && reply.data.title) || null,
     url: (reply.data && reply.data.url) || null,
+    // The work window is minimized normally; a gate brings it back because a human has to look.
+    window_state: winId ? windowState.get(winId) || "normal" : null,
   };
 }
 
