@@ -416,8 +416,29 @@ function watchNewWindows() {
   });
 }
 
+async function closeEmptyWindow(windowId, keepId) {
+  // The startup window is closed when nothing of the reader's is in it: Edge opens it with its own
+  // "new tab" page, and that page is not content. Any real tab — the reader's own — keeps the
+  // window alive, so this can never close something they were looking at. Without it every start
+  // left two windows on the taskbar (measured 2026-11-25).
+  if (!windowId || windowId === keepId) return;
+  try {
+    const rest = await chrome.tabs.query({ windowId });
+    if (!Array.isArray(rest)) return;
+    const disposable = rest.every((tab) => {
+      const url = String((tab && tab.url) || "");
+      return url === "" || /^(about:blank|edge:\/\/newtab|chrome:\/\/newtab|edge:\/\/welcome)/i.test(url);
+    });
+    if (disposable) await chrome.windows.remove(windowId);
+  } catch {
+    // Closing a window is a courtesy, never a requirement: any API that is missing or refuses
+    // must not fail the navigation that triggered it.
+  }
+}
+
 async function isolateWorkTab(tab) {
   if (!tab) return tab;
+  const source = tab.windowId;
   const stored = (await chrome.storage.local.get(WINDOW_KEY))[WINDOW_KEY];
   let win = Number.isInteger(stored)
     ? await within(chrome.windows.get(stored), 1_000)
@@ -427,6 +448,7 @@ async function isolateWorkTab(tab) {
       await within(chrome.tabs.move(tab.id, { windowId: win.id, index: -1 }), 2_000);
     }
     await minimizeWindow(win.id);
+    await closeEmptyWindow(source, win.id);
     return (await chrome.tabs.get(tab.id).catch(() => null)) || tab;
   }
   const opened = await within(
@@ -442,6 +464,7 @@ async function isolateWorkTab(tab) {
   if (blank && blank.id !== tab.id) await chrome.tabs.remove(blank.id).catch(() => null);
   await chrome.storage.local.set({ [WINDOW_KEY]: opened.id });
   await minimizeWindow(opened.id);
+  await closeEmptyWindow(source, opened.id);
   return (await chrome.tabs.get(tab.id).catch(() => null)) || tab;
 }
 

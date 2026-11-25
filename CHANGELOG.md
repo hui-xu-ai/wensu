@@ -27,17 +27,28 @@ Measured on one MDPI article across five builds: **9 figures → 4 → 4 → 0**
 
 The code stays in git history (`v0.14.14`, `v0.14.15`) for a future attempt.
 
-### Fixed — one browser window, and no crash-restore bubble
+### Fixed — no crash-restore bubble
 
-`wensu browser start` used to leave **two** windows: Edge's own startup window plus the one the
-extension creates for the work tab. The extension now closes the startup window after moving the
-work tab out — and only when that window holds nothing but browser-internal pages
-(`about:blank`, `edge://newtab`, `edge://welcome`), so a window with the reader's own tabs is never
-touched. Verified live: a single minimized window remains. Launches also pass
-`--hide-crash-restore-bubble`, so a browser that was force-closed does not ask about "restoring
-pages" the next time.
+Launches pass `--hide-crash-restore-bubble`, so a browser that was force-closed does not ask about
+"restoring pages" the next time. (The second-window fix landed in 0.14.17 — this release only
+carried the flag, and the entry above originally claimed both. Corrected here rather than silently
+edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
+
+## [0.14.17] - 2026-11-25
+
+### Fixed — one browser window instead of two
+
+`wensu browser start` left **two** windows: Edge's own startup window plus the one the extension
+creates for the work tab. The extension now closes the startup window after moving the work tab out,
+and only when that window holds nothing but browser-internal pages (`about:blank`,
+`edge://newtab`, `edge://welcome`) — a window with the reader's own tabs is never touched.
+
+Verified live after a cold start: a single minimized window remains, and `wensu doctor` reports all
+three components on the same version.
+
+`background-0.14.17.js`, as the cache-busting rule requires.
 
 ## [0.14.15] - 2026-11-25
 
