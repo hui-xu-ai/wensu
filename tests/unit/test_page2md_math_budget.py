@@ -41,7 +41,11 @@ def test_a_formula_that_cannot_be_converted_becomes_a_short_marker(monkeypatch) 
 
 
 def test_a_very_long_formula_is_cut_at_the_budget(monkeypatch) -> None:
-    monkeypatch.setattr(page2md, "_latex_from_math_element", lambda node: "x" * 500)
+    # The cap is a safety limit (4 000 characters since 0.14.15), so the sample is built from it:
+    # what must not happen is an unbounded formula reaching the Markdown.
+    monkeypatch.setattr(
+        page2md, "_latex_from_math_element", lambda node: "x" * (page2md.MATH_MAX_CHARS + 500)
+    )
 
     counters = _counters()
     rendered = page2md._render_inline(_paragraph(), counters)

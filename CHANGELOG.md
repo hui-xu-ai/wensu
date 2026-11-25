@@ -4,6 +4,34 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.14.15] - 2026-11-25
+
+### Changed — formulas: wait for MathJax, stop truncating, and say what is actually missing
+
+Asked whether a mature HTML→Markdown project could do this better, the honest answer came from six
+saved captures: **none of them contains MathML** (`<math>` = 0, `mjx-assistive-mml` = 0) and the
+160-character truncation never fired (`math_truncated` = 0 everywhere). No converter — pandoc,
+`markdownify`, `html-to-markdown`, MarkItDown — can recover LaTeX the DOM never had.
+
+What changed:
+
+* `content/readiness.js` now also waits for MathJax to finish typesetting (no empty `mjx-lazy`
+  shells, no `mjx-container` without children) before the capture walks the page. Measured on the
+  MDPI sample: empty shells **313 → 51**, and the formulas that do render are at least true to what
+  the reader saw.
+* `MATH_MAX_CHARS` 160 → 4 000: the cap is a safety limit, not a fidelity policy, and a long sum is
+  not improved by losing its tail.
+* The warning now says what is true — the page provides no MathML, so the Markdown has no LaTeX —
+  instead of advising the reader to "make the page render original MathML", which is not something
+  they can do.
+
+Still open, deliberately: sites that typeset formulas as SVG only (MDPI, Cambridge) need OCR to get
+LaTeX back. `texify`/`pix2tex` would work locally but pull a model of a few hundred MB, so it stays
+an opt-in experiment rather than a default; cloud APIs (Mathpix, Jina) remain rejected — they would
+send the article to a third party.
+
+`background-0.14.15.js`, as the cache-busting rule requires.
+
 ## [0.14.14] - 2026-11-25
 
 ### Fixed — figures are saved, and the page is asked when it is ready

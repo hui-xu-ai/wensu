@@ -42,7 +42,7 @@ TOOL_VERSION = "0.3.0-m1"
 SUFFIXES = {".html", ".htm", ".mhtml", ".mht"}
 # One formula, at most this many characters. Beyond it the Markdown grows without being
 # readable (and every consumer pays for it), so it is cut with an explicit warning instead.
-MATH_MAX_CHARS = 160
+MATH_MAX_CHARS = 4_000
 NOISE = ("cookie", "subscribe", "sign in", "advertisement", "related articles", "purchase pdf")
 JUNK_XPATH = "//script|//style|//noscript|//nav|//footer|//aside|//form"
 BLOCK_XPATH = ".//p|.//li|.//caption|.//figcaption"
@@ -1080,8 +1080,8 @@ def _warnings(meta: dict[str, Any]) -> list[str]:
     graphics = int(meta.get("mathjax_graphics") or 0)
     if graphics:
         found.append(
-            f"{graphics} 个公式由 MathJax 画成图形，Markdown 里没有对应 LaTeX"
-            "（要看公式请用 PDF，或让页面以原始 MathML 呈现）"
+            f"{graphics} 个公式由 MathJax 渲染为图形：页面未提供 MathML，Markdown 里没有对应 LaTeX"
+            "（要精确公式请看 PDF；本地 OCR 尚未启用）"
         )
     if not meta.get("math_total"):
         if not graphics:

@@ -17,21 +17,39 @@
   const TEXT_FLOOR = 1500;
   const SETTLE_STEP_MS = 350;
   const SETTLE_LIMIT_MS = 12_000;
+  const MATH_LIMIT_MS = 10_000;
 
   const bodyScore = () => {
     const hinted = document.querySelectorAll(BODY_HINT).length;
     const text = (document.body && document.body.innerText) || "";
-    return { hinted, text: text.trim().length };
+    // MathJax typesets lazily: until it runs, the page holds empty `<mjx-lazy>` shells and the
+    // capture contains no formula at all (measured 2026-11-25: 313 empty containers in the MHTML,
+    // zero `<math>`). Counting containers that still have no children is the browser's own way of
+    // saying "the formulas are not there yet".
+    const containers = Array.from(document.querySelectorAll("mjx-container"));
+    const empty = containers.filter((node) => node.childElementCount === 0).length;
+    const pending = document.querySelectorAll("mjx-lazy").length;
+    const mathml = document.querySelectorAll("mjx-assistive-mml math, math").length;
+    return {
+      hinted,
+      text: text.trim().length,
+      math_containers: containers.length,
+      math_empty: empty,
+      math_pending: pending,
+      mathml,
+    };
   };
+
+  const mathSettled = (score) => score.math_containers === 0 || (score.math_empty === 0 && score.math_pending === 0);
 
   const ready = () => {
     const score = bodyScore();
     // A skeleton has markup but almost no text; a paywall has text but no article sections.
-    return score.hinted >= 1 && score.text >= TEXT_FLOOR;
+    return score.hinted >= 1 && score.text >= TEXT_FLOOR && mathSettled(score);
   };
 
   const waitUntilReady = async () => {
-    const deadline = Date.now() + SETTLE_LIMIT_MS;
+    const deadline = Date.now() + Math.max(SETTLE_LIMIT_MS, MATH_LIMIT_MS);
     while (Date.now() < deadline) {
       if (ready()) return true;
       await new Promise((resolve) => setTimeout(resolve, SETTLE_STEP_MS));
