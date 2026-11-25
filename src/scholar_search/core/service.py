@@ -43,6 +43,7 @@ from .errors import (
 )
 from .export import to_csv, to_endnote, to_markdown, to_ris
 from .locking import interprocess_lock
+from .page_nav import article_navigation
 from .pageprobe import challenge_in_title, classify_mhtml
 from .planner import Planner
 from .policy import PolicyEngine
@@ -803,7 +804,7 @@ class ScholarService:
     def read_page(self, *, url: str = "", doi: str = "") -> dict[str, Any]:
         """Open the article a reader asked for, then say what is on it.
 
-        One navigation, no warm-up: the article URL is opened directly — a deep link, the
+        One navigation: the article URL is opened directly — a deep link, the
         same thing a reader who pasted the URL would do. Nothing is clicked and nothing is
         typed; only `goto` and `sleep` are used, so a page that challenges the browser ends
         as `blocked` / `challenge` and the human solves it in the browser (ADR 0004).
@@ -896,12 +897,8 @@ class ScholarService:
                     Plan(
                         channel=f"page:{publisher.name}",
                         purpose="detail",
-                        actions=(
-                            # A deep link: the article URL is opened as given, and the gate
-                            # markers let the extension stop waiting for a wall that will never
-                            # finish loading (ADR 0025).
-                            Action("goto", self._page_goto_params(target)),
-                        ),
+                        # One navigation to the article, built in one place (ADR 0025).
+                        actions=article_navigation(self, target, publisher),
                     ),
                     spec,
                 )

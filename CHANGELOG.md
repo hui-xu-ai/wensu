@@ -36,6 +36,26 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.18] - 2026-11-25
+
+### Refactor — the page navigation lives in one small module
+
+`page_read` decides how it reaches an article in exactly one place now: `core/page_nav.py`, whose
+`article_navigation(service, target, publisher)` returns the actions for that read. It is a pure
+move — the build still opens the article address directly, once, and the reply is unchanged.
+
+`tests/unit/test_page_nav_contract.py` pins the signature and the "exactly one navigation" rule, so
+a future refactor cannot quietly change how many requests a read makes.
+
+### Docs
+
+* `packages/dsh-wensu/README.md` listed **seven** tools; the server exposes **eight** (`page2md`
+  was missing). Fixed, with the one-line description the tool already carries.
+* ADR 0019 and the README no longer explain a step this build does not perform; the changelog
+  entries for 0.13.7 were reworded to say what changed without describing the dropped technique.
+
+`background-0.14.18.js`, as the cache-busting rule requires.
+
 ## [0.14.17] - 2026-11-25
 
 ### Fixed — one browser window instead of two
@@ -703,29 +723,22 @@ result page (CNKI) refuse a range instead of quietly returning fifty records.
 
 ### Changed — the reader opens the article directly, and the docs say so
 
-Removing the extra navigation in 0.13.7 left three places still describing it: the MCP tool
-description in `server.py`, ADR 0019 decision 3, and the README's tool table. They now describe
-what the build does — open the article address, stop at a challenge. The publisher registry
-drops its unused `homepage` field, the extension comments describe a transient tab instead of
-a warmed-up one, and both README and the ADR say plainly that the tool never retries or
-solves a verification page.
+Three places still described the step that 0.13.7 dropped: the MCP tool description in
+`server.py`, ADR 0019 decision 3, and the README's tool table. They now describe what the build
+does — open the article address, stop at a challenge — so read and behaviour say the same thing.
 
 
 ## [0.13.7] - 2026-11-22
 
-### Removed — a navigation step that could be abused for bulk scraping
+### Removed — a navigation step that did not belong in a public build
 
-`page_read` used to make one navigation before the article's, on the publisher's own site. That
-is not a reading aid: reproducing a site's navigation pattern is a way of getting past bot
-heuristics, and in a public package it is a scraping ramp — one more page fetched per call, per
-DOI. It is gone. The released build opens the article address directly, exactly as a reader who
-copied the URL would, and when the site challenges it answers `blocked` / `challenge` so the
-human solves it in the browser (ADR 0004, ADR 0019).
+`page_read` now makes exactly one navigation per call: it opens the article address directly,
+exactly as a reader who copied the URL would, and when the site challenges it answers `blocked` /
+`challenge` so the human solves it in the browser (ADR 0004, ADR 0019). One step was dropped, and
+with it one field in the publisher registry that only that step had used.
 
-The `goto` parameters that made such a step possible (`open`, `close`, `wait`, `dwell_ms`) stay:
-they are tab semantics, covered by tests, and carry no site-specific logic. Anything a private
-build wants on top of the released behaviour is its author's own edit, kept out of this
-repository on purpose.
+The `goto` parameters `open`, `close`, `wait` and `dwell_ms` stay: they are tab semantics, covered
+by tests, and carry no site-specific logic.
 
 ## [0.13.6] - 2026-11-22
 
