@@ -79,6 +79,32 @@ def challenge_in_title(title: str) -> str | None:
     return None
 
 
+# A DOI that does not resolve lands on the publisher's own error page instead of an article.
+# Elsevier renders `<h1>Error: DOI Not Found</h1>` / `<title>Error: DOI Not Found</title>`
+# (measured 2026-11-25 with `10.1016/j.snb.2026.000001`). Such a page has none of the article's
+# structure, so the rules below classified it `abstract_only` — "ask the user to sign in" — and
+# the 267 KB of error page was kept as if it were the article. It is neither a paywall nor a
+# preview: the identifier itself is wrong, and no session changes that.
+DOI_NOT_FOUND_MARKERS: tuple[str, ...] = (
+    "doi not found",
+    "doi cannot be found",
+    "the doi you requested",
+    "article not found",
+)
+
+
+def doi_not_found_in(title: str) -> str | None:
+    """The marker that made this page a "no such DOI" answer, or None."""
+
+    lowered = (title or "").strip().lower()
+    if not lowered:
+        return None
+    for marker in DOI_NOT_FOUND_MARKERS:
+        if marker in lowered:
+            return marker
+    return None
+
+
 SECTION_MARKERS: tuple[str, ...] = ('class="section-title"', "<section id=")
 # Without a numbered heading, only a page that wraps this many sections is still trusted as
 # the article itself; fewer means "abstract shell" (or "still rendering", see service.py).
@@ -94,6 +120,7 @@ _NUMBERED_HEADING = re.compile(
 )
 _PDF_LINK = re.compile(r'href="(https?://[^"]+?\.pdf[^"]*)"', re.IGNORECASE)
 _H1 = re.compile(r"<h1[^>]*>(.*?)</h1>", re.IGNORECASE | re.DOTALL)
+_DOC_TITLE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 _TAGS = re.compile(r"<[^>]+>")
 
 
@@ -142,6 +169,8 @@ def classify_mhtml(path: Path, *, url: str = "") -> dict[str, object]:
 
     heading = _H1.search(raw)
     title = _text_of(heading.group(1))[:300] if heading else ""
+    doc_title = _DOC_TITLE.search(raw)
+    document_title = _text_of(doc_title.group(1))[:300] if doc_title else ""
 
     counts = {
         "sections": sections,
@@ -155,6 +184,12 @@ def classify_mhtml(path: Path, *, url: str = "") -> dict[str, object]:
     signal = _challenge_signal(lowered, url)
     if signal:
         return {"status": "blocked", "reason": "challenge", "signal": signal, **counts}
+
+    # A page that answers "there is no such DOI" is not a page that holds the article's
+    # abstract: it holds nothing. Decided before the structure rules, because those rules can
+    # only describe *why* an article is missing, and here none of their reasons is true.
+    if doi_not_found_in(f"{title} {document_title}"):
+        return {"status": "no_html", "reason": "doi_not_found", **counts}
 
     # An abstract page still carries `<section id=` wrappers (highlights, related work), so
     # counting them called a ScienceDirect abstract page `ok` while holding no article body

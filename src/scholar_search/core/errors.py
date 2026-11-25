@@ -109,8 +109,8 @@ _RISK_ADVICE: dict[str, str] = {
     ),
     "verify_redirect": (
         "The site asked for a human check (a verification wall). Complete it in that browser "
-        "window, then call `snapshot` for the page now on screen — no cooldown applies here, "
-        "because this is expected traffic rather than abuse (ADR 0022)."
+        "window, then make the same request again — a solved wall is read from the open tab, "
+        "free. No cooldown applies: this is expected traffic, not abuse (ADR 0022)."
     ),
     "http_403": (
         "The site refused the request with 403. Stop for the day; retrying, changing "

@@ -141,6 +141,12 @@ class WebOfScienceChannel:
 
         return _CaptureState()
 
+    # The element that carries the site's own answer to a submitted expression — a refusal or
+    # the zero-hit notice. The kernel reads this instead of the whole page, which is what keeps
+    # the search form's help panel (it names the boolean operators as well) out of the message
+    # a caller sees (2026-11-25).
+    alert_selector = selectors.ALERT
+
     def is_empty_page(self, text: str) -> bool:
         """Whether the page itself says the query matched nothing."""
         return parse_records.is_empty_page(text)

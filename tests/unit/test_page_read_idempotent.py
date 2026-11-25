@@ -85,8 +85,17 @@ def test_the_capture_is_not_reused_after_it_disappears_from_disk(tmp_path: Path)
     assert not second.get("cached"), second
 
 
-def test_blocked_tells_the_caller_to_snapshot_not_to_read_again() -> None:
+def test_blocked_tells_the_caller_to_read_again_once_the_wall_is_solved() -> None:
+    """ADR 0022 rev 1: a solved wall leaves the article in the tab, so a second call is free.
+
+    The first version of this hint said "do NOT call page_read again". It was written before
+    the open-tab reuse existed, and following it leads away from the behaviour that makes a
+    solved wall cheap — the 2026-11-25 acceptance run had to try `page_read` against the hint
+    to find that out (P5 in the report).
+    """
+
     hint = _page_next({"status": "blocked", "reason": "challenge"})
 
-    assert "snapshot" in hint, hint
-    assert "Do NOT call page_read again" in hint, hint
+    assert "then call `page_read` again" in hint, hint
+    assert "0 quota" in hint, hint
+    assert "Do NOT" not in hint, hint

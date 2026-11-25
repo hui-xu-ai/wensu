@@ -4,6 +4,102 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.14.5] - 2026-11-25
+
+### Fixed — a zero-hit search is no longer reported as a refused expression
+
+The 2026-11-25 acceptance run (Chinese UI) sent two legal zero-hit expressions and got back
+`query.rejected` quoting the advanced-search **help panel** (「布尔运算符 : AND, OR, NOT字段标识 :…」),
+3 units each. Two causes: the diagnosis read the whole page, so the help panel below the alert
+answered instead of the alert itself; and the zero-result wording list is English-only
+(`EMPTY_MARKERS`), so a localized empty page matched nothing and fell through to the refusal
+branch. A channel may now name its alert container (`alert_selector`); the diagnosis reads that
+element alone, and **an alert that does not refuse the expression is the zero-hit answer** — no
+wording list, so it works in any UI language. `query_error` also stopped counting words the search
+form prints on its own.
+
+### Changed — the result wait is taken in slices, so the site's own answer arrives first
+
+A refusal or a zero-hit search used to be readable only *after* the result-list wait had spent
+its whole budget — 10.8 s on the live site, because only then did the kernel look at the page.
+The first attempt at this fix looked **once**, right after the click: the audit trail shows that
+look passing in **2 ms** with nothing in the DOM yet (2026-11-25), and the answer still cost the
+full wait.
+
+The wait is now taken in 1.2 s slices, and between slices the page is asked what its alert says
+(a `read_text`, free, no quota). Whichever of "results are up" and "the site answered" comes
+first wins. Measured on the live site the same afternoon:
+
+| case | before | after |
+|---|---|---|
+| zero-hit search | 19.4 s | **8.6 s** (`empty_reason: no_match`) |
+| refused expression | 22.0 s | **9.2 s** (site's own sentence) |
+| …of which is *waiting* | 10.8 s | **1.7 s** |
+
+The remaining time is the search's own head (navigate, type, submit, 900 ms pacing), which a
+failure cannot skip. A successful search is unchanged: it pays at most one extra slice before the
+list is noticed, and a channel without an alert container keeps the single whole wait.
+
+### Changed — a verification wall ends the wait about 10 s earlier
+
+`page_read` on a walled publisher used to spend its whole navigation budget on a page that was
+already final: a verification interstitial never fires the load event, so `waitComplete` polled for
+**12.12 s** (measured 2026-11-25) while the document title had said 「请稍候…」 from the first
+second, and nothing was captured at the end of it. The `goto` action now carries the kernel's own
+gate markers (`halt_url_markers`, `halt_titles` — from `core/risk.py`, so the extension keeps no
+second copy) and the extension runs a watcher beside both waits: once a marker has persisted for
+1.5 s it stops waiting and reports what is on screen. The grace is what keeps a challenge that
+solves *itself* cheap. A navigation without markers behaves exactly as before, and the kernel still
+decides `blocked` with its stricter rule (ADR 0025). Measured in the fake-browser probe
+(`tests/js/gate_watch_probe.js`): a wall answers in **1.5 s** instead of 12.1 s, a challenge that
+clears itself at 0.6 s is **not** reported as a wall, and a navigation without markers is unchanged
+at 15 ms.
+
+### Fixed — a DOI that does not resolve is its own answer
+
+`10.1016/j.snb.2026.000001` came back as `no_html` / `abstract_only` with "ask the user to sign
+in", kept 267 KB of the publisher's error page, and charged 2. It is now `reason: doi_not_found`
+(recognized from the page title and H1), the capture is discarded rather than saved, and 1 unit is
+reported for the navigation that did run. Verified on the live site 2026-11-25: nine seconds,
+`reason: doi_not_found`, `title: "Error: DOI Not Found"`, `quota_charged: 1`, `mhtml_path: null`,
+and the hint names the identifier instead of a sign-in.
+
+### Fixed — the wall advice matches what the code does
+
+`blocked` answers said "do NOT call `page_read` again — use `snapshot`", written before open-tab
+reuse existed; following it walked away from the 0-quota path. The three places that carry the
+hint (`_page_next`, the risk advice, the `page_read` docstring) now say: solve the wall in that
+browser window, then call `page_read` again.
+
+### Docs — the `scholar-search` skill caught up with the tools
+
+It said "seven tools" (no `page2md`), quoted 20–22 s for a Web of Science round (measured 10–15 s)
+and 15 s for CNKI (measured ~5 s), told agents to report `cooldown_until` after a wall (none is
+written since ADR 0022 rev 1) and priced a zero-hit search at 8 units (it costs 3 — the export
+chain never runs). Added a `page_read` → `page2md` section, and `scholar-install` no longer tells
+an agent to `wensu reset` a cool-down that was never recorded.
+
+### Added — a per-debit quota ledger, so a total can be reconciled
+
+`state/quota.json` keeps one number per day, which is enough to enforce the cap and not enough to
+explain it: the 2026-11-25 acceptance ledger disagreed with the day's total by one unit and nothing
+on disk named the call that made the difference (the audit trail records actions, and several
+actions belong to one call). Every debit now leaves one line in
+`state/quota-ledger-<day>.jsonl` — timestamp, channel, verb, amount, and the counter afterwards.
+No query, no URL, no page content, exactly as the privacy rules require of the audit log. One file
+per day, so it is bounded by the daily cap instead of growing without a limit. The counter stays
+the authority: if the ledger cannot be written the charge still happens.
+
+### Fixed — a capture's directory name is unique again
+
+`page_read` stores a capture at `<home>/pages/<slug>/page.mhtml`, and the slug was the document
+title truncated at 80 characters — `…Proximity-Sensing-and` in the report (P9). A second paper in
+the same series therefore wrote into the first one's folder and replaced it, after which `page2md`
+produced Markdown of the wrong article for the first path. The name keeps its readable title prefix
+(60 characters) and gains an 8-character hash of the URL, so the folder is still recognisable and
+two articles can no longer share one. Captures already on disk are untouched: the page cache stores
+the path it wrote.
+
 ## [0.14.4] - 2026-11-24
 
 ### Fixed — a refused search expression now says why

@@ -100,7 +100,9 @@ class Planner:
                 # code answers in milliseconds (ADR 0023). The quota unit is still debited —
                 # `wait_turn` is where accounting lives — so `quota_charged` does not move.
                 self.policy.wait_turn(
-                    interval_ms=HARD.ui_interval_ms if plan.pacing == "ui" else None
+                    interval_ms=HARD.ui_interval_ms if plan.pacing == "ui" else None,
+                    channel=plan.channel,
+                    verb=action.verb,
                 )
                 if self.policy.degraded:
                     raise PolicyError(

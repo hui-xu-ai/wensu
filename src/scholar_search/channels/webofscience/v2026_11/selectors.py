@@ -50,6 +50,18 @@ PAGE_BOX = "input#snNextPageTop"
 # scrolling, because a scroll on an unrendered list triggers no lazy load.
 RESULT_READY = NEXT_PAGE
 
+# The alert the site answers a submitted expression with when there is no result list to
+# show. Both answers share this one container: a refusal of the expression
+# (「检索错误: 布尔运算符的使用无效」) and the zero-hit notice. Markup captured live:
+# ``<div role="alert" class="search-error error-code light-red-bg">``.
+#
+# Reading *this element* rather than the page is what keeps the advanced-search help panel
+# out of the answer: it names the boolean operators too, and on 2026-11-25 it was quoted as
+# if the site had refused a legal expression. If the site renames the container the probe
+# reports "no alert" and the caller keeps its plain timeout message — it can never invent a
+# refusal.
+ALERT = "[role='alert'].search-error"
+
 # The capture node written by the MAIN-world content script
 # (extension/content/capture.js). It is deliberately rendered — one transparent
 # pixel anchored at the viewport origin — because ``wait_for`` matches on

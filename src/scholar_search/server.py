@@ -830,14 +830,15 @@ def build_server(service: ScholarService) -> FastMCP:
 
         * `ok` — `mhtml_path` holds the article; call `page2md` with it;
         * `no_html` — the page has no full text; `reason` says `paywall`, `abstract_only`,
-          `pdf_only` or `unparsable`, and `pdf_url` may offer the PDF route;
+          `doi_not_found`, `pdf_only` or `unparsable`, and `pdf_url` may offer the PDF route;
         * `unsupported_site` — the DOI belongs to a publisher this build does not visit
           (the curated list is in `core/publishers.py`, ADR 0019), so nothing was opened;
         * `blocked` — the site showed a human-verification wall. It is recognized from the
           tab title right after the navigation, so **the wall is never captured or saved**
           (ADR 0004): `mhtml_path` is null. Ask the user to solve it in that browser window,
-          then call `snapshot` — do not call `page_read` again, which would re-navigate and
-          replace any body already captured.
+          then call `page_read` again: with the wall solved the article is read from the tab
+          that is already open, without navigating and without charge. `snapshot` also works
+          for free, but it captures whichever tab is in front.
 
         Nothing is clicked or typed, and a page that only shows a preview is reported as
         such rather than passed off as the article.

@@ -423,6 +423,76 @@ function waitComplete(tabId, timeoutMs = 5000) {
   });
 }
 
+// Watching for a gate page while the navigation is still in flight.
+//
+// A verification interstitial never fires the load event, so `waitComplete` sits out its whole
+// budget on a page that is already final: measured 12.12 s on Wiley (2026-11-25), for an answer
+// the document title had given away in about a second. `waitNavigated` has the same problem when
+// the challenge is served at the article's own URL, because then the URL never moves.
+//
+// The markers arrive from the kernel (`core/risk.py`, via the `goto` params) and are opaque
+// here: this file does not know what a gate page is, and must not grow a second copy of the
+// list. The kernel still decides `blocked` / not-blocked with its stricter rule; this only ends
+// the wait early.
+const GATE_GRACE_MS = 1_500;
+const GATE_POLL_MS = 250;
+// Long enough to cover either wait above: the gate can appear while the URL is still settling.
+const GATE_WATCH_MS = 13_000;
+
+function gateMarkers(params) {
+  const urls = Array.isArray(params.halt_url_markers) ? params.halt_url_markers : [];
+  const titles = Array.isArray(params.halt_titles) ? params.halt_titles : [];
+  const clean = (list) =>
+    list.filter((marker) => typeof marker === "string" && marker).map((m) => m.toLowerCase());
+  return { urls: clean(urls), titles: clean(titles) };
+}
+
+function looksLikeGate(tab, markers) {
+  const url = String((tab && tab.url) || "").toLowerCase();
+  if (url && markers.urls.some((marker) => url.includes(marker))) return true;
+  const title = String((tab && tab.title) || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+  // `startsWith`, not `includes`: the kernel's rule treats a marker as a gate title only when it
+  // *is* the title or opens it (the rest being the site's name). Stopping on a looser match
+  // would cost a pause on an article that merely mentions the words.
+  return Boolean(title) && markers.titles.some((marker) => title.startsWith(marker));
+}
+
+function gateWatch(tabId, params) {
+  // Resolves `true` once a gate marker has persisted for the grace period, `false` otherwise.
+  // A `goto` without markers resolves immediately, which is exactly the old behaviour.
+  const markers = gateMarkers(params);
+  let stopped = false;
+  const stop = () => {
+    stopped = true;
+  };
+  if (!markers.urls.length && !markers.titles.length) {
+    return { promise: Promise.resolve(false), stop };
+  }
+  const promise = (async () => {
+    const deadline = Date.now() + GATE_WATCH_MS;
+    let matchingSince = 0;
+    while (!stopped && Date.now() < deadline) {
+      const tab = await chrome.tabs.get(tabId).catch(() => null);
+      if (stopped) break;
+      if (tab && looksLikeGate(tab, markers)) {
+        // The grace is what keeps a challenge that solves *itself* cheap: its script runs
+        // immediately, and a navigation that does resolve moves the tab away inside this
+        // window — the marker then disappears and the ordinary wait carries on.
+        if (!matchingSince) matchingSince = Date.now();
+        else if (Date.now() - matchingSince >= GATE_GRACE_MS) return true;
+      } else {
+        matchingSince = 0;
+      }
+      await new Promise((resolve) => setTimeout(resolve, GATE_POLL_MS));
+    }
+    return false;
+  })();
+  return { promise, stop };
+}
+
 async function pageMeta(tabId) {
   // sendMessage never settles while the frame is being replaced, and a goto that
   // waits on it hangs forever. Race it against a deadline: the meta is only ever
@@ -548,6 +618,7 @@ async function onHostMessage(message, channel) {
         });
       }
       let blanked = [];
+      let halted = false;
       if (params.close === "disposable") blanked = await closeDisposableTabs();
       const tab = await workTab(domains);
       if (!tab || !tab.id) throw new Error("no_active_tab");
@@ -585,10 +656,19 @@ async function onHostMessage(message, channel) {
         // (`blocked`), which is the honest answer and the one the risk rules describe
         // (2026-11-24, reproduced four times on a Cloudflare interstitial).
         const started = Date.now();
-        await within(waitNavigated(tab.id, before, domains), 10_000);
-        // Whatever is left of a 13 s budget: heavy publisher pages genuinely need past 10 s
-        // (Wiley measured 13.3 s), so this trims the tail of the *wait*, not the page.
-        await within(waitComplete(tab.id), Math.max(1_000, 13_000 - (Date.now() - started)));
+        // The gate watch runs beside both waits: an interstitial can be up before the URL moves
+        // (the `waitNavigated` case) or after it moved but without ever finishing (`waitComplete`
+        // case), and neither of those waits can see it. Whichever arrives first decides.
+        const watch = gateWatch(tab.id, params);
+        const navigated = (async () => {
+          await within(waitNavigated(tab.id, before, domains), 10_000);
+          // Whatever is left of a 13 s budget: heavy publisher pages genuinely need past 10 s
+          // (Wiley measured 13.3 s), so this trims the tail of the *wait*, not the page.
+          await within(waitComplete(tab.id), Math.max(1_000, 13_000 - (Date.now() - started)));
+          return false;
+        })();
+        halted = await Promise.race([watch.promise, navigated]);
+        watch.stop();
       }
       if (params.reload === true) await within(waitComplete(tab.id), 3_000);
       await new Promise((resolve) => setTimeout(resolve, dwellFor(params)));
@@ -603,6 +683,9 @@ async function onHostMessage(message, channel) {
         url: finalUrl,
         title: updated.title || "",
         status: status || undefined,
+        // Reported only when it happened, so every existing caller reads the same shape it did
+        // before this parameter existed.
+        ...(halted ? { halted: true } : {}),
         // Reported so a caller can prove the tab was blanked and kept, rather than closed
         // and replaced by a new one.
         blanked,

@@ -28,8 +28,18 @@ MAX_DOWNLOAD_TIMEOUT_MS = 60_000
 MAX_TEXT_CHARS = 16_000
 MAX_SLEEP_MS = 3_000
 
+# A `goto` may name the gate markers it wants to stop waiting for. The bound exists so a caller
+# cannot send a page-sized list through the bridge: no gate list in `core/risk.py` is longer than
+# a dozen entries, and every marker is a short fragment of a URL or of a document title.
+_GOTO_HALT_KEYS = ("halt_url_markers", "halt_titles")
+HALT_MARKER_LIMIT = 32
+HALT_MARKER_MAX_LEN = 80
+
 ALLOWED_KEYS: dict[str, frozenset[str]] = {
-    "goto": frozenset({"url", "reload", "open", "close", "wait", "dwell_ms"}),
+    # `halt_url_markers` / `halt_titles`: the gate markers a navigation may stop waiting for
+    # (ADR 0025). Opaque to the extension — the kernel owns the lists in `core/risk.py` and
+    # still decides what a wall is; these only end the wait early.
+    "goto": frozenset({"url", "reload", "open", "close", "wait", "dwell_ms", *_GOTO_HALT_KEYS}),
     "wait_for": frozenset({"selector", "timeout_ms", "state"}),
     "type": frozenset({"selector", "text", "clear"}),
     # `wait_until` lets a click report when the site finished the work it started.
@@ -72,6 +82,17 @@ def _selector(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip()) and len(value) <= 2_000
 
 
+def _halt_markers(value: Any) -> bool:
+    """A gate-marker list `goto` may carry: short, non-empty, and bounded in number."""
+
+    if not isinstance(value, list) or len(value) > HALT_MARKER_LIMIT:
+        return False
+    return all(
+        isinstance(item, str) and bool(item.strip()) and len(item) <= HALT_MARKER_MAX_LEN
+        for item in value
+    )
+
+
 def validate_params(verb: str, params: Any) -> str | None:
     """Return an error code, or None when the params match the verb schema."""
 
@@ -84,6 +105,9 @@ def validate_params(verb: str, params: Any) -> str | None:
         return "policy.params"
 
     if verb == "goto":
+        for key in _GOTO_HALT_KEYS:
+            if key in params and not _halt_markers(params[key]):
+                return "policy.params"
         if "open" in params and params["open"] not in GOTO_OPEN:
             return "policy.params"
         if "close" in params and params["close"] not in GOTO_CLOSE:

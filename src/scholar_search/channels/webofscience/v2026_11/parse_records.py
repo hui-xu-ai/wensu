@@ -52,9 +52,12 @@ EMPTY_MARKERS = (
 # and then reported "click did not start a query". Reporting the site's own sentence costs
 # nothing and is the difference between "nothing happened" and "your expression is wrong".
 QUERY_ERROR_MARKERS: tuple[str, ...] = (
+    # Only phrases that *are* the refusal, never ones the page prints on its own: the
+    # advanced-search help panel lists the operators (「布尔运算符 : AND, OR, NOT」), so
+    # matching that word turned a legal zero-hit query into "the site refused this query"
+    # and quoted the help panel as the reason (measured 2026-11-25). The refusal sentence is
+    # headed by 「检索错误」/「Search error」, which is enough to recognise it.
     "检索错误",
-    "布尔运算符",
-    "请检查您的检索式",
     "检索式有误",
     "search error",
     "invalid boolean",
@@ -70,7 +73,8 @@ def query_error(text: str) -> str | None:
 
     `None` means "no refusal found" — either the page says the search matched nothing, or there
     is nothing to report. A zero-result page must never be reported as a bad query: both use the
-    same alert, so the empty-result wording is checked first.
+    same alert, so the empty-result wording is checked first, and only a phrase that is itself
+    the refusal is allowed to match.
     """
 
     flat = " ".join(text.split())

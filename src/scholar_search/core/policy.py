@@ -15,7 +15,7 @@ import random
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -114,6 +114,44 @@ class PolicyEngine:
         if state.day != self._today():
             return QuotaState(day=self._today())
         return state
+
+    def _ledger_path(self, day: str) -> Path:
+        """One file per day, so the trail is bounded by the daily cap rather than by time."""
+
+        return self._state_path.with_name(f"quota-ledger-{day}.jsonl")
+
+    def _note(
+        self, state: QuotaState, *, op: str, amount: int, channel: str = "", verb: str = ""
+    ) -> None:
+        """Append one line for this debit. Best effort — the counter is the authority.
+
+        The acceptance run of 2026-11-25 could not reconcile the day's total against the
+        `quota_charged` values it had collected, and nothing on disk named the call that made the
+        difference: the state file holds one number per day, and the audit trail records actions,
+        several of which belong to one call. This is that missing trail.
+
+        It carries the channel, the verb and the amounts — never the query, the URL or anything
+        read from a page, which is the same line the privacy rules draw for the audit log.
+        """
+
+        record = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "day": state.day,
+            "op": op,
+            "amount": amount,
+            "used": state.used,
+            "channel": channel,
+            "verb": verb,
+        }
+        try:
+            path = self._ledger_path(state.day)
+            with path.open("a", encoding="utf-8", newline="\n") as handle:
+                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except OSError:
+            # A ledger that cannot be written must never stop a charge: the file is a
+            # convenience for reconciliation, and refusing traffic over it would take the tool
+            # down for a cosmetic reason.
+            pass
 
     def _write(self, state: QuotaState) -> bool:
         try:
@@ -254,9 +292,14 @@ class PolicyEngine:
             new_used = max(0, state.used - max(0, count))
             if new_used == state.used:
                 return True
-            return self._write(replace(state, used=new_used))
+            refunded = self._write(replace(state, used=new_used))
+            if refunded:
+                self._note(replace(state, used=new_used), op="refund", amount=-max(0, count))
+            return refunded
 
-    def wait_turn(self, *, interval_ms: int | None = None) -> float:
+    def wait_turn(
+        self, *, interval_ms: int | None = None, channel: str = "", verb: str = ""
+    ) -> float:
         """Reserve one network slot, sleeping for the interval if needed.
 
         `interval_ms` overrides the configured floor for this one slot, and never below
@@ -264,6 +307,9 @@ class PolicyEngine:
         opens a dialog on a page already loaded still costs a quota unit — the accounting is
         untouched — but it does not need a network-sized pause. The floor stays in force for
         everything that submits a query or opens a page.
+
+        `channel` and `verb` are recorded in the day's ledger so a total can be reconciled to the
+        calls that made it; they never reach the site and never change what is charged.
         """
 
         base = max(
@@ -309,7 +355,8 @@ class PolicyEngine:
             state.last = now
             # A failed write marks the engine degraded; the planner refuses to
             # send the reserved action (see Planner below).
-            self._write(state)
+            if self._write(state):
+                self._note(state, op="charge", amount=1, channel=channel, verb=verb)
         return slept
 
     def note_request(self) -> None:

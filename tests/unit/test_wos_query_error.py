@@ -66,6 +66,7 @@ def test_the_quote_is_bounded() -> None:
 def test_a_kernel_refusal_becomes_a_channel_error() -> None:
     """`_run_tail` translates: a failed tail plus a refusal page is the site speaking."""
 
+    from scholar_search.core.contracts import Action, Plan
     from scholar_search.core.errors import ActionError, ChannelError
     from scholar_search.core.service import ScholarService
 
@@ -84,8 +85,13 @@ def test_a_kernel_refusal_becomes_a_channel_error() -> None:
         def _site_diagnosis(self, impl: object, spec: object) -> tuple[str, bool]:
             return ("检索错误: 布尔运算符的使用无效。", False)
 
+    tail = Plan(
+        channel="webofscience",
+        purpose="search",
+        actions=(Action("wait_for", {"selector": "#next", "state": "visible"}, timeout_ms=1_000),),
+    )
     with pytest.raises(ChannelError) as caught:
-        FakeService()._run_tail(object(), object(), object())  # type: ignore[arg-type]
+        FakeService()._run_tail(object(), object(), tail)  # type: ignore[arg-type]
 
     assert "refused this query" in str(caught.value)
     assert "布尔运算符" in str(caught.value)

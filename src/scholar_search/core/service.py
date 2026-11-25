@@ -48,11 +48,17 @@ from .planner import Planner
 from .policy import PolicyEngine
 from .publishers import PUBLISHERS, Publisher, publisher_for_doi, publisher_for_host
 from .registry import ChannelRegistry, ChannelSpec
-from .risk import RiskGuard
+from .risk import RISK_TITLE_MARKERS, VERIFY_URL_MARKERS, RiskGuard
 
 # A page read is billed as two network units (one navigation plus the capture that
 # follows it, which itself spends nothing) — the price the price table documents.
 PAGE_READ_QUOTA = 2
+# How long one slice of a result-list wait may be when the channel can also be asked what the
+# page says. It is the price of noticing "the site already answered" late: on the happy path
+# nothing changes (the first slice succeeds), and a slow-but-real page pays one free read per
+# slice. Measured 2026-11-25: the alert is not in the DOM when the click returns, so a single
+# check right after the click finds nothing and the refusal still costs the whole budget.
+ANSWER_SLICE_MS = 1_200
 # Article bodies paint after the load event; a capture taken too early holds only the
 # highlights. Both waits are clamped by the extension to 3 s per action.
 _ARTICLE_SETTLE_MS = 1_200
@@ -106,10 +112,16 @@ def _page_next(probe: dict[str, Any]) -> str:
         return "call `page2md` with this `mhtml_path` (0 quota, runs inside the server)"
     if status == "blocked":
         return (
-            "the publisher challenged this browser, and this call has already navigated the "
-            "tab to the challenge page: ask the user to finish it in that window, then call "
-            "`snapshot` (0 quota) and `page2md`. Do NOT call page_read again — it re-navigates "
-            "and would replace a body that had already been captured."
+            "the publisher challenged this browser and the tab is already on it: ask the user to "
+            "finish the check in that window, then call `page_read` again — a solved wall is read "
+            "from the open tab at 0 quota. `snapshot` is also free but captures whichever tab is "
+            "in front."
+        )
+    if status == "no_html" and reason == "doi_not_found":
+        return (
+            "the DOI did not resolve: the publisher answered with its own 'no such DOI' page, so "
+            "nothing was kept and only the navigation is charged (1 unit). Check the identifier "
+            "itself — a mistyped or not-yet-indexed DOI lands here; signing in will not change it."
         )
     if status == "no_html" and reason in {"paywall", "abstract_only"}:
         return (
@@ -118,6 +130,27 @@ def _page_next(probe: dict[str, Any]) -> str:
             "in that browser window, then call page_read again. Do not retry by yourself."
         )
     return "no full text on the page: offer the PDF route instead"
+
+
+# How much of the title survives in the directory name. A person reads these folder names in a
+# file manager, so the readable part matters — but it is exactly the *prefix* that used to collide.
+_PAGE_SLUG_CHARS = 60
+
+
+def _page_dir_slug(meta: dict[str, str]) -> str:
+    """Directory name for one capture: readable title prefix, then a hash that makes it unique.
+
+    The name used to be the title cut at 80 characters, so two papers in the same series landed in
+    one folder and the second capture overwrote the first (P9, 2026-11-25:
+    `…Proximity-Sensing-and`). The hash comes from the URL, which is what actually identifies the
+    article — and a page with no usable title (`page`, or a title the rule strips entirely, as CJK
+    titles are) still gets a directory of its own.
+    """
+
+    title = meta.get("title") or meta.get("url") or "page"
+    readable = re.sub(r"[^A-Za-z0-9._-]+", "-", title)[:_PAGE_SLUG_CHARS].strip("-") or "page"
+    digest = hashlib.sha1((meta.get("url") or title).encode("utf-8")).hexdigest()[:8]
+    return f"{readable}-{digest}"
 
 
 def _page_spec(publisher: Publisher) -> ChannelSpec:
@@ -364,6 +397,8 @@ class ScholarService:
                     # the result list, which is the site's own "the query ran" signal. If the
                     # page still is not a results route afterwards, the click did nothing.
                     tail_outcomes = self._run_tail(channel, spec, tail)
+                    if tail_outcomes is None:
+                        return self._empty_result(query, channel, key)
                     proof = _last_url(tail_outcomes) or landed
                     if not is_results(proof):
                         raise ActionError(
@@ -373,18 +408,12 @@ class ScholarService:
                         )
                     landed = proof
                 else:
-                    empty = SearchPage(
-                        records=(),
-                        total=0,
-                        page=None,
-                        empty_reason="no_match",
-                        query_effective=self._effective_query(channel, query),
-                    )
-                    self._cache.set(key, _page_to(empty))
-                    return empty
-            outcomes = heads + (
-                tail_outcomes if tail_outcomes is not None else self._run_tail(channel, spec, tail)
-            )
+                    return self._empty_result(query, channel, key)
+            if tail_outcomes is None:
+                tail_outcomes = self._run_tail(channel, spec, tail)
+                if tail_outcomes is None:
+                    return self._empty_result(query, channel, key)
+            outcomes = heads + tail_outcomes
         else:
             plan = channel.plan_search(query)
             try:
@@ -419,15 +448,7 @@ class ScholarService:
                         raise ChannelError(
                             f"the site refused this query (query.rejected): {refusal}"
                         ) from None
-                    empty = SearchPage(
-                        records=(),
-                        total=0,
-                        page=None,
-                        empty_reason="no_match",
-                        query_effective=self._effective_query(channel, query),
-                    )
-                    self._cache.set(key, _page_to(empty))
-                    return empty
+                    return self._empty_result(query, channel, key)
                 else:
                     raise
         # An export-capable channel has no read action in its plan — the payload is a file —
@@ -758,6 +779,27 @@ class ScholarService:
         except (OSError, ValueError):
             return
 
+    @staticmethod
+    def _page_goto_params(target: str) -> dict[str, Any]:
+        """The `goto` that opens an article, carrying the gate markers worth stopping for.
+
+        A verification interstitial never fires the load event, so `waitComplete` sits out its
+        whole budget on a page that is already final: measured 12.12 s on Wiley (2026-11-25),
+        for an answer the title had given away in about a second. Handing the markers to the
+        extension lets it end the wait as soon as one of them persists (ADR 0025).
+
+        The lists come from `core/risk.py`, which is where a wall is decided — the extension
+        treats them as opaque strings and never learns what a gate page is. Passing a copy of
+        the *values* is deliberate: the extension gets no second opinion to drift from, and the
+        kernel's own `RiskGuard` and `challenge_in_title` still make the call.
+        """
+
+        return {
+            "url": target,
+            "halt_url_markers": list(VERIFY_URL_MARKERS),
+            "halt_titles": list(RISK_TITLE_MARKERS),
+        }
+
     def read_page(self, *, url: str = "", doi: str = "") -> dict[str, Any]:
         """Open the article a reader asked for, then say what is on it.
 
@@ -855,8 +897,10 @@ class ScholarService:
                         channel=f"page:{publisher.name}",
                         purpose="detail",
                         actions=(
-                            # A deep link: the article URL is opened as given.
-                            Action("goto", {"url": target}),
+                            # A deep link: the article URL is opened as given, and the gate
+                            # markers let the extension stop waiting for a wall that will never
+                            # finish loading (ADR 0025).
+                            Action("goto", self._page_goto_params(target)),
                         ),
                     ),
                     spec,
@@ -965,6 +1009,16 @@ class ScholarService:
             }
             if probe.get("status") == "ok":
                 self._page_cache_put(target, result)
+            elif probe.get("reason") == "doi_not_found":
+                # There is no article here, so the capture is discarded instead of becoming a
+                # file a caller could mistake for one, and only the navigation is reported: the
+                # capture price buys an article body, and this page has none (measured
+                # 2026-11-25: 267 KB of Elsevier's error page was kept and 2 units charged).
+                with suppress(OSError):
+                    readable.unlink()
+                result["mhtml_path"] = None
+                result["bytes"] = 0
+                result["quota_charged"] = 1
             return result
 
     def _collect_chunks(self, adapter: Any, first: dict[str, Any]) -> bytes:
@@ -1018,8 +1072,7 @@ class ScholarService:
     def _write_page(self, payload: bytes, meta: dict[str, str]) -> Path:
         """Store the capture under `<home>/pages/<slug>/page.mhtml`, scripts removed."""
 
-        title = meta.get("title") or meta.get("url") or "page"
-        slug = re.sub(r"[^A-Za-z0-9._-]+", "-", title)[:80].strip("-") or "page"
+        slug = _page_dir_slug(meta)
         home = Path(self._policy.state_dir).parent if self._policy else Path.cwd()
         target = home / "pages" / slug / "page.mhtml"
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -1404,14 +1457,94 @@ class ScholarService:
                 self._pinned_adapter.close()
             self._pinned_adapter = None
 
-    def _run_tail(self, impl: Channel, spec: ChannelSpec, tail: Plan) -> tuple[ActionOutcome, ...]:
+    def _empty_result(self, query: SearchQuery, channel: Any, key: str) -> SearchPage:
+        """The site's own "nothing matched" answer, cached like any other page.
+
+        A zero-hit search is not a failure: the actions that ran were really sent, and "the
+        expression matches nothing" is a true answer about it (2026-11-25: two legal zero-hit
+        expressions were reported as refused expressions instead).
+        """
+
+        empty = SearchPage(
+            records=(),
+            total=0,
+            page=None,
+            empty_reason="no_match",
+            query_effective=self._effective_query(channel, query),
+        )
+        self._cache.set(key, _page_to(empty))
+        return empty
+
+    def _run_tail(
+        self, impl: Channel, spec: ChannelSpec, tail: Plan
+    ) -> tuple[ActionOutcome, ...] | None:
         """Run the part of a split plan that reads the result, translating a refusal.
 
         A bad expression is answered with an alert instead of a result list, so this wait can
         only time out. The site says what is wrong in a sentence; reporting that is the
         difference between "your expression is invalid" and "nothing happened" (measured
         2026-11-24: `TS=(ionic OR electroactive) AND actuator` → 「布尔运算符的使用无效」).
+
+        `None` means the site said the expression matched nothing. That is an answer, not a
+        failure: the caller renders it as an empty page instead of an error.
+
+        **The wait is taken in slices when the channel names an alert container.** The alert is
+        not in the DOM when the click returns — measured 2026-11-25: one look right after the
+        click passed in 2 ms with nothing there, and the refusal still cost 10.8 s of waiting
+        for a result list that was never coming. Between slices the page is asked what it says,
+        so whichever of "results are up" and "the site answered" happens first wins. Both polls
+        are reads, so a slice costs a round trip and no quota.
         """
+
+        alert_selector = getattr(impl, "alert_selector", None)
+        first = tail.actions[0] if tail.actions else None
+        polls_between_slices = (
+            isinstance(alert_selector, str)
+            and bool(alert_selector)
+            and first is not None
+            and first.verb == "wait_for"
+        )
+        if not polls_between_slices:
+            return self._tail_once(impl, spec, tail)
+        assert first is not None  # narrowed by `polls_between_slices`
+        deadline = time.monotonic() + max(1, first.timeout_ms) / 1000
+        last: ActionError | None = None
+        while True:
+            left_ms = int((deadline - time.monotonic()) * 1000)
+            if left_ms <= 0:
+                break
+            slice_ms = min(ANSWER_SLICE_MS, left_ms)
+            sliced = replace(
+                first,
+                params={**first.params, "timeout_ms": slice_ms},
+                timeout_ms=slice_ms + 1_000,
+            )
+            try:
+                return self._run(replace(tail, actions=(sliced, *tail.actions[1:])), spec)
+            except ActionError as error:
+                if error.stage != "wait.result-list":
+                    raise
+                last = error
+            refusal, nothing_matched = self._site_diagnosis(impl, spec)
+            if refusal is not None:
+                raise ChannelError(
+                    f"the site refused this query (query.rejected): {refusal}"
+                ) from None
+            if nothing_matched:
+                return None
+        if last is not None:
+            raise last
+        raise ActionError(
+            "the result list never appeared",
+            verb="wait_for",
+            code="timeout",
+            stage="wait.result-list",
+        )
+
+    def _tail_once(
+        self, impl: Channel, spec: ChannelSpec, tail: Plan
+    ) -> tuple[ActionOutcome, ...] | None:
+        """The whole tail in one go, then one look at the page when the wait failed."""
 
         try:
             return self._run(tail, spec)
@@ -1421,11 +1554,13 @@ class ScholarService:
             # must not spend a step on a probe that cannot describe it.
             if error.stage != "wait.result-list":
                 raise
-            refusal, _ = self._site_diagnosis(impl, spec)
+            refusal, nothing_matched = self._site_diagnosis(impl, spec)
             if refusal is not None:
                 raise ChannelError(
                     f"the site refused this query (query.rejected): {refusal}"
                 ) from None
+            if nothing_matched:
+                return None
             raise
 
     def _site_diagnosis(self, impl: Channel, spec: ChannelSpec) -> tuple[str | None, bool]:
@@ -1437,16 +1572,29 @@ class ScholarService:
         * a refusal is the site's own sentence ("布尔运算符的使用无效…"); before this probe the
           caller was told the result list never appeared, which is true and useless;
         * "no results" is not a refusal: both render the same alert, so the wording decides.
+          When the channel names that alert, no wording list is needed at all — an alert that
+          does not refuse the expression *is* the zero-hit notice — and that is what makes it
+          work on a localized UI, where the empty wording is a sentence nobody has captured
+          (2026-11-25: a Chinese zero-hit page was reported as a refused expression, quoting
+          the search form's help panel, because the English-only wording list matched nothing
+          and the whole page was read instead of the alert).
         """
 
         refusal_checker = getattr(impl, "query_error", None)
         empty_checker = getattr(impl, "is_empty_page", None)
         if refusal_checker is None and empty_checker is None:
             return (None, False)
+        # `inner` is rendered text, so the alert container the site keeps in the DOM while it
+        # is not showing anything reads as empty rather than as a message.
+        alert_selector = getattr(impl, "alert_selector", None)
+        if isinstance(alert_selector, str) and alert_selector:
+            probe_action = Action("read_text", {"selector": alert_selector, "mode": "inner"})
+        else:
+            probe_action = Action("read_text", {"selector": "body", "mode": "text"})
         probe = Plan(
             channel=spec.name,
             purpose="probe",
-            actions=(Action("read_text", {"selector": "body", "mode": "text"}),),
+            actions=(probe_action,),
         )
         try:
             outcomes = self._run(probe, spec)
@@ -1458,12 +1606,14 @@ class ScholarService:
                 candidate = outcome.data.get("text")
                 if isinstance(candidate, str):
                     text = candidate
-        if not text:
+        if not text.strip():
             return (None, False)
         if refusal_checker is not None:
             message = refusal_checker(text)
             if isinstance(message, str) and message.strip():
                 return (message.strip(), False)
+        if isinstance(alert_selector, str) and alert_selector:
+            return (None, True)
         if empty_checker is not None and empty_checker(text):
             return (None, True)
         return (None, False)

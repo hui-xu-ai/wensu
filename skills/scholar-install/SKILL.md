@@ -169,8 +169,9 @@ wensu --version                 # 磁盘上的
 | `install.ps1` 报 `csc.exe not found` | 缺 .NET Framework 编译器 | 让用户装 .NET Framework 4.x，或从别的机器拷 `scholar-host.exe` |
 | `status` 正常但检索报 `content_not_ready` | 浏览器停在错误页。**国内最常见的是代理换证**：代理软件对 `kns.cnki.net` 做 TLS 中间人，Edge 显示「隐私错误 / `NET::ERR_CERT_COMMON_NAME_INVALID`」，错误页上没有内容脚本 | 先看浏览器窗口标题。是错误页就让 `cnki.net` 直连（Clash 里加 `DOMAIN-SUFFIX,cnki.net → DIRECT`，或把 `*.cnki.net;cnki.net` 加进 `ProxyOverride`），重启浏览器；**不要**用 `curl`/`Invoke-WebRequest` 能通就判断站点没问题——它们不走系统代理 |
 | 动作报 `bridge.timeout` | 窗口不在前台导致定时器节流，或标签页状态坏 | 切前台、只留一个窗口一个标签页；仍不行关掉 CNKI 标签页重来 |
-| `blocked` + `cooldown_until` | 触发了风控 | **停止**。让用户人工在浏览器完成验证，再 `wensu reset --confirm`。禁止重试 |
-| **全新浏览器环境第一次检索就 `blocked`（`verify_redirect`）** | 新 profile 没有 Cookie 与历史，知网要求人工验证；属预期行为 | 让用户在该窗口完成滑块验证 → `wensu reset --confirm` → 再跑一次。**不要**直接 reset 后立刻重试，reset 前必须确认验证已通过 |
+| `blocked`（`captcha` / `verify_redirect` / `login_redirect`，**不带 `cooldown_until`**） | 触发了人工验证，不是封禁 | **停止**。让用户在那个浏览器窗口自己完成验证，然后**再跑一次同一个请求**（墙已过时会复用已打开的标签页，0 额度）。不冷却，也不要用 `wensu reset` 去"解"一个不存在的冷却 |
+| `blocked` + **`cooldown_until` 有值**（403 / 429） | 站点明确拒绝 | 停到那个时间点。不要重试、不要换 IP、不要换 profile |
+| **全新浏览器环境第一次检索就 `blocked`（`verify_redirect`）** | 新 profile 没有 Cookie 与历史，知网要求人工验证；属预期行为 | 让用户在该窗口完成滑块验证，然后**再跑一次**那个请求（0.14.5 起不需要 `wensu reset`） |
 | 配额用尽 | 当日 300 次用完 | 等次日自动重置，不要改 `quota.json` |
 
 ## 不要做
