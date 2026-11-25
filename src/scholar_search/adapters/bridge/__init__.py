@@ -19,6 +19,7 @@ action may have had side effects.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import socket
@@ -30,6 +31,7 @@ from typing import Any
 from ...core.config import host_runtime_dir
 from ...core.contracts import Action, ActionOutcome
 from ...core.errors import BridgeAmbiguous, BridgeError
+from ...core.process import process_alive
 
 PING_TIMEOUT_S = 0.6
 
@@ -146,6 +148,39 @@ class BridgeAdapter:
         return unique
 
     @staticmethod
+    def _drop_dead(paths: list[Path]) -> list[Path]:
+        """Endpoint files whose host process has exited, and cannot come back.
+
+        A host writes `bridge-<pid>.json` and the file stays after it exits. Every one of them
+        was pinged on every transaction: fourteen dead files at 605 ms each put **8.5 s** in
+        front of every search before anything reached the browser (measured 2026-11-25). The pid
+        is the answer, and the file is deleted — a dead pid never writes it again.
+
+        A file with no readable pid is kept: deleting a malformed record could hide a live host.
+        Files written in the last minute are also kept, so a host that is still starting cannot
+        lose its endpoint to a race.
+        """
+
+        import time
+
+        now = time.time()
+        kept: list[Path] = []
+        for path in paths:
+            try:
+                info = json.loads(path.read_text(encoding="utf-8"))
+                pid = int(info["pid"])
+                fresh = now - path.stat().st_mtime < 60
+            except (OSError, ValueError, KeyError, TypeError):
+                kept.append(path)
+                continue
+            if fresh or process_alive(pid):
+                kept.append(path)
+                continue
+            with contextlib.suppress(OSError):
+                path.unlink()
+        return kept
+
+    @staticmethod
     def _read_profiles(paths: list[Path]) -> dict[Path, str | None]:
         found: dict[Path, str | None] = {}
         for path in paths:
@@ -200,7 +235,7 @@ class BridgeAdapter:
 
         wanted = self._wanted_profile()
         live: list[tuple[Path, tuple[int, str], str | None]] = []
-        for path in self._candidates():
+        for path in self._drop_dead(self._candidates()):
             found = self._ping(path)
             if found is None:
                 continue

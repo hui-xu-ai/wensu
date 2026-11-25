@@ -18,9 +18,10 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from .config import app_home
+from .process import process_alive
 
 BUNDLE_NAME = "@hui-xu-ai/dsh-wensu"
 
@@ -111,36 +112,8 @@ def bridge_state(home: Path | None = None) -> dict[str, Any]:
         return {"endpoint": str(endpoint), "pid": None, "port": None, "alive": False}
     pid = payload.get("pid") if isinstance(payload, dict) else None
     port = payload.get("port") if isinstance(payload, dict) else None
-    alive = _process_alive(pid)
+    alive = process_alive(pid)
     return {"endpoint": str(endpoint), "pid": pid, "port": port, "alive": alive}
-
-
-def _process_alive(pid: object) -> bool:
-    """Whether `pid` names a live process. Windows needs OpenProcess, not `os.kill(pid, 0)`.
-
-    On Windows `os.kill(pid, 0)` is not a probe: signal 0 goes through TerminateProcess, so it
-    can either lie or kill. Query the handle instead (measured 2026-11-24: the host was alive
-    and `os.kill` said otherwise).
-    """
-
-    if not isinstance(pid, int) or pid <= 0:
-        return False
-    if os.name == "nt":
-        import ctypes
-
-        # Viewed as `Any`: `windll` only exists on Windows, and CI type-checks on Linux (the
-        # same platform-gated-attribute problem `msvcrt` had — see `core/browser.py`).
-        kernel32 = cast(Any, ctypes).windll.kernel32
-        handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
-        if not handle:
-            return False
-        kernel32.CloseHandle(handle)
-        return True
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        return False
-    return True
 
 
 def pandoc_version() -> str | None:

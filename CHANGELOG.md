@@ -4,6 +4,26 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.14.11] - 2026-11-25
+
+### Fixed — every search paid 8.5 s for host endpoints that no longer existed
+
+Chasing the ~9 s that a walled search spent *outside* its audited actions (the audit showed a
+single 3.5 s `goto`) turned up a leak with a fixed price per search. The native host writes
+`host/hosts/bridge-<pid>.json` and never removes it, so the directory had accumulated **fourteen**
+files whose processes were long gone. `BridgeAdapter.pin()` pings every candidate before choosing
+one, and on this machine each dead endpoint took ~605 ms to fail: **8,515 / 8,527 / 8,520 ms**,
+measured three times with the browser lock free and no network action involved.
+
+A candidate whose recorded pid is not running can never answer, so it is dropped and deleted
+before the pings (`core/process.py` now owns the liveness probe; the doctor uses the same one).
+Files written in the last minute are kept, so a host that is still starting cannot lose its
+endpoint to a race. Measured after the fix: entering a browser transaction **630 ms → 615 ms** for
+a pid that had been recycled by a browser, and a walled WoS search went from **11,746 / 12,192 /
+13,618 ms to 3,307 ms**.
+
+`background-0.14.11.js`, as the cache-busting rule requires.
+
 ## [0.14.10] - 2026-11-25
 
 ### Fixed — a login wall is reported when it lands, not when the wait runs out
