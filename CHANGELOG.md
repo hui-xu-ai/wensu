@@ -36,6 +36,23 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.20] - 2026-11-25
+
+### Fixed — the second window was `--load-extension`, not Edge restoring a session
+
+Every `wensu browser start` passed `--load-extension`, and Edge answers that by opening its
+extensions/settings window beside the startup window — two windows on every cold start. The flag was
+being passed because the check for "is this extension already known" looked in `Preferences`, while
+Edge records extensions in **`Secure Preferences`**. The profile has carried the extension all along
+(`extensions.settings.gmaimbocfj… → …\scholar-search\browser\extension`, verified), so the flag was
+pure overhead.
+
+`start` now reads both files (and accepts the saved `extension_id` as a match) and passes
+`--load-extension` **only** when the profile does not know the extension — i.e. the genuine first
+run. Measured with the flag: two windows; without it: one.
+
+`background-0.14.20.js`, as the cache-busting rule requires (worker unchanged).
+
 ## [0.14.19] - 2026-11-25
 
 ### Fixed — the restored window is closed, not just the empty one

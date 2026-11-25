@@ -282,6 +282,38 @@ def profile_is_running(config: BrowserConfig) -> bool | None:
             handle.close()
 
 
+def extension_installed(config: BrowserConfig) -> bool:
+    """Whether the profile already carries this extension.
+
+    Edge records extensions in ``Secure Preferences`` (per-profile), not in ``Preferences``: looking
+    in the wrong file made a loaded extension look absent and every launch passed
+    ``--load-extension``, which is what makes Edge open its extensions/settings window — the second
+    window users saw on every start (measured 2026-11-25). A persisted entry means the extension
+    loads by itself, so the flag can be dropped.
+    """
+
+    wanted = str(Path(config.extension_dir).resolve()).replace("/", "\\").lower()
+    root = Path(config.profile_dir)
+    if not root.is_dir():
+        return False
+    for name in ("Secure Preferences", "Preferences"):
+        for candidate in root.glob(f"*/{name}"):
+            try:
+                data = json.loads(candidate.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            settings = (data.get("extensions") or {}).get("settings") or {}
+            if not isinstance(settings, dict):
+                continue
+            if config.extension_id and config.extension_id in settings:
+                return True
+            for entry in settings.values():
+                path = str((entry or {}).get("path") or "").replace("/", "\\").lower()
+                if path and path == wanted:
+                    return True
+    return False
+
+
 def start(config: BrowserConfig, *, settle_s: float = 1.5) -> subprocess.Popen[bytes]:
     """Start the recorded profile and confirm it stayed up.
 
@@ -305,7 +337,9 @@ def start(config: BrowserConfig, *, settle_s: float = 1.5) -> subprocess.Popen[b
         # start — a window the user did not ask for (measured 2026-11-25).
         "--hide-crash-restore-bubble",
     ]
-    if Path(config.extension_dir).is_dir():
+    # Only when the profile does not know the extension yet: with a persisted entry Edge loads it on
+    # its own, and the flag would add an extensions/settings window (see `extension_installed`).
+    if Path(config.extension_dir).is_dir() and not extension_installed(config):
         args.append(f"--load-extension={config.extension_dir}")
 
     creationflags = 0
