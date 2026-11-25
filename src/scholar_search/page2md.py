@@ -994,72 +994,6 @@ def _localise_images(
     return re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", rewrite, markdown), copied, missing
 
 
-def _figure_stem(target: str) -> str:
-    """The part of a figure URL that identifies the image, without its format.
-
-    Publishers serve one figure in several formats — the page's `<img src>` said
-    `…-g001-550.jpg` while the browser had downloaded `…-g001-550.webp` — so matching on the whole
-    URL missed every figure on the first live run. The directory plus the filename without its
-    extension is what stays the same across those variants.
-    """
-
-    path = target.split("?")[0].split("#")[0]
-    head, _, tail = path.rpartition("/")
-    stem = tail.rsplit(".", 1)[0] if "." in tail else tail
-    return f"{head}/{stem}".lower()
-
-
-def _relink_figures(markdown: str, adopted: dict[str, str]) -> tuple[str, int]:
-    """Point the Markdown at the captured files: exact URL first, then the format-free stem."""
-
-    by_url = {url.lower(): relative for url, relative in adopted.items()}
-    by_stem = {_figure_stem(url): relative for url, relative in adopted.items()}
-    resolved = 0
-
-    def rewrite(match: re.Match[str]) -> str:
-        nonlocal resolved
-        alt, target = match.group(1), match.group(2).strip()
-        relative = by_url.get(target.lower()) or by_stem.get(_figure_stem(target))
-        if not relative:
-            return match.group(0)
-        resolved += 1
-        return f"![{alt}]({relative})"
-
-    return re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", rewrite, markdown), resolved
-
-
-def _adopt_figure_assets(source: Path, out: Path) -> dict[str, str]:
-    """Copy the debugger-captured figures next to the Markdown and return their link map.
-
-    `page_read(..., figures=True)` writes `<page_dir>/assets/NN.ext` plus an `index.json` that maps
-    each publisher URL to that file (ADR 0026). The MHTML itself never carried those images — its
-    `<img src>` still points at the CDN — so without this the Markdown loses them offline.
-    """
-
-    index = source.parent / "assets" / "index.json"
-    if not index.is_file():
-        return {}
-    try:
-        mapping = json.loads(index.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    if not isinstance(mapping, dict):
-        return {}
-    target = out / "assets"
-    adopted: dict[str, str] = {}
-    for url, relative in mapping.items():
-        if not isinstance(url, str) or not isinstance(relative, str):
-            continue
-        name = Path(relative).name
-        origin = source.parent / "assets" / name
-        if not origin.is_file():
-            continue
-        target.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(origin, target / name)
-        adopted[url] = f"assets/{name}"
-    return adopted
-
-
 # --------------------------------------------------------------------- 主流程
 
 
@@ -1550,14 +1484,8 @@ def convert(
         # Figures the browser captured through the debugger (ADR 0026) sit beside the page with a
         # URL → file map, because the MHTML never carried them: its `<img src>` still points at the
         # publisher's CDN. Adopting them makes the Markdown directory self-contained.
-        adopted = _adopt_figure_assets(source, out)
-        if adopted:
-            markdown, resolved = _relink_figures(markdown, adopted)
-            copied += resolved
-            missing = max(0, missing - resolved)
         info["images_copied"] = copied
         info["images_missing"] = missing
-        info["figures_adopted"] = len(adopted)
     title = info.get("title") or source.stem
     header = f"# {title}\n\n"
     facts = [

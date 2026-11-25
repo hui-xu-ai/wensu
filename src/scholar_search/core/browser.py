@@ -301,6 +301,9 @@ def start(config: BrowserConfig, *, settle_s: float = 1.5) -> subprocess.Popen[b
         f"--user-data-dir={config.profile_dir}",
         "--no-first-run",
         "--no-default-browser-check",
+        # A profile whose browser was force-closed shows a "restore pages?" bubble on the next
+        # start — a window the user did not ask for (measured 2026-11-25).
+        "--hide-crash-restore-bubble",
     ]
     if Path(config.extension_dir).is_dir():
         args.append(f"--load-extension={config.extension_dir}")

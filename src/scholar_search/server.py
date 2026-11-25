@@ -818,20 +818,13 @@ def build_server(service: ScholarService) -> FastMCP:
             return _payload(error if isinstance(error, Exception) else ValueError("bad record"))
 
     @mcp.tool()
-    def page_read(url: str = "", doi: str = "", figures: bool = False) -> dict[str, Any]:
+    def page_read(url: str = "", doi: str = "") -> dict[str, Any]:
         """Open a publisher article page and say whether it holds the full text.
 
         Give `doi` (preferred — it also decides the publisher) or an article `url`. The
         browser opens that address directly, then saves the page as MHTML; the navigation
         plus the capture is charged as **2 quota units** — or **1** when the page turns out
         to be a challenge wall, because nothing is captured then.
-
-        `figures=True` also saves the article's images under `<page_dir>/assets/`. The MHTML
-        never carries cross-origin images, so they are read out of what the browser **already
-        downloaded** — no second request is made to the publisher — and the browser shows a
-        "being debugged" notice while this capture runs (ADR 0026). Up to 12 figures, 1.2 MB
-        each, 8 MB total; anything skipped is named in `figures.skipped`. `page2md` then links
-        the saved files instead of the publisher's CDN.
 
         Read `status` before anything else:
 
@@ -852,7 +845,7 @@ def build_server(service: ScholarService) -> FastMCP:
         """
 
         try:
-            return service.read_page(url=url, doi=doi, figures=figures)
+            return service.read_page(url=url, doi=doi)
         except (RiskBlocked, ScholarSearchError, OSError, ValueError) as error:
             return _payload(error)
 

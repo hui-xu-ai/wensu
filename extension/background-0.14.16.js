@@ -167,166 +167,6 @@ function waitNavigated(tabId, fromUrl, domains, timeoutMs = 10_000) {
 const CHUNK_BYTES = 192 * 1024;
 const captures = new Map();
 
-// Figures (ADR 0026). `pageCapture` does not carry cross-origin images — measured 2026-11-25, a
-// page with 36 `<img>` produced zero image parts — and **no** extension API hands back a response
-// body: `fetch` is a new request (cache hit indistinguishable from a miss), a canvas is tainted by
-// cross-origin images, `webRequest` sees metadata only, and the disk cache has no API. The one
-// channel that reads what the browser already downloaded, without asking the site again, is the
-// debugger protocol — and only for requests that happen **while attached**, which is why the goto
-// attaches before it navigates.
-const MAX_FIGURES = 12;
-const MAX_FIGURE_BYTES = Math.round(1.2 * 1024 * 1024);
-const MAX_FIGURES_TOTAL = 8 * 1024 * 1024;
-const FIGURE_CHUNK_CHARS = 1_200_000;
-// Figures ride along in the capture reply itself whenever they fit: the readback-by-index path
-// depends on the capture surviving to the next message, and three live runs lost it
-// (`snapshot.expired`). A frame holds 2 MB and the page's own first chunk is ~256 KB, so this is
-// the room left for images. Whatever does not fit is still readable by index.
-const FIGURE_INLINE_CHARS = 1_200_000;
-// Walking a long article takes a while (the readiness script waits for the body, then scrolls in
-// viewport steps); this bounds it so a slow page cannot eat the whole capture budget.
-const FIGURE_WALK_BUDGET_MS = 20_000;
-// A page's network carries far more images than its figures: consent banners, analytics beacons,
-// tracking pixels and logos all arrive first and ate the whole budget in the first live run
-// (measured 2026-11-25: twelve `uct.service.usercentrics.eu` beacons, zero article figures). So a
-// beacon is dropped by host, and anything smaller than a few kilobytes is kept only if there is
-// room — a 1×1 pixel is not a figure.
-const FIGURE_BLOCK = /(usercentrics|google-analytics|googletagmanager|doubleclick|facebook|hotjar|segment|sentry|newrelic|cloudflareinsights|favicon)/i;
-const FIGURE_MIN_BYTES = 4 * 1024;
-let figureSession = null; // { tabId, images: Map<requestId, {url, mime, size}>, order, skipped }
-
-function onDebuggerEvent(source, method, params) {
-  const session = figureSession;
-  if (!session || !source || source.tabId !== session.tabId) return;
-  if (method !== "Network.responseReceived") return;
-  const response = (params && params.response) || {};
-  const mime = String(response.mimeType || "");
-  const type = String((params && params.type) || "");
-  if (type !== "Image" && !mime.startsWith("image/")) return;
-  if (session.images.has(params.requestId)) return;
-  const url = String(response.url || "");
-  if (!/^https?:/i.test(url)) return;
-  if (FIGURE_BLOCK.test(url)) {
-    session.skipped.push({ url, reason: "not_a_figure" });
-    return;
-  }
-  if (session.order.length >= MAX_FIGURES) {
-    session.skipped.push({ url, reason: "too_many" });
-    return;
-  }
-  const size = Number(response.contentLength || response.encodedDataLength || 0);
-  if (size && size < FIGURE_MIN_BYTES) {
-    session.skipped.push({ url, reason: "too_small" });
-    return;
-  }
-  if (size > MAX_FIGURE_BYTES) {
-    session.skipped.push({ url, reason: "too_large" });
-    return;
-  }
-  session.images.set(params.requestId, { url, mime: mime || "image/png", size });
-  session.order.push(params.requestId);
-}
-
-// Publisher pages carry `content/readiness.js`, which knows when the article is actually there and
-// walks the page so lazy images are fetched. A stopwatch was the old answer and a cold cache proved
-// it wrong: six seconds produced a skeleton while a warm cache produced the full article.
-async function settleAndWalk(tabId, budgetMs) {
-  const ask = (cmd, ms) =>
-    new Promise((resolve) => {
-      let done = false;
-      const finish = (value) => {
-        if (done) return;
-        done = true;
-        resolve(value);
-      };
-      try {
-        chrome.tabs.sendMessage(tabId, { cmd }, (reply) => {
-          void chrome.runtime.lastError;
-          finish(reply || null);
-        });
-      } catch {
-        finish(null);
-      }
-      setTimeout(() => finish(null), ms);
-    });
-  const walked = await ask("wensu.walk", budgetMs);
-  return walked;
-}
-
-async function beginFigures(tabId) {
-  if (!chrome.debugger) throw new Error("figures.unavailable");
-  if (figureSession && figureSession.tabId === tabId) return;
-  await endFigures();
-  await chrome.debugger.attach({ tabId }, "1.3");
-  figureSession = { tabId, images: new Map(), order: [], skipped: [] };
-  // Article images are lazy, and a minimized window never paints — so nothing is ever downloaded
-  // for the debugger to read. The window is brought back (unfocused: taking focus is exactly what
-  // the quiet windows avoid) and minimized again when the capture ends.
-  const tab = await chrome.tabs.get(tabId).catch(() => null);
-  if (tab && tab.windowId) {
-    await within(chrome.windows.update(tab.windowId, { state: "normal" }), 1_000).catch(() => null);
-  }
-  // Let the page say it is ready and walk it, so lazy figures are downloaded before the capture.
-  // On a host without the readiness script this answers null immediately and the caller falls back
-  // to the stopwatch it always had.
-  await settleAndWalk(tabId, FIGURE_WALK_BUDGET_MS);
-  // The buffer has to be able to hold what is kept; `getResponseBody` fails once it is evicted.
-  await chrome.debugger.sendCommand({ tabId }, "Network.enable", {
-    maxTotalBufferSize: MAX_FIGURES_TOTAL + 1024 * 1024,
-    maxResourceBufferSize: MAX_FIGURE_BYTES + 256 * 1024,
-  });
-}
-
-async function endFigures() {
-  const session = figureSession;
-  figureSession = null;
-  if (!session) return;
-  await chrome.debugger.detach({ tabId: session.tabId }).catch(() => null);
-  const tab = await chrome.tabs.get(session.tabId).catch(() => null);
-  if (tab && tab.windowId) {
-    await minimizeWindow(tab.windowId);
-  }
-}
-
-async function collectFigures() {
-  const session = figureSession;
-  if (!session) return { assets: [], skipped: [], bytes: 0 };
-  const assets = [];
-  const skipped = [...session.skipped];
-  let total = 0;
-  for (const requestId of session.order) {
-    const info = session.images.get(requestId);
-    if (!info) continue;
-    try {
-      const body = await chrome.debugger.sendCommand({ tabId: session.tabId }, "Network.getResponseBody", {
-        requestId,
-      });
-      const base64 = body && body.base64Encoded ? String(body.body || "") : "";
-      if (!base64) {
-        skipped.push({ url: info.url, reason: "no_body" });
-        continue;
-      }
-      // The cap has to be checked against the *decoded* size: a response served from the cache
-      // reports `contentLength: 0`, so the header cannot be trusted for accounting.
-      const raw = Math.floor((base64.length * 3) / 4);
-      if (total + raw > MAX_FIGURES_TOTAL) {
-        skipped.push({ url: info.url, reason: "total_cap" });
-        continue;
-      }
-      assets.push({ url: info.url, mime: info.mime, size: raw, base64 });
-      total += raw;
-    } catch {
-      skipped.push({ url: info.url, reason: "no_body" });
-    }
-  }
-  return { assets, skipped, bytes: total };
-}
-
-function sliceAsset(asset, offset) {
-  const from = Math.max(0, Number(offset) || 0);
-  return asset.base64.slice(from, from + FIGURE_CHUNK_CHARS);
-}
-
 function bytesToBase64(bytes) {
   let binary = "";
   for (let index = 0; index < bytes.length; index += 0x8000) {
@@ -755,29 +595,6 @@ async function onHostMessage(message, channel) {
       if (token) {
         const capture = captures.get(token);
         if (!capture) throw new Error("snapshot.expired");
-        // A figure is read the same way the MHTML is: one chunk per frame, because a frame is
-        // capped at 2 MB and a page's figures are not.
-        if (params.asset !== undefined) {
-          const index = Number(params.asset);
-          const asset = Array.isArray(capture.assets) ? capture.assets[index] : null;
-          if (!asset) throw new Error("snapshot.no_asset");
-          const offset = Math.max(0, Number(params.offset) || 0);
-          const chunk = sliceAsset(asset, offset);
-          reply({
-            ok: true,
-            data: {
-              token,
-              asset: index,
-              offset,
-              chunk,
-              total: asset.base64.length,
-              done: offset + chunk.length >= asset.base64.length,
-              mime: asset.mime,
-              url: asset.url,
-            },
-          });
-          return;
-        }
         reply({
           ok: true,
           data: {
@@ -800,17 +617,6 @@ async function onHostMessage(message, channel) {
       if (!tab.url || !/^https?:/i.test(tab.url)) throw new Error("policy.url_scheme");
       const blob = await chrome.pageCapture.saveAsMHTML({ tabId: tab.id });
       const bytes = new Uint8Array(await blob.arrayBuffer());
-      // Figures ride along only when the caller asked for them: the debugger was attached by the
-      // `goto` that produced this page, and its recorded bodies are still in the session.
-      let figures = { assets: [], skipped: [], bytes: 0 };
-      if (params && params.assets === true) {
-        try {
-          figures = await collectFigures();
-        } finally {
-          // The banner must not outlive the capture, whatever the outcome.
-          await endFigures();
-        }
-      }
       // A challenge page is the one thing this verb must not hand back as if it were the
       // article. Reading the flag costs one message at most and lets the caller say
       // "stop, solve it yourself" instead of summarising a captcha.
@@ -821,11 +627,8 @@ async function onHostMessage(message, channel) {
         url: tab.url,
         title: tab.title || "",
         captchaVisible: meta.captcha_visible === true,
-        assets: figures.assets,
       };
       captures.set(fresh.token, fresh);
-      const figureInline = [];
-      let figureInlineBudget = FIGURE_INLINE_CHARS;
       // A capture nobody reads must not sit in memory forever.
       setTimeout(() => captures.delete(fresh.token), 120_000);
       reply({
@@ -838,28 +641,6 @@ async function onHostMessage(message, channel) {
           title: fresh.title,
           captcha_visible: fresh.captchaVisible,
           status: Number(meta.status) || 0,
-          // A manifest, never the bytes: the caller asks for each figure by index.
-          figures: (() => {
-            let budget = figureInlineBudget;
-            return figures.assets.map((asset, index) => {
-              const entry = {
-                index,
-                url: asset.url,
-                mime: asset.mime,
-                size: asset.size,
-                chunks: Math.ceil(asset.base64.length / FIGURE_CHUNK_CHARS),
-              };
-              if (budget >= asset.base64.length) {
-                budget -= asset.base64.length;
-                figureInline.push({ index, base64: asset.base64 });
-                entry.inline = true;
-              }
-              return entry;
-            });
-          })(),
-          figures_inline: figureInline,
-          figures_bytes: figures.bytes,
-          figures_skipped: figures.skipped,
         },
       });
       return;
@@ -936,9 +717,6 @@ async function onHostMessage(message, channel) {
         // ("Navigation rejected."), and that is exactly the first navigation after a browser
         // start — measured 2026-11-25: the first search failed and the immediate retry worked.
         const navigate = async () => {
-          // Attach *before* the navigation: `getResponseBody` only knows requests that happened
-          // while attached, so attaching afterwards would find nothing (ADR 0026).
-          if (params.assets === true) await beginFigures(tab.id);
           await chrome.tabs.update(tab.id, { url: params.url });
           // Read the tab back only once it has moved: `tabs.get` immediately after
           // `update` can return the previous URL, which looked like a redirect out of scope.
@@ -1243,9 +1021,6 @@ async function onHostMessage(message, channel) {
 
 chrome.runtime.onInstalled.addListener(connect);
 chrome.runtime.onStartup.addListener(connect);
-if (chrome.debugger && chrome.debugger.onEvent) {
-  chrome.debugger.onEvent.addListener(onDebuggerEvent);
-}
 watchNewWindows();
 connect();
 

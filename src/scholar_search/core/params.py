@@ -39,9 +39,7 @@ ALLOWED_KEYS: dict[str, frozenset[str]] = {
     # `halt_url_markers` / `halt_titles`: the gate markers a navigation may stop waiting for
     # (ADR 0025). Opaque to the extension — the kernel owns the lists in `core/risk.py` and
     # still decides what a wall is; these only end the wait early.
-    "goto": frozenset(
-        {"url", "reload", "open", "close", "wait", "dwell_ms", "assets", *_GOTO_HALT_KEYS}
-    ),
+    "goto": frozenset({"url", "reload", "open", "close", "wait", "dwell_ms", *_GOTO_HALT_KEYS}),
     "wait_for": frozenset({"selector", "timeout_ms", "state"}),
     "type": frozenset({"selector", "text", "clear"}),
     # `wait_until` lets a click report when the site finished the work it started.
@@ -58,9 +56,7 @@ ALLOWED_KEYS: dict[str, frozenset[str]] = {
     "sleep": frozenset({"ms"}),
     # No parameters for a capture; `token`/`offset` read the bytes back in chunks, because
     # the browser's download manager blocks every `.mhtml` it writes (ADR 0018).
-    # `assets` turns the figure capture on for this capture, `asset` names which figure to read
-    # back (same chunked path as the page itself), all of them parameters of the existing verb.
-    "snapshot": frozenset({"token", "offset", "tab", "assets", "asset"}),
+    "snapshot": frozenset({"token", "offset", "tab"}),
 }
 
 WAIT_STATES = frozenset({"visible", "hidden"})
@@ -112,8 +108,6 @@ def validate_params(verb: str, params: Any) -> str | None:
         for key in _GOTO_HALT_KEYS:
             if key in params and not _halt_markers(params[key]):
                 return "policy.params"
-        if "assets" in params and not isinstance(params["assets"], bool):
-            return "policy.params"
         if "open" in params and params["open"] not in GOTO_OPEN:
             return "policy.params"
         if "close" in params and params["close"] not in GOTO_CLOSE:
@@ -141,12 +135,6 @@ def validate_params(verb: str, params: Any) -> str | None:
             return "policy.params"
         if "token" in params and not isinstance(params["token"], str):
             return "policy.params"
-        if "assets" in params and not isinstance(params["assets"], bool):
-            return "policy.params"
-        if "asset" in params:
-            index = params["asset"]
-            if not isinstance(index, int) or isinstance(index, bool) or not 0 <= index < 32:
-                return "policy.params"
         return None
 
     if verb in {"click", "read_text", "type", "select", "wait_for"}:

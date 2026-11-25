@@ -63,10 +63,6 @@ ANSWER_SLICE_MS = 1_200
 # highlights. Both waits are clamped by the extension to 3 s per action.
 _ARTICLE_SETTLE_MS = 1_200
 _SECOND_LOOK_MS = 1_500
-# Figures arrive after the body: the same page captured at 1.2 s held only header logos, and at
-# ~6 s its four article figures were in the network (measured 2026-11-25). One `sleep` may not
-# exceed 3 s (`MAX_SLEEP_MS`), so the wait is two of them.
-_FIGURE_SETTLE_MS = 2_400
 
 
 def _classify_saved(saved: dict[str, Any], *, url: str = "") -> dict[str, Any]:
@@ -141,71 +137,6 @@ def _page_next(probe: dict[str, Any]) -> str:
 _PAGE_SLUG_CHARS = 60
 
 
-def _no_figures() -> dict[str, Any]:
-    """The report for a capture that was not asked for figures."""
-
-    return {"assets": [], "skipped": [], "bytes": 0}
-
-
-def _no_figures_report() -> dict[str, Any]:
-    """The saved-figures report when a capture was not asked for any."""
-
-    return {"saved": 0, "skipped": [], "bytes": 0, "files": {}}
-
-
-def _write_figures(page: Path, figures: dict[str, Any]) -> dict[str, Any]:
-    """Put the figures beside the page and leave the map `page2md` rewrites links from."""
-
-    assets = [item for item in (figures.get("assets") or []) if isinstance(item, dict)]
-    skipped = [item for item in (figures.get("skipped") or []) if isinstance(item, dict)]
-    if not assets:
-        return {"saved": 0, "skipped": skipped, "bytes": 0, "files": {}}
-    target = page.parent / "assets"
-    target.mkdir(parents=True, exist_ok=True)
-    mapping: dict[str, str] = {}
-    for position, asset in enumerate(assets, start=1):
-        mime = str(asset.get("mime") or "")
-        url = str(asset.get("url") or "")
-        name = f"{position:02d}{_figure_suffix(mime, url)}"
-        (target / name).write_bytes(asset["data"])
-        if url:
-            mapping[url] = f"assets/{name}"
-    (target / "index.json").write_text(
-        json.dumps(mapping, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    return {
-        "saved": len(mapping),
-        "skipped": skipped,
-        "bytes": int(figures.get("bytes") or 0),
-        "files": mapping,
-    }
-
-
-_FIGURE_MIME_SUFFIX = {
-    "image/png": ".png",
-    "image/jpeg": ".jpg",
-    "image/jpg": ".jpg",
-    "image/gif": ".gif",
-    "image/webp": ".webp",
-    "image/svg+xml": ".svg",
-    "image/avif": ".avif",
-    "image/bmp": ".bmp",
-}
-
-
-def _figure_suffix(mime: str, url: str) -> str:
-
-    suffix = _FIGURE_MIME_SUFFIX.get(mime.split(";")[0].strip().lower(), "")
-    if suffix:
-        return suffix
-    tail = urlparse(url).path.rsplit("/", 1)[-1]
-    if "." in tail:
-        candidate = "." + tail.rsplit(".", 1)[-1].lower()
-        if 2 <= len(candidate) <= 5 and candidate[1:].isalnum():
-            return candidate
-    return ".bin"
-
-
 def _page_dir_slug(meta: dict[str, str]) -> str:
     """Directory name for one capture: readable title prefix, then a hash that makes it unique.
 
@@ -237,10 +168,7 @@ def _page_spec(publisher: Publisher) -> ChannelSpec:
         schema_version=1,
         min_core=__version__,
         domains=(*publisher.hosts(), "doi.org"),
-        # `scroll` is here for one reason: article images are lazy, and walking the page is what
-        # makes the browser download them so the debugger can read them (ADR 0026). It is a UI
-        # action on a page the reader could scroll themselves, and it issues no request of ours.
-        verbs=("goto", "read_html", "wait_for", "sleep", "scroll"),
+        verbs=("goto", "read_html", "wait_for", "sleep"),
         capabilities=(),
     )
     return ChannelSpec(name=manifest.channel, site_version="v1", manifest=manifest, package="")
@@ -852,7 +780,7 @@ class ScholarService:
             return
 
     @staticmethod
-    def _page_goto_params(target: str, *, assets: bool = False) -> dict[str, Any]:
+    def _page_goto_params(target: str) -> dict[str, Any]:
         """The `goto` that opens an article, carrying the gate markers worth stopping for.
 
         A verification interstitial never fires the load event, so `waitComplete` sits out its
@@ -866,18 +794,13 @@ class ScholarService:
         kernel's own `RiskGuard` and `challenge_in_title` still make the call.
         """
 
-        params: dict[str, Any] = {
+        return {
             "url": target,
             "halt_url_markers": list(VERIFY_URL_MARKERS),
             "halt_titles": list(RISK_TITLE_MARKERS),
         }
-        if assets:
-            # Figures can only be read from responses that arrive while the debugger is attached,
-            # so the flag has to ride on the navigation itself (ADR 0026).
-            params["assets"] = True
-        return params
 
-    def read_page(self, *, url: str = "", doi: str = "", figures: bool = False) -> dict[str, Any]:
+    def read_page(self, *, url: str = "", doi: str = "") -> dict[str, Any]:
         """Open the article a reader asked for, then say what is on it.
 
         One navigation, no warm-up: the article URL is opened directly — a deep link, the
@@ -909,9 +832,7 @@ class ScholarService:
             target = f"https://doi.org/{identifier}"
 
         cached = self._page_cache_get(target)
-        # A cached capture holds no figures — it was made before they were asked for — so a request
-        # that wants them navigates again instead of answering from the cache (ADR 0026).
-        if cached is not None and not figures:
+        if cached is not None:
             # Idempotent on purpose: the page is already on disk, so navigating again could
             # only replace a good capture with whatever the publisher serves now.
             return {
@@ -924,7 +845,6 @@ class ScholarService:
                 "bytes": cached.get("bytes"),
                 "headings": cached.get("headings"),
                 "title": str(cached.get("title") or ""),
-                "figures": _no_figures_report(),
                 "quota_charged": 0,
                 "next": _page_next({"status": "ok"}),
             }
@@ -948,10 +868,7 @@ class ScholarService:
                     "quota_charged": 0,
                     "next": _page_next({"status": "blocked", "reason": "challenge"}),
                 }
-            # Figures are read out of responses that arrive *while the debugger is attached*, so
-            # reusing a tab that was loaded before the request cannot yield any: with `figures`
-            # the page is always navigated again (ADR 0026).
-            if identifier and identifier in str(open_tab.get("url") or "") and not figures:
+            if identifier and identifier in str(open_tab.get("url") or ""):
                 return {
                     "status": "ok",
                     "source": "open-tab",
@@ -983,7 +900,7 @@ class ScholarService:
                             # A deep link: the article URL is opened as given, and the gate
                             # markers let the extension stop waiting for a wall that will never
                             # finish loading (ADR 0025).
-                            Action("goto", self._page_goto_params(target, assets=figures)),
+                            Action("goto", self._page_goto_params(target)),
                         ),
                     ),
                     spec,
@@ -1036,24 +953,15 @@ class ScholarService:
             # Publisher article bodies render after the load event: capturing straight after
             # `goto` returned 1.8 KB of "Highlights" from a ScienceDirect article page that
             # was fully accessible (0.12.59, real run after signing in).
-            #
-            # With `figures` the extension brings the work window back for the duration of the
-            # capture, and the page gets longer to fetch its images: article figures arrive a few
-            # seconds after the body, and capturing at 1.2 s found only the header logos
-            # (measured 2026-11-25 — with ~6 s the same page's four figures were in the network).
-            settle: list[Action] = [Action("sleep", {"ms": _ARTICLE_SETTLE_MS})]
-            if figures:
-                for _ in range(2):
-                    settle.append(Action("sleep", {"ms": _FIGURE_SETTLE_MS}))
             self._run(
                 Plan(
                     channel=f"page:{publisher.name}",
                     purpose="detail",
-                    actions=tuple(settle),
+                    actions=(Action("sleep", {"ms": _ARTICLE_SETTLE_MS}),),
                 ),
                 spec,
             )
-            saved = self._snapshot_locked(tab="work", assets=figures)
+            saved = self._snapshot_locked(tab="work")
             probe = _classify_saved(saved, url=final_url)
             if _still_rendering(probe):
                 # No article body, but also no sign-in prompt: the page is still painting,
@@ -1066,7 +974,7 @@ class ScholarService:
                     ),
                     spec,
                 )
-                retry = self._snapshot_locked(tab="work", assets=figures)
+                retry = self._snapshot_locked(tab="work")
                 retry_probe = _classify_saved(retry, url=final_url)
                 if retry_probe.get("status") == "ok":
                     saved, probe = retry, retry_probe
@@ -1095,7 +1003,6 @@ class ScholarService:
                 "final_url": final_url,
                 "mhtml_path": str(readable),
                 "bytes": int(saved.get("bytes") or 0),
-                "figures": saved.get("figures") or _no_figures_report(),
                 "title": str(saved.get("title") or probe.get("title") or ""),
                 "quota_charged": PAGE_READ_QUOTA,
                 "next": _page_next(probe),
@@ -1114,9 +1021,7 @@ class ScholarService:
                 result["quota_charged"] = 1
             return result
 
-    def _collect_chunks(
-        self, adapter: Any, first: dict[str, Any], *, assets: bool = False
-    ) -> tuple[bytes, dict[str, Any]]:
+    def _collect_chunks(self, adapter: Any, first: dict[str, Any]) -> bytes:
         """Assemble the capture from base64 chunks the extension hands out on request."""
 
         token = str(first.get("token") or "")
@@ -1162,74 +1067,7 @@ class ScholarService:
                     code="snapshot.chunk",
                     stage="snapshot",
                 )
-        figures = self._collect_figures(adapter, token, first) if assets else _no_figures()
-        return bytes(buffer[:total]), figures
-
-    def _collect_figures(self, adapter: Any, token: str, first: dict[str, Any]) -> dict[str, Any]:
-        """Read the figures the extension recorded, one chunk at a time, over the same token.
-
-        The reply carried a manifest and no bytes (a frame is capped at 2 MB), so each figure is
-        asked for by index. A figure that cannot be read is *named*, never silently dropped: the
-        caller has to be able to say "3 of 5 figures were saved".
-        """
-
-        manifest = [item for item in (first.get("figures") or []) if isinstance(item, dict)]
-        skipped = [item for item in (first.get("figures_skipped") or []) if isinstance(item, dict)]
-        # Figures that fit in the capture reply arrive with it. Preferring them is not just an
-        # optimisation: the readback-by-index path depends on the extension's capture surviving to
-        # the next message, and three live runs lost it (`snapshot.expired`) while the bytes were
-        # already in hand (ADR 0026).
-        inline: dict[int, str] = {}
-        for item in first.get("figures_inline") or []:
-            if isinstance(item, dict) and item.get("base64"):
-                with suppress(TypeError, ValueError):
-                    inline[int(str(item.get("index")))] = str(item["base64"])
-        collected: list[dict[str, Any]] = []
-        total = 0
-        for item in manifest:
-            index = int(item.get("index", -1))
-            if index < 0:
-                continue
-            buffer = bytearray()
-            payload_b64 = inline.get(index, "")
-            if payload_b64:
-                with suppress(ValueError):
-                    buffer.extend(base64.b64decode(payload_b64))
-            else:
-                offset = 0
-                failure = ""
-                while True:
-                    follow_up = adapter.execute(
-                        Action("snapshot", {"token": token, "asset": index, "offset": offset}),
-                        timeout_ms=SNAPSHOT_TIMEOUT_MS,
-                    )
-                    if not follow_up.ok:
-                        failure = str(follow_up.error or "snapshot.asset")
-                        break
-                    payload = dict(follow_up.data)
-                    chunk = str(payload.get("chunk") or "")
-                    if not chunk:
-                        failure = "snapshot.asset"
-                        break
-                    buffer.extend(base64.b64decode(chunk))
-                    offset += len(chunk)
-                    if payload.get("done"):
-                        break
-                if failure:
-                    skipped.append({"url": str(item.get("url") or ""), "reason": failure})
-                    continue
-            if not buffer:
-                skipped.append({"url": str(item.get("url") or ""), "reason": "empty"})
-                continue
-            collected.append(
-                {
-                    "url": str(item.get("url") or ""),
-                    "mime": str(item.get("mime") or ""),
-                    "data": bytes(buffer),
-                }
-            )
-            total += len(buffer)
-        return {"assets": collected, "skipped": skipped, "bytes": total}
+        return bytes(buffer[:total])
 
     def _write_page(self, payload: bytes, meta: dict[str, str]) -> Path:
         """Store the capture under `<home>/pages/<slug>/page.mhtml`, scripts removed."""
@@ -1281,7 +1119,7 @@ class ScholarService:
         with self._browser_transaction():
             return self._snapshot_locked()
 
-    def _snapshot_locked(self, *, tab: str = "active", assets: bool = False) -> dict[str, Any]:
+    def _snapshot_locked(self, *, tab: str = "active") -> dict[str, Any]:
         """`snapshot` without taking the browser lock — for a caller already holding it.
 
         The bytes travel as base64 chunks over the bridge and the *kernel* writes the file.
@@ -1293,12 +1131,7 @@ class ScholarService:
 
         self._ensure_bridge()
         adapter = self._transaction_adapter()
-        params: dict[str, Any] = {} if tab == "active" else {"tab": tab}
-        if assets:
-            # The debugger was attached by the `goto` that produced this page; asking here is
-            # what turns its recorded responses into files (ADR 0026).
-            params["assets"] = True
-        action = Action("snapshot", params) if params else Action("snapshot")
+        action = Action("snapshot", {"tab": tab}) if tab != "active" else Action("snapshot")
         first = adapter.execute(action, timeout_ms=SNAPSHOT_TIMEOUT_MS)
         if not first.ok:
             if str(first.error or "").startswith("policy."):
@@ -1326,7 +1159,7 @@ class ScholarService:
             "url": str(data.get("url") or ""),
             "title": str(data.get("title") or ""),
         }
-        payload, figures_report = self._collect_chunks(adapter, data, assets=assets)
+        payload = self._collect_chunks(adapter, data)
         # A wall is decided here, before the bytes reach the disk: saving one would leave a
         # file that looks like an article, overwrite nothing useful, and invite a caller to
         # convert 73 KB of "please wait" into Markdown (2026-11-24, report D1/D2).
@@ -1350,16 +1183,12 @@ class ScholarService:
                 ),
             }
         stored = self._write_page(payload, meta)
-        figures_saved = _write_figures(stored, figures_report)
 
         result: dict[str, Any] = {
             "path": str(stored),
             "bytes": len(payload),
-            "figures": figures_saved,
             **meta,
         }
-        if figures_saved["saved"] or figures_saved["skipped"]:
-            result["figures_path"] = str(stored.parent / "assets")
         return result
 
     # -- internals ------------------------------------------------------

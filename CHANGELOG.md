@@ -4,6 +4,41 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.14.16] - 2026-11-25
+
+### Removed — the experimental figures feature and every permission it needed
+
+`page_read(figures=true)` never became dependable: reading article images through CDP depends on
+three things that are not under the tool's control — the window being visible (Chromium does not
+paint an occluded renderer, so its images are never fetched), the images actually going over the
+network (a cache hit emits no response event), and the kernel and the extension agreeing on timing.
+Measured on one MDPI article across five builds: **9 figures → 4 → 4 → 0**, with
+`bridge.timeout` on consecutive captures. It is therefore withdrawn rather than shipped half-working
+(ADR 0026 records the measurements).
+
+* `page_read` has no `figures` parameter; `goto`/`snapshot` have no `assets`/`asset`; `page2md` no
+  longer adopts a captured `assets/` directory.
+* The extension's `debugger` permission is gone, and so is the publisher-host `content_scripts`
+  entry (25 domains) that existed only to walk those pages for figures. Permissions are back to
+  `nativeMessaging, storage, tabs, downloads, pageCapture`, with content scripts on CNKI and Web of
+  Science only.
+* The Markdown keeps the publisher's image URLs and the warning says so; nothing pretends the
+  figures were captured.
+
+The code stays in git history (`v0.14.14`, `v0.14.15`) for a future attempt.
+
+### Fixed — one browser window, and no crash-restore bubble
+
+`wensu browser start` used to leave **two** windows: Edge's own startup window plus the one the
+extension creates for the work tab. The extension now closes the startup window after moving the
+work tab out — and only when that window holds nothing but browser-internal pages
+(`about:blank`, `edge://newtab`, `edge://welcome`), so a window with the reader's own tabs is never
+touched. Verified live: a single minimized window remains. Launches also pass
+`--hide-crash-restore-bubble`, so a browser that was force-closed does not ask about "restoring
+pages" the next time.
+
+`background-0.14.16.js`, as the cache-busting rule requires.
+
 ## [0.14.15] - 2026-11-25
 
 ### Changed — formulas: wait for MathJax, stop truncating, and say what is actually missing
