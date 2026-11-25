@@ -36,6 +36,23 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.19] - 2026-11-25
+
+### Fixed — the restored window is closed, not just the empty one
+
+0.14.17 closed the startup window when it held nothing but browser-internal pages. That is not the
+case after a force-kill: `profile.exit_type` stays `Crashed`, so Edge restores the previous session
+— the work window **plus** a second window carrying the tabs of earlier runs (measured 2026-11-25:
+"新建标签页 和另外 2 个页面" beside the work tab). Writing `session.restore_on_startup` into the
+profile does not help, because the browser rewrites `Preferences` on every exit; the value was gone
+by the next start.
+
+The cleanup therefore moved into the extension, which can see what a window contains: a window is
+closed when **every** tab in it is blank or on a site this tool may navigate (the search sites and
+the publisher list). A window holding anything else — the reader's own pages — is left alone.
+
+`background-0.14.19.js`, as the cache-busting rule requires.
+
 ## [0.14.18] - 2026-11-25
 
 ### Refactor — the page navigation lives in one small module

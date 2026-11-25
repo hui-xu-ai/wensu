@@ -256,6 +256,7 @@ const WINDOW_KEY = "wensuWorkWindowId";
 // minimized so a search never takes the screen. Timers are not slowed by that — measured
 // 2026-11-25 with the work window hidden for 5m40s, `sleep(150)` answered in 155 ms, the same as
 // unfocused (156 ms) — so the pacing rules in ADR 0023 are untouched.
+const TOOL_PAGE = /^(about:blank|edge:\/\/newtab|chrome:\/\/newtab|edge:\/\/welcome)/i;
 const QUIET_KEY = "wensuQuietWindows";
 
 function dwellFor(params) {
@@ -302,12 +303,38 @@ async function closeDisposableTabs() {
   return blanked;
 }
 
+async function closeToolWindows(keepId, domains) {
+  // Edge restores the previous session after a force-kill — `profile.exit_type: Crashed` makes that
+  // automatic, and the profile's own preference cannot be written back because Edge rewrites
+  // `Preferences` on every exit (measured 2026-11-25: `restore_on_startup: 1` was gone by the next
+  // start). So the windows are cleaned up here instead, by the one component that can see the tabs:
+  // a window is closed only when every tab in it is blank or on a site this tool may navigate
+  // (the search sites and the publisher list). Anything else is the reader's and is left alone.
+  const open = await chrome.windows.getAll({ populate: true, windowTypes: ["normal"] }).catch(() => null);
+  for (const win of Array.isArray(open) ? open : []) {
+    if (!win || !win.id || win.id === keepId) continue;
+    const tabs = Array.isArray(win.tabs) ? win.tabs : [];
+    const ours = tabs.every((tab) => {
+      const url = String((tab && tab.url) || "");
+      if (url === "" || TOOL_PAGE.test(url)) return true;
+      try {
+        const parsed = new URL(url);
+        return parsed.protocol === "https:" && allowedHost(parsed.hostname, domains);
+      } catch {
+        return false;
+      }
+    });
+    if (ours) await chrome.windows.remove(win.id).catch(() => null);
+  }
+}
+
 async function workTab(domains) {
   const tab = await resolveWorkTab(domains);
   // Pin it: a pinned tab is compact, visually separate from the user's own pages, and the
   // browser asks before closing it. Only tabs in our own list ever reach here — the user's
   // tabs are refused by `resolveWorkTab` — so pinning cannot touch anyone else's page.
   if (tab && tab.id) await within(chrome.tabs.update(tab.id, { pinned: true }), 1_000);
+  if (tab && tab.id) void closeToolWindows(tab.windowId, domains.length ? domains : DEFAULT_DOMAINS).catch(() => null);
   return tab;
 }
 
