@@ -149,6 +149,19 @@ def test_the_work_window_stays_minimized(probe: dict[str, Any]) -> None:
     assert probe["work_tab"]["window_state"] == "minimized", probe["work_tab"]
 
 
+def test_a_window_that_appears_after_the_sweep_is_minimized_too(probe: dict[str, Any]) -> None:
+    """The browser opens its first window a moment after the extension connects.
+
+    The boot sweep has already run by then, and its marker keeps it from running again — so the
+    window stayed on screen (measured 2026-11-25, live). Windows created early in a session are
+    minimized as they appear.
+    """
+
+    late = probe["late_window"]
+
+    assert late["state"] == "minimized", late
+
+
 def test_the_boot_sweep_runs_once_per_browser_session(probe: dict[str, Any]) -> None:
     """A window the user restores by hand stays restored; the sweep does not fight them."""
 

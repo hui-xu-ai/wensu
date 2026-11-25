@@ -119,6 +119,12 @@ function makeBrowser() {
         return { id, state: windowState.get(id) || "normal" };
       },
       getAll: async () => [{ id: 900, state: windowState.get(900) || "normal" }],
+      onCreated: {
+        listeners: [],
+        addListener(fn) {
+          this.listeners.push(fn);
+        },
+      },
     },
     downloads: { onCreated: { addListener() {} }, search: async () => [] },
     scripting: { executeScript: async () => [{ result: {} }] },

@@ -147,6 +147,12 @@ function makeBrowser(seed = []) {
         return { ...win };
       },
       getAll: async () => [...windows.values()].map((win) => ({ ...win })),
+      onCreated: {
+        listeners: [],
+        addListener(fn) {
+          this.listeners.push(fn);
+        },
+      },
     },
     downloads: { onCreated: { addListener() {} }, search: async () => [] },
     scripting: { executeScript: async () => [{ result: {} }] },
@@ -318,6 +324,17 @@ async function scenarioTransientTab() {
     before: first,
     after_first_call: afterFirst,
     after_second_call: [...browser.windows.values()].map((win) => win.state),
+  };
+
+  // The browser brings up its first window a moment *after* the extension connects, so a sweep
+  // alone left it on screen (measured 2026-11-25). Windows created early in the session are
+  // minimized as they appear.
+  const late = await browser.chrome.windows.create({ url: "about:blank" });
+  for (const listener of browser.chrome.windows.onCreated.listeners) listener({ id: late.id });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  observations.late_window = {
+    id: late.id,
+    state: browser.windows.get(late.id).state,
   };
 }
 

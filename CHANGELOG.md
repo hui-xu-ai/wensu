@@ -4,6 +4,18 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.14.9] - 2026-11-25
+
+### Fixed — the window the browser opens *after* the sweep is minimized too
+
+0.14.8's boot sweep minimized what existed at the moment the extension connected. The browser
+brings up its own first window a moment later, and that one stayed on screen — measured live, one
+window minimized and one still titled `about:blank` in front of the user. Windows created during
+the first 90 s of a session are now minimized as they appear; a window opened later behaves like
+any other, and one the user restores by hand is never fought over (restoring is not creation).
+
+`background-0.14.9.js`, as the cache-busting rule requires.
+
 ## [0.14.8] - 2026-11-25
 
 ### Changed — the browser runs minimized, out of the user's way

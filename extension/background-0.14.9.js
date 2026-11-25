@@ -384,6 +384,32 @@ async function quietWindows() {
   await chrome.storage.session.set({ [QUIET_KEY]: Date.now() });
 }
 
+// A window opened while the browser is still starting is not in the sweep's list: the browser
+// brings up its first window a moment after the extension connects (measured 2026-11-25 — the
+// sweep minimized the main window, and a window created right after it stayed on screen).
+// New windows are therefore minimized for the first minute of the session, and left alone after
+// that, so a window the user opens later behaves like any other window.
+const SESSION_KEY = "wensuSessionStart";
+const QUIET_WINDOW_MS = 90_000;
+
+async function sessionStart() {
+  const stored = (await chrome.storage.session.get(SESSION_KEY))[SESSION_KEY];
+  if (Number.isFinite(stored)) return stored;
+  const began = Date.now();
+  await chrome.storage.session.set({ [SESSION_KEY]: began });
+  return began;
+}
+
+function watchNewWindows() {
+  chrome.windows.onCreated.addListener((win) => {
+    void (async () => {
+      const began = await sessionStart();
+      if (Date.now() - began > QUIET_WINDOW_MS) return;
+      await minimizeWindow(win && win.id);
+    })().catch(() => null);
+  });
+}
+
 async function isolateWorkTab(tab) {
   if (!tab) return tab;
   const stored = (await chrome.storage.local.get(WINDOW_KEY))[WINDOW_KEY];
@@ -1004,6 +1030,7 @@ async function onHostMessage(message, channel) {
 
 chrome.runtime.onInstalled.addListener(connect);
 chrome.runtime.onStartup.addListener(connect);
+watchNewWindows();
 connect();
 
 
