@@ -994,6 +994,40 @@ def _localise_images(
     return re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", rewrite, markdown), copied, missing
 
 
+def _figure_stem(target: str) -> str:
+    """The part of a figure URL that identifies the image, without its format.
+
+    Publishers serve one figure in several formats — the page's `<img src>` said
+    `…-g001-550.jpg` while the browser had downloaded `…-g001-550.webp` — so matching on the whole
+    URL missed every figure on the first live run. The directory plus the filename without its
+    extension is what stays the same across those variants.
+    """
+
+    path = target.split("?")[0].split("#")[0]
+    head, _, tail = path.rpartition("/")
+    stem = tail.rsplit(".", 1)[0] if "." in tail else tail
+    return f"{head}/{stem}".lower()
+
+
+def _relink_figures(markdown: str, adopted: dict[str, str]) -> tuple[str, int]:
+    """Point the Markdown at the captured files: exact URL first, then the format-free stem."""
+
+    by_url = {url.lower(): relative for url, relative in adopted.items()}
+    by_stem = {_figure_stem(url): relative for url, relative in adopted.items()}
+    resolved = 0
+
+    def rewrite(match: re.Match[str]) -> str:
+        nonlocal resolved
+        alt, target = match.group(1), match.group(2).strip()
+        relative = by_url.get(target.lower()) or by_stem.get(_figure_stem(target))
+        if not relative:
+            return match.group(0)
+        resolved += 1
+        return f"![{alt}]({relative})"
+
+    return re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", rewrite, markdown), resolved
+
+
 def _adopt_figure_assets(source: Path, out: Path) -> dict[str, str]:
     """Copy the debugger-captured figures next to the Markdown and return their link map.
 
@@ -1518,9 +1552,7 @@ def convert(
         # publisher's CDN. Adopting them makes the Markdown directory self-contained.
         adopted = _adopt_figure_assets(source, out)
         if adopted:
-            resolved = sum(1 for url in adopted if f"]({url})" in markdown)
-            for url, relative in adopted.items():
-                markdown = markdown.replace(f"]({url})", f"]({relative})")
+            markdown, resolved = _relink_figures(markdown, adopted)
             copied += resolved
             missing = max(0, missing - resolved)
         info["images_copied"] = copied

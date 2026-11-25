@@ -60,11 +60,16 @@ def test_only_images_are_kept_and_oversized_ones_are_named(probe: dict[str, Any]
     assert "https://mdpi-res.com/a.css" not in skipped, "a stylesheet is not a figure"
 
 
-def test_the_reply_carries_a_manifest_and_no_bytes(probe: dict[str, Any]) -> None:
-    """A frame is capped at 2 MB; the caller must ask for each figure by index."""
+def test_the_reply_carries_the_figure_bytes_inline(probe: dict[str, Any]) -> None:
+    """The bytes ride along: reading them back by index failed three live runs in a row.
 
-    assert probe["reply_has_no_bytes"] is True, probe
-    assert probe["manifest"][0]["chunks"] == 1, probe["manifest"]
+    A frame holds 2 MB and the page's own first chunk takes ~256 KB, so figures up to a budget come
+    with the capture and `figures_inline` marks them. What does not fit stays readable by index.
+    """
+
+    assert probe["manifest"][0]["inline"] is True, probe["manifest"]
+    # `reply_has_no_bytes` is the inverse: false here means the bytes really are in the reply.
+    assert probe["reply_has_no_bytes"] is False, probe
 
 
 def test_the_debugger_is_detached_when_the_capture_ends(probe: dict[str, Any]) -> None:

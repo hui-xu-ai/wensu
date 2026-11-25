@@ -4,6 +4,34 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.14.14] - 2026-11-25
+
+### Fixed — figures are saved, and the page is asked when it is ready
+
+The previous two releases proved the pieces and delivered nothing: a cold cache captured a skeleton
+(`status: no_html`) and the figures that *were* found never reached disk. Both had the same shape —
+the tool was guessing instead of asking the browser — and both are fixed here.
+
+* **Publisher pages now carry a content script** (`content/readiness.js`, 25 publisher domains from
+  ADR 0019). It answers "is the article body actually here" using the browser's own view
+  (`article`/`section[id]` present and ≥1500 characters of text, waiting up to 12 s), then scrolls the
+  page once in viewport steps so `loading="lazy"` figures are downloaded. A `goto` with `assets`
+  waits for that walk (20 s budget); a host without the script answers immediately and the old
+  stopwatch still applies.
+* **Figure bytes travel with the capture reply.** Reading them back by index failed three live runs
+  in a row with `snapshot.expired`, while the bytes were already in hand — so up to 1.2 MB of figure
+  data now rides along (the frame holds 2 MB and the page's own first chunk takes ~256 KB). Whatever
+  does not fit is still readable by index, and a failure is named in `figures.skipped`.
+* **`page2md` matches figures by filename stem.** The page's `<img src>` names `…-g001-550.jpg` while
+  the browser downloaded `…-g001-550.webp`; matching whole URLs relinked nothing on the first live
+  run.
+
+Live, cold cache, one MDPI article (`10.3390/s26041303`) in **10.8 s**: `saved: 9` figures,
+146,831 bytes, including the four article figures `g001`–`g004`; `skipped: 1` (a consent beacon);
+`page.md` now points at `assets/08.webp` instead of the publisher's CDN.
+
+`background-0.14.14.js`, as the cache-busting rule requires.
+
 ## [0.14.13] - 2026-11-25
 
 ### Fixed — the figures a live run found in the browser now land on disk

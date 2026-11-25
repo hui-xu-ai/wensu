@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 
 from scholar_search.core.service import _figure_suffix, _write_figures
-from scholar_search.page2md import _adopt_figure_assets
+from scholar_search.page2md import _adopt_figure_assets, _figure_stem, _relink_figures
 
 
 def test_the_extension_follows_the_mime_type_then_the_url() -> None:
@@ -79,3 +79,29 @@ def test_page2md_ignores_a_missing_index(tmp_path: Path) -> None:
     page.write_bytes(b"mhtml")
 
     assert _adopt_figure_assets(page, tmp_path / "md") == {}
+
+
+def test_a_figure_is_matched_even_when_the_page_names_another_format() -> None:
+    """The page's `<img src>` said `-g001-550.jpg`; the browser had downloaded `.webp`."""
+
+    captured = {"https://cdn/a/sensors-26-01303-g001-550.webp": "assets/06.webp"}
+    markdown = "![image](https://cdn/a/sensors-26-01303-g001-550.jpg)"
+
+    relinked, resolved = _relink_figures(markdown, captured)
+
+    assert resolved == 1
+    assert relinked == "![image](assets/06.webp)"
+
+
+def test_an_uncaptured_image_keeps_its_url() -> None:
+    captured = {"https://cdn/a/one.png": "assets/01.png"}
+    markdown = "![image](https://cdn/a/two.png)"
+
+    relinked, resolved = _relink_figures(markdown, captured)
+
+    assert resolved == 0
+    assert relinked == markdown
+
+
+def test_the_stem_ignores_the_query_string() -> None:
+    assert _figure_stem("https://cdn/a/x-550.webp?v=2") == _figure_stem("https://cdn/a/x-550.jpg")

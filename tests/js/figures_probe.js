@@ -68,8 +68,12 @@ function makeBrowser() {
       },
       move: async () => {},
       remove: async () => {},
-      sendMessage: async () => {
-        throw new Error("no receiver");
+      // The readiness script answers `wensu.walk`; a host without it answers null and the
+      // extension falls back to its stopwatch.
+      sendMessage: async (_id, message, callback) => {
+        const reply = { ok: true, ready: true, score: { hinted: 2, text: 4000 } };
+        if (typeof callback === "function") callback(reply);
+        return reply;
       },
     },
     windows: {

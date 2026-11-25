@@ -178,6 +178,14 @@ const MAX_FIGURES = 12;
 const MAX_FIGURE_BYTES = Math.round(1.2 * 1024 * 1024);
 const MAX_FIGURES_TOTAL = 8 * 1024 * 1024;
 const FIGURE_CHUNK_CHARS = 1_200_000;
+// Figures ride along in the capture reply itself whenever they fit: the readback-by-index path
+// depends on the capture surviving to the next message, and three live runs lost it
+// (`snapshot.expired`). A frame holds 2 MB and the page's own first chunk is ~256 KB, so this is
+// the room left for images. Whatever does not fit is still readable by index.
+const FIGURE_INLINE_CHARS = 1_200_000;
+// Walking a long article takes a while (the readiness script waits for the body, then scrolls in
+// viewport steps); this bounds it so a slow page cannot eat the whole capture budget.
+const FIGURE_WALK_BUDGET_MS = 20_000;
 // A page's network carries far more images than its figures: consent banners, analytics beacons,
 // tracking pixels and logos all arrive first and ate the whole budget in the first live run
 // (measured 2026-11-25: twelve `uct.service.usercentrics.eu` beacons, zero article figures). So a
@@ -219,6 +227,32 @@ function onDebuggerEvent(source, method, params) {
   session.order.push(params.requestId);
 }
 
+// Publisher pages carry `content/readiness.js`, which knows when the article is actually there and
+// walks the page so lazy images are fetched. A stopwatch was the old answer and a cold cache proved
+// it wrong: six seconds produced a skeleton while a warm cache produced the full article.
+async function settleAndWalk(tabId, budgetMs) {
+  const ask = (cmd, ms) =>
+    new Promise((resolve) => {
+      let done = false;
+      const finish = (value) => {
+        if (done) return;
+        done = true;
+        resolve(value);
+      };
+      try {
+        chrome.tabs.sendMessage(tabId, { cmd }, (reply) => {
+          void chrome.runtime.lastError;
+          finish(reply || null);
+        });
+      } catch {
+        finish(null);
+      }
+      setTimeout(() => finish(null), ms);
+    });
+  const walked = await ask("wensu.walk", budgetMs);
+  return walked;
+}
+
 async function beginFigures(tabId) {
   if (!chrome.debugger) throw new Error("figures.unavailable");
   if (figureSession && figureSession.tabId === tabId) return;
@@ -232,6 +266,10 @@ async function beginFigures(tabId) {
   if (tab && tab.windowId) {
     await within(chrome.windows.update(tab.windowId, { state: "normal" }), 1_000).catch(() => null);
   }
+  // Let the page say it is ready and walk it, so lazy figures are downloaded before the capture.
+  // On a host without the readiness script this answers null immediately and the caller falls back
+  // to the stopwatch it always had.
+  await settleAndWalk(tabId, FIGURE_WALK_BUDGET_MS);
   // The buffer has to be able to hold what is kept; `getResponseBody` fails once it is evicted.
   await chrome.debugger.sendCommand({ tabId }, "Network.enable", {
     maxTotalBufferSize: MAX_FIGURES_TOTAL + 1024 * 1024,
@@ -786,6 +824,8 @@ async function onHostMessage(message, channel) {
         assets: figures.assets,
       };
       captures.set(fresh.token, fresh);
+      const figureInline = [];
+      let figureInlineBudget = FIGURE_INLINE_CHARS;
       // A capture nobody reads must not sit in memory forever.
       setTimeout(() => captures.delete(fresh.token), 120_000);
       reply({
@@ -799,13 +839,25 @@ async function onHostMessage(message, channel) {
           captcha_visible: fresh.captchaVisible,
           status: Number(meta.status) || 0,
           // A manifest, never the bytes: the caller asks for each figure by index.
-          figures: figures.assets.map((asset, index) => ({
-            index,
-            url: asset.url,
-            mime: asset.mime,
-            size: asset.size,
-            chunks: Math.ceil(asset.base64.length / FIGURE_CHUNK_CHARS),
-          })),
+          figures: (() => {
+            let budget = figureInlineBudget;
+            return figures.assets.map((asset, index) => {
+              const entry = {
+                index,
+                url: asset.url,
+                mime: asset.mime,
+                size: asset.size,
+                chunks: Math.ceil(asset.base64.length / FIGURE_CHUNK_CHARS),
+              };
+              if (budget >= asset.base64.length) {
+                budget -= asset.base64.length;
+                figureInline.push({ index, base64: asset.base64 });
+                entry.inline = true;
+              }
+              return entry;
+            });
+          })(),
+          figures_inline: figureInline,
           figures_bytes: figures.bytes,
           figures_skipped: figures.skipped,
         },

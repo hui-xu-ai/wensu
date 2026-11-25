@@ -909,7 +909,9 @@ class ScholarService:
             target = f"https://doi.org/{identifier}"
 
         cached = self._page_cache_get(target)
-        if cached is not None:
+        # A cached capture holds no figures — it was made before they were asked for — so a request
+        # that wants them navigates again instead of answering from the cache (ADR 0026).
+        if cached is not None and not figures:
             # Idempotent on purpose: the page is already on disk, so navigating again could
             # only replace a good capture with whatever the publisher serves now.
             return {
@@ -922,6 +924,7 @@ class ScholarService:
                 "bytes": cached.get("bytes"),
                 "headings": cached.get("headings"),
                 "title": str(cached.get("title") or ""),
+                "figures": _no_figures_report(),
                 "quota_charged": 0,
                 "next": _page_next({"status": "ok"}),
             }
@@ -1172,6 +1175,15 @@ class ScholarService:
 
         manifest = [item for item in (first.get("figures") or []) if isinstance(item, dict)]
         skipped = [item for item in (first.get("figures_skipped") or []) if isinstance(item, dict)]
+        # Figures that fit in the capture reply arrive with it. Preferring them is not just an
+        # optimisation: the readback-by-index path depends on the extension's capture surviving to
+        # the next message, and three live runs lost it (`snapshot.expired`) while the bytes were
+        # already in hand (ADR 0026).
+        inline: dict[int, str] = {}
+        for item in first.get("figures_inline") or []:
+            if isinstance(item, dict) and item.get("base64"):
+                with suppress(TypeError, ValueError):
+                    inline[int(str(item.get("index")))] = str(item["base64"])
         collected: list[dict[str, Any]] = []
         total = 0
         for item in manifest:
@@ -1179,27 +1191,35 @@ class ScholarService:
             if index < 0:
                 continue
             buffer = bytearray()
-            offset = 0
-            failure = ""
-            while True:
-                follow_up = adapter.execute(
-                    Action("snapshot", {"token": token, "asset": index, "offset": offset}),
-                    timeout_ms=SNAPSHOT_TIMEOUT_MS,
-                )
-                if not follow_up.ok:
-                    failure = str(follow_up.error or "snapshot.asset")
-                    break
-                payload = dict(follow_up.data)
-                chunk = str(payload.get("chunk") or "")
-                if not chunk:
-                    failure = "snapshot.asset"
-                    break
-                buffer.extend(base64.b64decode(chunk))
-                offset += len(chunk)
-                if payload.get("done"):
-                    break
-            if failure or not buffer:
-                skipped.append({"url": str(item.get("url") or ""), "reason": failure or "empty"})
+            payload_b64 = inline.get(index, "")
+            if payload_b64:
+                with suppress(ValueError):
+                    buffer.extend(base64.b64decode(payload_b64))
+            else:
+                offset = 0
+                failure = ""
+                while True:
+                    follow_up = adapter.execute(
+                        Action("snapshot", {"token": token, "asset": index, "offset": offset}),
+                        timeout_ms=SNAPSHOT_TIMEOUT_MS,
+                    )
+                    if not follow_up.ok:
+                        failure = str(follow_up.error or "snapshot.asset")
+                        break
+                    payload = dict(follow_up.data)
+                    chunk = str(payload.get("chunk") or "")
+                    if not chunk:
+                        failure = "snapshot.asset"
+                        break
+                    buffer.extend(base64.b64decode(chunk))
+                    offset += len(chunk)
+                    if payload.get("done"):
+                        break
+                if failure:
+                    skipped.append({"url": str(item.get("url") or ""), "reason": failure})
+                    continue
+            if not buffer:
+                skipped.append({"url": str(item.get("url") or ""), "reason": "empty"})
                 continue
             collected.append(
                 {
