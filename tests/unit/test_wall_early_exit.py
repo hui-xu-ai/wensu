@@ -112,6 +112,33 @@ def probe() -> dict[str, Any]:
     return payload
 
 
+def test_a_redirect_out_of_scope_costs_a_second_not_ten(probe: dict[str, Any]) -> None:
+    """A login wall must be reported when it lands, not when the wait runs out.
+
+    Measured 2026-11-25 on a WoS login redirect: `waitNavigated` required the new URL to be
+    *allowed*, so a wall at `access.clarivate.com` never satisfied it and the budget ran out —
+    11.7 s to report what the page said in the first second.
+    """
+
+    out = probe["redirect_out"]
+
+    assert out["ok"] is False, out
+    assert out["error"] == "policy.domain", out
+    assert out["elapsed_ms"] < 3_000, out
+
+
+def test_a_navigation_the_site_sends_straight_back_is_not_a_stall(probe: dict[str, Any]) -> None:
+    """`/verify/home` redirects to `/wos/` on the real site (measured 2026-11-25).
+
+    The tab ends on the URL it started from, which the first version of the stall check reported
+    as `navigation.stalled` — hiding a navigation that really did happen.
+    """
+
+    back = probe["redirect_back"]
+
+    assert back["ok"] is True, back
+
+
 def test_navigating_to_the_page_already_open_is_not_a_stall(probe: dict[str, Any]) -> None:
     """Search re-opens the advanced-search page, `page_read` re-reads the same article.
 

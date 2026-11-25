@@ -144,7 +144,13 @@ function waitNavigated(tabId, fromUrl, domains, timeoutMs = 10_000) {
       // on the publisher, so waiting for `doi.org` to appear would always time out.
       const moved = url && url !== fromUrl && inScope;
       const settled = tab && tab.status === "complete" && inScope;
-      if (moved || settled) return resolve(tab);
+      // A redirect *out* of the allowlist is a finished navigation too. Without this the wait ran
+      // out its whole 10 s budget on a login wall — the tab had long since landed on
+      // `access.clarivate.com`, but "landed somewhere we may not be" is not "in scope", so the
+      // caller paid 11.7 s to be told what the page said in the first second (measured
+      // 2026-11-25 on a WoS login redirect).
+      const landed = url && url !== fromUrl && tab && tab.status === "complete";
+      if (moved || settled || landed) return resolve(tab);
       if (Date.now() >= deadline) return resolve(tab);
       setTimeout(tick, 150);
     };
@@ -789,26 +795,11 @@ async function onHostMessage(message, channel) {
       }
       const meta = await pageMeta(updated.id);
       const status = Number(meta.status || 0);
-      // A URL that never left http(s) is not a domain violation: nothing was navigated. A
-      // *changed* URL outside the scope still is a policy event (a login or verify redirect).
-      //
-      // "Unchanged" on its own is not enough: navigating to the document the tab is already on
-      // (a search re-opening the advanced-search page, `page_read` re-reading the same article)
-      // leaves the URL exactly as it was and is perfectly normal.
-      const sameDoc = (one, two) => {
-        try {
-          const from = new URL(one);
-          const to = new URL(two);
-          return from.origin === to.origin && from.pathname === to.pathname;
-        } catch {
-          return false;
-        }
-      };
-      const stalled =
-        params.reload !== true &&
-        before !== "" &&
-        finalUrl === before &&
-        !sameDoc(before, params.url);
+      // A tab that is still not on an http(s) page after the navigation was not navigated at all.
+      // That is the only thing this may say: a *redirect* can land back on the URL the tab was
+      // already showing (`/verify/home` → `/wos/`, measured 2026-11-25), and reporting that as a
+      // stall hid a navigation that did happen. A URL outside the scope stays `policy.domain`.
+      const stalled = !/^https?:/i.test(finalUrl);
       const outOfScope = !allowedHost(new URL(finalUrl).hostname, domains);
       const data = {
         ...meta,

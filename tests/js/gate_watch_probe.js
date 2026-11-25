@@ -190,6 +190,39 @@ async function drive(params, schedule) {
   };
 }
 
+async function scenarioRedirectOutOfScope() {
+  // A login wall: the navigation completes on a host outside the allowlist. The wait must end
+  // when the document lands, not when its URL becomes allowed — otherwise it burns its whole
+  // 10 s budget (measured 2026-11-25: 11.7 s to report a WoS login redirect).
+  return drive({ url: ARTICLE, dwell_ms: 0 }, (tab, browser) => {
+    const update = browser.chrome.tabs.update;
+    browser.chrome.tabs.update = async () => {
+      // Land outside the allowlist, complete, and stay there.
+      const landed = "https://access.clarivate.com/login?app=wos";
+      const current = browser.tabs.get(tab.id);
+      current.url = landed;
+      current.status = "complete";
+      current.title = "Clarivate";
+      return { ...current };
+    };
+    return update;
+  });
+}
+
+async function scenarioRedirectBack() {
+  // The site sends the navigation straight back to the page the tab was already on
+  // (`/verify/home` → `/wos/`, measured 2026-11-25). The URL ends up unchanged, and the first
+  // version of the stall check called that "nothing navigated".
+  return drive({ url: ARTICLE, dwell_ms: 0 }, (tab, browser) => {
+    const update = browser.chrome.tabs.update;
+    const landed = "https://advanced.onlinelibrary.wiley.com/";
+    tab.url = landed;
+    tab.status = "complete";
+    tab.title = ARTICLE_TITLE;
+    browser.chrome.tabs.update = async () => ({ ...tab });
+  });
+}
+
 async function scenarioAlreadyThere() {
   // Navigating to the document the tab is already on: the URL does not change, and that is not a
   // stalled navigation — a search re-opens the advanced-search page and `page_read` re-reads the
@@ -306,6 +339,8 @@ async function scenarioPlain() {
     process.exit(0);
   }, 30000);
   try {
+    observations.redirect_out = await scenarioRedirectOutOfScope();
+    observations.redirect_back = await scenarioRedirectBack();
     observations.already_there = await scenarioAlreadyThere();
     observations.stays_blank = await scenarioStaysBlank();
     observations.rejected = await scenarioRejectedUpdate();

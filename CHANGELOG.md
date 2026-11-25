@@ -4,6 +4,25 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.14.10] - 2026-11-25
+
+### Fixed — a login wall is reported when it lands, not when the wait runs out
+
+Found by pointing the browser at a real WoS wall (Clarivate login, `access.clarivate.com`) and
+timing it: the kernel took **11.7 s** to answer `RiskBlocked: login_redirect`, while the page had
+said so in the first second. `waitNavigated` only considered a navigation done when its URL became
+*allowed*, and a wall is by definition outside the allowlist, so the wait ran out its whole 10 s
+budget. A completed document now ends the wait wherever it landed; the caller hears
+`policy.domain` in about a second and the kernel classifies the redirect.
+
+The same run found the second half of it:
+
+- **`navigation.stalled` fired on a redirect back.** `/verify/home` is redirected to `/wos/` by the
+  site, and the tab ends on the URL it started from — reported as "nothing navigated". A stall now
+  means only what it says: the tab is still not on an http(s) page after a retry.
+
+`background-0.14.10.js`, as the cache-busting rule requires.
+
 ## [0.14.9] - 2026-11-25
 
 ### Fixed — the window the browser opens *after* the sweep is minimized too
