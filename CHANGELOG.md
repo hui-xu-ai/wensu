@@ -36,6 +36,29 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.21] - 2026-11-25
+
+### Fixed — a full Wiley article was reported as a paywall
+
+Reported by a reader: `10.1002/anie.202005087` opened fine in the browser, but the tool kept saying
+it could not capture the text. The capture was **not** empty — 4.1 MB holding Abstract / Introduction
+/ Results and Discussion / Conclusion, `article_tags: 2`, `body_headings: 41` — but one
+"institutional access" string in the sidebar made the classifier answer `no_html` / `paywall`.
+
+The paywall markers are now split by what they mean:
+
+* **blocking** — `purchase pdf`, `sign in to view`, `buy article`, `rent this article`: the body is
+  behind a wall, so they decide even when the page looks like an article (a `<section>` wrapper
+  around an abstract is still an abstract);
+* **soft** — `get access`, `access through your organization`, `institutional access`: printed for
+  readers who are already entitled, so they only count when the page does not have an article body.
+
+Re-judging the real capture after the change answers `ok`. `tests/unit/test_page_probe_paywall_order.py`
+pins both directions, and the pre-existing "abstract page that wraps sections" case still reports
+`paywall`.
+
+`background-0.14.21.js`, as the cache-busting rule requires (worker unchanged).
+
 ## [0.14.20] - 2026-11-25
 
 ### Fixed — the second window was `--load-extension`, not Edge restoring a session

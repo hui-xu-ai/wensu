@@ -23,6 +23,15 @@ PAYWALL_MARKERS: tuple[str, ...] = (
     "institutional access",
 )
 
+# Markers that mean the body itself is behind a wall. These decide even when the page looks like an
+# article: a `<section>` wrapper around an abstract is not a body.
+BLOCKING_PAYWALL_MARKERS: tuple[str, ...] = (
+    "purchase pdf",
+    "sign in to view",
+    "buy article",
+    "rent this article",
+)
+
 # A human-verification wall is neither a paywall nor an "abstract shell": it is the site
 # asking for a person. Measured 2026-11-22 on Wiley (`10.1002/adma.75384`): Cloudflare
 # answered the plain article URL, so the URL check below sees nothing — only these body
@@ -196,18 +205,23 @@ def classify_mhtml(path: Path, *, url: str = "") -> dict[str, object]:
     # (0.12.58, real run). A numbered article heading ("1. Introduction") is the honest
     # signal: an abstract page has none. When the page is the article, keep `ok` even if a
     # publisher prints a price somewhere.
-    if headings:
+    # Not every marker blocks the text. "Purchase PDF" / "Sign in to view" mean the body is behind
+    # an access wall, so they decide on their own. "Access through your organization" and
+    # "institutional access" are printed in the sidebar of pages an entitled reader is already
+    # reading — measured 2026-11-25 on `10.1002/anie.202005087` (Wiley): a capture holding
+    # Abstract / Introduction / Results and Discussion / Conclusion with `body_headings: 41` was
+    # reported `no_html` / `paywall` because of one such mention, and the reader was told the tool
+    # could not capture an article that was right there.
+    blocking = sum(1 for marker in BLOCKING_PAYWALL_MARKERS if marker in _text_of(lowered))
+    article_shaped = sections >= FULL_TEXT_SECTIONS or (
+        bool(article_tags) and body_headings >= BODY_HEADINGS
+    )
+    if blocking:
+        status, reason = "no_html", "paywall"
+    elif headings or article_shaped:
         status, reason = "ok", ""
     elif hits:
         status, reason = "no_html", "paywall"
-    elif sections >= FULL_TEXT_SECTIONS or (article_tags and body_headings >= BODY_HEADINGS):
-        # Two publisher shapes count as the article itself:
-        #   * plenty of `<section id=…>` wrappers (Elsevier style);
-        #   * an `<article>` element with several `<h2>`/`<h3>` headings (Nature style — its
-        #     sections are unnumbered and carry no `section id`, which made a full article
-        #     look like an abstract shell on the 0.13.3 rule; live run on
-        #     `10.1038/s41586-020-2649-2`).
-        status, reason = "ok", ""
     else:
         status, reason = "no_html", "abstract_only"
     return {"status": status, "reason": reason, **counts}
