@@ -191,19 +191,29 @@ class RiskGuard:
     # -- inspection ----------------------------------------------------
 
     def inspect(self, outcome: ActionOutcome) -> RiskSignal | None:
+        """Stop only on evidence that cannot be anything else.
+
+        Two things qualify, and nothing else does:
+
+        * a captcha widget that is actually visible on screen (the content script checks the
+          viewport, not just the DOM);
+        * the site refusing the request outright — HTTP 403 / 429.
+
+        Everything else is a *hint*: a login-looking URL, a login form in the header, a title
+        such as "Just a moment…" that a slow page also shows while it paints. Hints are recorded in
+        `last_note` for the audit trail and the reply, and then ignored — because a false "you hit
+        risk control" costs the reader a whole document, while a missed hint costs one extra
+        snapshot that the capture classifies honestly.
+        """
+
+        self.last_note = None
+
         if outcome.error:
             lowered = outcome.error.casefold()
             if "http 403" in lowered or "403" == lowered.strip():
                 return RiskSignal.HTTP_403
             if "captcha" in lowered:
                 return RiskSignal.CAPTCHA
-
-        url = (outcome.url or "").casefold()
-        if not url:
-            nested = outcome.data.get("url")
-            url = nested.casefold() if isinstance(nested, str) else ""
-        if any(marker in url for marker in LOGIN_URL_MARKERS):
-            return RiskSignal.LOGIN_REDIRECT
 
         status = outcome.data.get("status")
         if status == 403 or status == "403":
@@ -213,24 +223,30 @@ class RiskGuard:
         if outcome.error and "429" in outcome.error:
             return RiskSignal.RATE_LIMITED
 
-        # The content script reports whether the captcha widget is actually on
-        # screen; scanning raw HTML would match the SDK's hidden preloaded DOM.
+        # The content script reports whether the captcha widget is actually on screen; scanning raw
+        # HTML would match the SDK's hidden preloaded DOM.
         if outcome.data.get("captcha_visible") is True:
             return RiskSignal.CAPTCHA
 
-        # Account verification gates ("手机号认证") are a login wall in disguise.
-        if outcome.data.get("auth_required") is True:
-            return RiskSignal.LOGIN_REDIRECT
-
-        # Verification interstitials keep a short, distinctive document title. This — and the
-        # visible-captcha flag above — is the only evidence that stops a plan.
+        url = (outcome.url or "").casefold()
+        if not url:
+            nested = outcome.data.get("url")
+            url = nested.casefold() if isinstance(nested, str) else ""
         title = outcome.data.get("title")
-        if isinstance(title, str) and _title_is_gate(title):
-            return RiskSignal.VERIFY_REDIRECT
-        # A URL that merely *looks* like a verification hop is not a wall. ACS redirects through
-        # `/inocaj/article/…?captcha=…` and lands on the article; the reader sees no challenge, and
-        # `verify_redirect` used to drop the read and remember a 30-minute wall marker for it
-        # (measured 2026-11-25, `10.1021/acs.inorgchem.1c03019`). Stopping without a visible
+        final_title = (
+            isinstance(title, str)
+            and bool(title.strip())
+            and not title.casefold().startswith("http")
+        )
+        hints: list[str] = []
+        if any(marker in url for marker in LOGIN_URL_MARKERS):
+            hints.append("url:login")
+        if outcome.data.get("auth_required") is True:
+            hints.append("body:login-form")
+        if final_title and isinstance(title, str) and _title_is_gate(title):
+            hints.append(f"title:{title[:60]}")
+        self.last_note = ",".join(hints) if hints else None
+        return None
         # signal is worse than not stopping: the rule from ADR 0004 is "a human solves the check in
         # the browser", which requires there to *be* a check on screen.
         return None

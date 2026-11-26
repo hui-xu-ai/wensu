@@ -717,7 +717,7 @@ class ScholarService:
     # How long "this URL hit a wall" is remembered. Long enough to cover "the reader is
     # clicking through the challenge right now", short enough that a later attempt is not
     # second-guessed by a stale marker.
-    _PAGE_WALL_TTL_S = 1800.0
+    _PAGE_WALL_TTL_S = 300.0
 
     def _page_cache_path(self) -> Path:
         state_dir = Path(self._policy.state_dir) if self._policy else Path.cwd()

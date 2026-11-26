@@ -233,7 +233,9 @@ def classify_mhtml(path: Path, *, url: str = "") -> dict[str, object]:
         "pdf_url": pdf_url,
         "title": title,
     }
-    signal = _challenge_signal(lowered, url)
+    # Cloudflare writes `ray id` into ordinary pages too, so the body markers only mean a wall when
+    # there is no prose to speak of. A page with a body is a page, whatever its comments say.
+    signal = _challenge_signal(lowered, url) if prose_words < PROSE_WORDS else ""
     if signal:
         return {"status": "blocked", "reason": "challenge", "signal": signal, **counts}
 

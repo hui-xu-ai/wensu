@@ -36,6 +36,28 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.26] - 2026-11-25
+
+### Changed — only two things may report a wall
+
+The risk rules had seven detectors, and five of them were guesses: a login-looking URL, a header
+login form, a `Just a moment…` title, and Cloudflare's `ray id` string inside an article. Each is
+ordinary on pages nobody is challenging, and each dropped a read the reader could see (reported
+twice, `10.1021/acs.inorgchem.1c03019`).
+
+Two remain, and both are evidence that cannot be anything else:
+
+* a captcha widget the content script sees **in the viewport**;
+* the site refusing outright — HTTP 403 / 429.
+
+The rest are recorded in `RiskGuard.last_note` (`url:login`, `body:login-form`, `title:…`) for the
+audit trail and then ignored: a false wall costs a whole document, a missed hint costs one extra
+snapshot that the capture classifies honestly. The body-marker check now also requires that the page
+has no prose — `ray id` is written into ordinary pages. The cached wall marker drops from 30 minutes
+to 5.
+
+`background-0.14.26.js`, as the cache-busting rule requires (worker unchanged).
+
 ## [0.14.25] - 2026-11-25
 
 ### Fixed — a Letter has no headings, and it is still an article
