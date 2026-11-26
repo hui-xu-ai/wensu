@@ -89,7 +89,8 @@ def test_risk_stops_plan_before_next_action(tmp_path: Path) -> None:
 
 def test_existing_cooldown_blocks_before_any_action(tmp_path: Path) -> None:
     risk = RiskGuard(state_path=tmp_path / "cooldown.json")
-    risk.trip(RiskSignal.CAPTCHA)
+    # A refusal cools down; a captcha stops the plan but leaves no cooldown behind (ADR 0022 r1).
+    risk.trip(RiskSignal.HTTP_403)
 
     adapter = FixtureAdapter([{"verb": "goto"}])
     planner = Planner(

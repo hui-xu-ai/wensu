@@ -52,16 +52,39 @@ def test_http_429_stops_the_plan(tmp_path: Path) -> None:
 # -- the hints that no longer stop --------------------------------------------
 
 
-def test_a_login_looking_url_is_only_a_note(tmp_path: Path) -> None:
+def test_a_login_url_stops_the_plan_without_cooling_down(tmp_path: Path) -> None:
+    """AGENTS.md §3: a login redirect terminates the plan and cools nothing down (ADR 0022 r1).
+
+    The URL itself is the evidence — no text matching is involved — so this is attributable.
+    """
+
     instance = guard(tmp_path)
-    assert instance.inspect(outcome(url="https://fsso.cnki.net/login")) is None
-    assert instance.last_note == "url:login"
+
+    assert instance.inspect(outcome(url="https://fsso.cnki.net/login")) is RiskSignal.LOGIN_REDIRECT
+    blocked = instance.trip(RiskSignal.LOGIN_REDIRECT)
+    assert blocked.cooldown_until is None
 
 
-def test_a_login_form_in_the_page_is_only_a_note(tmp_path: Path) -> None:
+def test_a_page_that_asks_for_a_login_stops_the_plan(tmp_path: Path) -> None:
     instance = guard(tmp_path)
-    assert instance.inspect(outcome(data={"auth_required": True})) is None
-    assert instance.last_note == "body:login-form"
+
+    assert instance.inspect(outcome(data={"auth_required": True})) is RiskSignal.LOGIN_REDIRECT
+
+
+def test_an_explicit_verification_path_stops_the_plan(tmp_path: Path) -> None:
+    instance = guard(tmp_path)
+
+    assert instance.inspect(outcome(url="https://kns.cnki.net/verify/home")) is (
+        RiskSignal.VERIFY_REDIRECT
+    )
+
+
+def test_a_url_that_merely_contains_captcha_is_not_a_verification_page(tmp_path: Path) -> None:
+    """ACS hops through such a URL and lands on the article (measured 2026-11-25)."""
+
+    instance = guard(tmp_path)
+
+    assert instance.inspect(outcome(url="https://pubs.acs.org/doi?captcha=1")) is None
 
 
 def test_a_challenge_looking_title_is_only_a_note(tmp_path: Path) -> None:

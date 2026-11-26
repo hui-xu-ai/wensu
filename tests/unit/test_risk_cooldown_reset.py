@@ -68,7 +68,8 @@ def test_a_later_trip_is_not_undone_by_an_earlier_clear(state: Path) -> None:
 
     cli.clear()
     clock.advance(60)
-    server.trip(RiskSignal.CAPTCHA, "captcha visible")
+    # 403 is the one signal that cools down (ADR 0022 r1); a captcha does not.
+    server.trip(RiskSignal.HTTP_403, "refused")
 
     assert server.cooldown_until() is not None
     with pytest.raises(RiskBlocked):

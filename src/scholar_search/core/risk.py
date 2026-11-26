@@ -10,18 +10,18 @@ import json
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .config import HARD, app_home
 from .contracts import ActionOutcome, RiskSignal
 from .errors import RiskBlocked
 
-# URL fragments that mean "you are behind an interstitial", not a result page.
+# URL fragments that mean "you are behind an interstitial", not a result page. These are **path
+# forms**: a bare `captcha` inside a URL is not a challenge (ACS hops through such a URL and lands
+# on the article — measured 2026-11-25), so only an explicit verification path qualifies.
 VERIFY_URL_MARKERS: tuple[str, ...] = (
     "/verify/home",
     "/verify/",
-    "captcha",
-    "recaptcha",
-    "hcaptcha",
 )
 
 # Gate pages keep a short, distinctive document title. These used to be matched as
@@ -59,6 +59,12 @@ LOGIN_URL_MARKERS: tuple[str, ...] = (
     "shibboleth",
     "carsi",
     "session-expired",
+)
+
+
+# Signals a person clears in seconds: they stop the plan but cool nothing down (ADR 0022 rev 1).
+_NO_COOLDOWN: frozenset[RiskSignal] = frozenset(
+    {RiskSignal.CAPTCHA, RiskSignal.VERIFY_REDIRECT, RiskSignal.LOGIN_REDIRECT}
 )
 
 
@@ -191,19 +197,23 @@ class RiskGuard:
     # -- inspection ----------------------------------------------------
 
     def inspect(self, outcome: ActionOutcome) -> RiskSignal | None:
-        """Stop only on evidence that cannot be anything else.
+        """Stop on evidence that can only be one thing.
 
-        Two things qualify, and nothing else does:
+        Four qualify:
 
         * a captcha widget that is actually visible on screen (the content script checks the
           viewport, not just the DOM);
-        * the site refusing the request outright — HTTP 403 / 429.
+        * the site refusing the request outright — HTTP 403 / 429;
+        * an explicit verification path (`/verify/home` and friends): the site itself says a
+          person has to check something;
+        * an actual login redirect — the URL is a login endpoint, or the page says
+          `auth_required`.
 
-        Everything else is a *hint*: a login-looking URL, a login form in the header, a title
-        such as "Just a moment…" that a slow page also shows while it paints. Hints are recorded in
-        `last_note` for the audit trail and the reply, and then ignored — because a false "you hit
-        risk control" costs the reader a whole document, while a missed hint costs one extra
-        snapshot that the capture classifies honestly.
+        A *title* is still a hint, not a verdict: a slow page also paints "Just a moment…", and an
+        article may mention "Access Denied" in its own text. Hints are recorded in `last_note` for
+        the audit trail. The 2026-11-24 change removed the URL and login categories along with the
+        title one; the url/login categories are back, attributable, and the title stays a hint
+        (audit 2026-11-26, F03).
         """
 
         self.last_note = None
@@ -239,10 +249,13 @@ class RiskGuard:
             and not title.casefold().startswith("http")
         )
         hints: list[str] = []
+        path = urlparse(url).path if url else ""
+        if any(marker in path for marker in VERIFY_URL_MARKERS):
+            return RiskSignal.VERIFY_REDIRECT
         if any(marker in url for marker in LOGIN_URL_MARKERS):
-            hints.append("url:login")
+            return RiskSignal.LOGIN_REDIRECT
         if outcome.data.get("auth_required") is True:
-            hints.append("body:login-form")
+            return RiskSignal.LOGIN_REDIRECT
         if final_title and isinstance(title, str) and _title_is_gate(title):
             hints.append(f"title:{title[:60]}")
         self.last_note = ",".join(hints) if hints else None
@@ -254,7 +267,11 @@ class RiskGuard:
     # -- tripping ------------------------------------------------------
 
     def trip(self, signal: RiskSignal, reason: str = "") -> RiskBlocked:
-        until = self._now() + timedelta(hours=self._cooldown_hours)
+        # A check a person clears in seconds must not punish the machine for a day: a captcha, an
+        # explicit verification page and a login redirect carry no cooldown (ADR 0022 rev 1, which
+        # AGENTS.md §3 records). Only a refusal — 403/429 — means "do not come back today".
+        hours = 0 if signal in _NO_COOLDOWN else self._cooldown_hours
+        until = self._now() + timedelta(hours=hours)
         self._memory_until = until
         self._memory_since = self._now()
         try:
@@ -276,5 +293,5 @@ class RiskGuard:
         return RiskBlocked(
             reason or f"risk signal detected: {signal.value}",
             signal=signal.value,
-            cooldown_until=until.isoformat(),
+            cooldown_until=until.isoformat() if hours else None,
         )
