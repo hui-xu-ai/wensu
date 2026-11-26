@@ -36,6 +36,53 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.34] - 2026-11-26
+
+P5 真实链路验收（`docs/reviews/wensu-0.14.33-p5-2026-11-26.md`）的 3 条 P1 与 1 条 P2。
+
+### Fixed — the gate wait was implemented but never advertised
+
+The worker had the `await_gate_clear` branch, and `CAPABILITIES` still listed only
+`goto`/`snapshot`/`sleep`. The capability gate therefore refused the action **before it was
+sent**, so the "wait for the person" never happened: the real read returned `verification_timeout`
+after 3.3 s with zero wait actions executed (F33-01). The unit tests could not see it — the
+fixture adapter answers no `info()` at all, so the gate was skipped. A contract test now reads
+`CAPABILITIES` / `CHANNEL_CAPABILITIES` out of the shipped worker and asserts that every verb a
+publisher read plans is advertised.
+
+### Fixed — a wait that never ran was reported as "the person did not click"
+
+`_await_gate_clear` swallowed the failure and the caller answered `verification_timeout`, whose
+advice is "ten seconds passed, solve it in the browser". Two different failures now have two
+different names (F33-02):
+
+* `verification_timeout` — the wait ran, the budget expired, the title still looked like a gate
+  (`terminal: timeout`);
+* `gate_wait_unavailable` — the wait could not run at all (`terminal: blocked`, with `waited:
+  false` and the underlying reason), because that is a build or bridge problem, not a slow click.
+
+### Fixed — ordinary prose containing `cited by` truncated the article
+
+`_cut_tail_markers` fell back to a bare substring search when it found no heading, and `excited by`
+contains `cited by`: a real Springer capture was cut from 20,225 to 16,933 characters, losing its
+Fabrication Steps and Conclusion sections — while `terminal` said `ok`, the hash matched, and
+`coverage: 0.365` was too high to warn (F33-04). A marker now has to start a line, so only a real
+heading cuts. Replays cover `excited by` (not cut), a genuine `Cited by` heading (cut), and the
+conclusion surviving in every output.
+
+### Fixed — a refused warm-up reported success and no cost
+
+`warm_up` caught a refusal per target and returned `status: ok, quota_charged: 0` while the ledger
+had paid one unit and a cooldown had been written; it then went on to the next target (F33-03). A
+refusal now ends the whole warm-up: `status: blocked` with the signal, the cooldown, the cost that
+was actually spent, and the targets that were not attempted.
+
+`skills/scholar-batch-read/SKILL.md` also records what the acceptance measured: warm-up is per
+**subdomain**, not per publisher — Wiley's warm-up tab and its second article lived on different
+subdomains and the gate came back.
+
+`background-0.14.34.js`, as the cache-busting rule requires.
+
 ## [0.14.33] - 2026-11-26
 
 单任务读取流程与批量编排（`work/tasks/2026-11-26-read-flow/plan.md`）：让"卡在哪一步"和
