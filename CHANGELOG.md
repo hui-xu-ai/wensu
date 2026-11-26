@@ -36,6 +36,40 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.33] - 2026-11-26
+
+单任务读取流程与批量编排（`work/tasks/2026-11-26-read-flow/plan.md`）：让"卡在哪一步"和
+"人已经点完验证"变成可读的事实，而不是让调用方去猜。
+
+### Added — 每次读取都说明它停在哪一步
+
+`page_read` 的回答多了四个字段：`job_id`（这次读取）、`terminal`
+（`ok`/`partial`/`blocked`/`timeout`/`no_page`/`unsupported_site`）、`stage`
+（`cache`/`navigate`/`wall`/`capture`/`identity`/`publish`）与 `evidence`（实际观测到的标题、
+落地地址、页面自报 DOI、正文词数等）。`stage` 由回答自身的字段推导，因此每个出口都被覆盖。
+
+### Added — 验证墙改为"请人点，并等到点完"（ADR 0027）
+
+新增动作 `await_gate_clear`：识别到验证页后，工作标签页的窗口被**最大化并切到前台**，扩展每
+2 秒读一次标签页标题、最多等 10 秒。标题不再像验证页 ⇒ 人已经点完，继续抓取；到点仍未清 ⇒
+`terminal: timeout`、`reason: verification_timeout`，批量层据此跳过该出版商。
+
+它不是网络动作（`NETWORK_VERBS` 未变），不扣额度；不重新导航、不换 IP、不延时重试。这也是
+`wait_for` 做不到的事：内容脚本只注入两个渠道域名，出版社页上没有接收端（审计 F08）。
+
+### Added — 预热标签页与批量读取 skill（ADR 0028）
+
+`goto` 支持 `keep: true`（与 `open: "new"` 一起用）：这类标签页记进**保留名单**，
+`closeDisposableTabs()` 永不触碰——否则下一次导航就会把预热页清空。新工具
+`warm_up(targets)` 为每个出版社打开**一篇**文献到保留标签页，返回 `opened[]` 与总费用；
+每个目标 = 1 次导航 = 1 额度 + 1 次站点访问，所以调用前必须告诉用户。
+
+`skills/scholar-batch-read/SKILL.md` 把批量流程写成规范：按出版社分组、组内串行、预热成本先告知、
+每条 `ok` 立刻把 `mhtml_path` + `capture_sha256` 交子代理离线转换、`blocked` 立即停、
+`timeout` 跳过该出版社、失败写账本、收尾一次汇报并按原因询问重试。
+
+`background-0.14.33.js`，按缓存规则改名（worker 含新动作与保留名单）。
+
 ## [0.14.32] - 2026-11-26
 
 0.14.31 验收（`docs/reviews/wensu-0.14.31-acceptance-2026-11-26.md`）的 3 条 P1、4 条 P2，以及
