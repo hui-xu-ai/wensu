@@ -63,6 +63,51 @@ def _no_pandoc(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(page2md, "_MATH_PANDOC", {})
 
 
+def test_section_titles_sharing_a_container_are_not_reported_as_sections() -> None:
+    """ACS hangs every section title off the *same* container (2026-11-26 report P1-5).
+
+    Measured on `10.1021/jacs.6c13448`: fourteen entries, each returning the same 529 blocks.
+    The de-duplicator then left the first holding the whole body and thirteen holding their
+    unique leftover furniture — a table of contents that lies. One honest entry is the answer.
+    """
+
+    html = """<!DOCTYPE html><html><body><div class="body">
+    <h2 class="section-title">Introduction</h2>
+    <p>Ionic transport through the polymer matrix decides how a soft actuator bends under load.</p>
+    <h3 class="section-title">Results</h3>
+    <p>Spectroscopy of the copper alkynide cluster shows three emission bands at 620 nm.</p>
+    </div></body></html>"""
+
+    markdown, _chars, _counters = page2md._section_markdown(html)
+
+    # One entry, not two copies of the whole article: the surviving one holds both paragraphs.
+    assert markdown.count("## ") == 1, markdown[:400]
+    assert "Ionic transport" in markdown and "Spectroscopy" in markdown, markdown[:400]
+    assert markdown.count("Ionic transport") == 1, markdown[:400]
+
+
+def test_a_long_document_in_one_section_says_the_split_failed(tmp_path: Path) -> None:
+    """A thousand-token "Introduction" holding the whole paper is not a reading plan."""
+
+    # Distinct words per paragraph: near-identical blocks are de-duplicated, which is a different
+    # mechanism and would hide the section split from this test.
+    paragraphs = "".join(
+        f"<p>{' '.join(f'term{index}x{slot}' for slot in range(30))} ends here.</p>"
+        for index in range(120)
+    )
+    html = (
+        '<!DOCTYPE html><html><body><div class="body">'
+        '<h2 class="section-title">Introduction</h2>' + paragraphs + "</div></body></html>"
+    )
+    page = tmp_path / "one-section.html"
+    page.write_text(html, encoding="utf-8")
+
+    meta = page2md.convert(page, tmp_path / "out")
+
+    assert int(meta["sections_total"]) <= 2, meta["sections_total"]
+    assert any("章节不足" in warning for warning in meta["warnings"]), meta["warnings"]
+
+
 def test_mathml_to_latex_handles_fraction_and_superscript() -> None:
     from lxml import html as LH
 

@@ -196,5 +196,38 @@ $env:TEMP=$env:TMP=$env:TMPDIR="D:\Python\DeepSeek\DateWork\.tmp"; $env:PYTHONPA
 
 本机 `%LOCALAPPDATA%\scholar-search\state\page-read.json` 现有 45 条旧条目**全部没有 `judge`** ⇒ 从这一版起它们不再被当作缓存命中（也不会被删除）；下一次读取会重新导航并写入带指纹的条目。这是有意的：那 45 条里有 6 条 blocked 标记与 1 条"判成摘要"的 ok 快照，正是报告里反复出现的元凶。
 
+---
+
+# T6 结果：page2md 分节失真（2026-11-26，P1-5）
+
+**验证档位：单元测试 + 两份真实抓取的实测对照**。
+
+## 根因（探针实测，不是推断）
+
+`_section_entries` 的 `class="section-title"` 分支用 `title_element.getparent()` 当容器。**ACS 把 14 个节标题全挂在同一个 div 下**，于是 14 个条目的 `_own_blocks(容器)` 返回**同一批 529 块 / 106,817 字符**（探针 `probe-collect.py` 直接打印出来）。下游的指纹去重于是让第一个条目吃下整篇正文、其余 13 个只剩各自唯一的残留垃圾 —— 这就是"`01-introduction` 24,576 tokens，其余各 613"的真相：**613 是残留导航，不是被切开的小节**。
+
+同时确认了 `_own_blocks` 只跳过嵌套的 `<section id>`，而 ACS 用的是 `class="section-title"`（已一并修）。
+
+## 改了什么
+
+| 改动 | 位置 | 效果（实测） |
+|---|---|---|
+| `_without_shared_container_duplicates()`：块列表完全相同的条目只保留一个 | `page2md.py:567-590`、`:642` | JACS 抓取：**14 节 → 1 节**；ACS 新文：**7 节 → 2 节**（Introduction + Supporting Information），`bytes_md` 130,399 → 97,913（删掉的 32 KB 全是 `Close Figure N` / `Google Scholar` 垃圾） |
+| `_own_blocks` 跳过嵌套的 `class="section-title"` 子树 | `page2md.py:475-487` | 外层标题不再吞子节正文 |
+| `warnings` 新增"正文章节不足"：`tokens_total ≥ 5000` 且 `sections_total ≤ 2` 时报出 | `page2md.py:1562-1569` | 站点给不出可用容器时，调用方**知道**按节阅读无效，而不是读到一份假目录 |
+
+## 偏离计划的一处（重要）
+
+计划写的是"条分节按 `<h2>/<h3>` 实际层级**重建**"。实测后我**没有**做重建，理由：ACS 的容器是共享的，重建等价于重写 `_own_blocks` / `_section_entries` 的核心走查（1400 行文件里最危险的一段），而现有夹具只覆盖 Elsevier/JATS 形态；在没有 ACS 形态的 fixture 之前动它，等于用一个样本赌所有出版商。本轮交付的是**确认过的那一半**：垃圾小节不再冒充章节、失败状态如实上报。
+
+⇒ **遗留 TODO（下一轮）**：为"共享容器"形态加脱敏 fixture，再把走查改成"以标题为边界切分"，目标是 JACS 那份能切出 ≥4 个真实小节。
+
+## 测试
+
+- `test_section_titles_sharing_a_container_are_not_reported_as_sections`：两条标题共用一个容器 ⇒ 只出一个 `##`，且两段正文都在其中（不重复）。
+- `test_a_long_document_in_one_section_says_the_split_failed`：长文单节 ⇒ `sections_total ≤ 2` 且 warnings 含"章节不足"。
+- 全量 `pytest tests/unit` 通过（606 passed）。
+
+
 
 

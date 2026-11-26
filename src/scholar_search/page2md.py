@@ -478,6 +478,11 @@ def _own_blocks(section: Any) -> list[str]:
                 and child.xpath(".//*[self::h1 or self::h2 or self::h3][1]")
             ):
                 continue  # 有标题的子节会被独立枚举，这里跳过去免得内容被外层吞掉
+            if child.xpath('.//*[contains(@class, "section-title")]'):
+                # 同上，但 ACS 用的是 `class="section-title"` 而不是 `<section id>`：外层标题的
+                # 容器把 13 个子节的正文全吞了进去（2026-11-26 报告 P1-5，`01-introduction`
+                # 24,576 tokens、其余各 613）。两种嵌套形式必须一视同仁。
+                continue
             if child.xpath(BLOCK_CONTAINER_XPATH):
                 walk(child)
                 continue
@@ -564,7 +569,30 @@ def _section_entries(doc: Any) -> list[tuple[str, int, list[str]]]:
             if paragraphs:
                 front.append(("Abstract", 2, paragraphs))
 
-    return front + entries
+    return _without_shared_container_duplicates(front + entries)
+
+
+def _without_shared_container_duplicates(
+    entries: list[tuple[str, int, list[str]]],
+) -> list[tuple[str, int, list[str]]]:
+    """Keep one entry per distinct block list.
+
+    ACS hangs every section title off the *same* container, so `getparent()` returns the whole
+    article for each of them: all fourteen entries came back with the same 529 blocks (measured
+    2026-11-26 on `10.1021/jacs.6c13448`). The de-duplicator downstream then left the first entry
+    holding the entire body and thirteen behind holding their unique leftover furniture — which
+    is what "正文集中在 01-introduction" looked like from outside. Keeping one entry is the honest
+    result: the split did not work, and the caller is told so in `warnings`.
+    """
+
+    seen: list[list[str]] = []
+    unique: list[tuple[str, int, list[str]]] = []
+    for entry in entries:
+        if entry[2] in seen:
+            continue
+        seen.append(entry[2])
+        unique.append(entry)
+    return unique
 
 
 def _normalise(text: str) -> str:
@@ -1521,6 +1549,16 @@ def convert(
     meta["sections_total"] = len(cast(list[Any], chunks["sections"]))
     meta["tokens_total"] = chunks["total_tokens"]
     meta["tokens_core"] = chunks["core_tokens"]
+    # A long document in one or two sections is not a reading plan: the site gave no usable
+    # section containers, so say so instead of letting a caller page through a heading that
+    # holds the whole paper (2026-11-26 report P1-5).
+    if (
+        int(cast(int, meta["tokens_total"])) >= 5_000
+        and int(cast(int, meta["sections_total"])) <= 2
+    ):
+        cast(list[str], meta["warnings"]).append(
+            "正文章节不足：站点没有提供可用的章节容器，正文集中在少数小节里，按节阅读的效果有限"
+        )
     (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     return meta
 
