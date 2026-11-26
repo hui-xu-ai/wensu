@@ -212,6 +212,53 @@ def test_the_default_view_navigates_once_even_when_the_page_names_a_fulltext_url
     assert result["quota_charged"] == 1, result
 
 
+def test_a_capture_that_names_another_doi_is_not_this_articles_answer(tmp_path: Path) -> None:
+    """The tab can move between the navigation and the snapshot (audit F05).
+
+    Two different articles on the same publisher look identical to a `status: ok` check, so the
+    page's own `citation_doi` decides. Contradictory evidence is a failure the caller can read,
+    not a success it has to notice.
+    """
+
+    other = (
+        '<html><head><meta name="citation_doi" content="10.1002/anie.201102901"/></head>'
+        '<body><h1>Another paper</h1><section id="s1"><h2>1. Introduction</h2>'
+        "<p>Body text of a different article.</p></section></body></html>"
+    )
+    blob = write_mhtml(tmp_path / "other.mhtml", other).read_bytes()
+    service = build_service(
+        tmp_path,
+        [
+            [
+                {
+                    "verb": "goto",
+                    "data": {"url": "https://onlinelibrary.wiley.com/doi/10.1002/pen.23634"},
+                },
+                {"verb": "sleep", "data": {"ms": 1}},
+                {
+                    "verb": "snapshot",
+                    "data": {
+                        "token": "t1",
+                        "total": len(blob),
+                        "base64": base64.b64encode(blob).decode("ascii"),
+                        "url": "https://onlinelibrary.wiley.com/doi/10.1002/anie.201102901",
+                        "title": "Another paper",
+                        "captcha_visible": False,
+                    },
+                },
+            ]
+        ],
+    )
+
+    result = service.read_page(doi="10.1002/pen.23634")
+
+    assert result["status"] == "no_page", result
+    assert result["reason"] == "capture_mismatch", result
+    assert result["declared_doi"] == "10.1002/anie.201102901", result
+    assert result["full_text"] is False, result
+    assert not list(tmp_path.rglob("page.mhtml")), "another article's bytes must not be kept"
+
+
 def test_doi_prefixes_map_to_the_right_publisher() -> None:
     assert publisher_for_doi("10.1016/j.cej.2023.145123").name == "elsevier"  # type: ignore[union-attr]
     assert publisher_for_doi("https://doi.org/10.1038/s41586-024-00001-0").name == "nature"  # type: ignore[union-attr]

@@ -872,7 +872,11 @@ def build_server(service: ScholarService) -> FastMCP:
           (ADR 0004): `mhtml_path` is null. Ask the user to solve it in that browser window,
           then call `page_read` again: with the wall solved the article is read from the tab
           that is already open, without navigating and without charge. `snapshot` also works
-          for free, but it captures whichever tab is in front.
+          for free, but it captures whichever tab is in front;
+        * `no_page` — the browser was not showing a usable page: `reason: "tab_not_a_page"` when
+          the tab holds something that is not a web page, or `reason: "capture_mismatch"` when
+          the captured page names a different DOI than the one requested (the tab moved between
+          the navigation and the capture). Nothing was kept.
 
         Nothing is clicked or typed, and a page that only shows a preview is reported as
         such rather than passed off as the article.

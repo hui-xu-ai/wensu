@@ -40,7 +40,7 @@ def test_page_read_stops_at_the_wall_and_captures_nothing(tmp_path: Path) -> Non
     # and fail. (The wait is free — it is how a transient interstitial is told apart from a wall.)
     service = build_service(
         tmp_path,
-        [[*_goto("请稍候…"), {"verb": "wait_for", "ok": False, "error": "action.timeout"}]],
+        [[*_goto("请稍候…"), *_wall_steps(URL)]],
     )
 
     result = service.read_page(doi=DOI)
@@ -72,7 +72,7 @@ def test_a_wall_stops_the_plan_without_cooling_anything_down(tmp_path: Path) -> 
         [
             [
                 *_goto("Just a moment..."),
-                {"verb": "wait_for", "ok": False, "error": "action.timeout"},
+                *_wall_steps(URL),
             ],
             [
                 {
@@ -142,7 +142,7 @@ def test_snapshot_still_works_after_a_wall(tmp_path: Path) -> None:
         [
             [
                 *_goto("请稍候…"),
-                {"verb": "wait_for", "ok": False, "error": "action.timeout"},
+                *_wall_steps(URL),
             ],
             [_snapshot_reply(html.encode("utf-8"), "Directional Confinement", captcha=False)],
         ],
@@ -417,11 +417,12 @@ def test_the_answer_names_the_page_it_captured(tmp_path: Path) -> None:
     assert result["captured_url"] == ACS_ARTICLE, result
 
 
-def test_a_gate_title_that_clears_while_we_wait_is_not_a_wall(tmp_path: Path) -> None:
-    """Measured 2026-11-26 on ACS: the interstitial was gone minutes later, the title was not.
+def test_a_gate_title_on_a_page_that_is_not_a_wall_is_not_a_wall(tmp_path: Path) -> None:
+    """Measured 2026-11-26 on ACS: the title said 「请稍候…」 while the page was the article.
 
-    `wait_for` costs nothing, so the article gets twelve seconds to announce itself before the
-    verdict. Without this the read called a readable page a challenge (the report's N1).
+    The title is a claim about the tab at the instant `goto` returned; the capture is the page
+    itself, costs no quota, and a real wall is discarded before it reaches the disk. Without
+    this the read called a readable page a challenge (the report's N1).
     """
 
     from test_page_read import build_service
@@ -431,7 +432,6 @@ def test_a_gate_title_that_clears_while_we_wait_is_not_a_wall(tmp_path: Path) ->
         [
             [
                 _goto_at(ACS_ARTICLE, "请稍候…", halted=True),
-                {"verb": "wait_for", "data": {"found": True}},
                 {"verb": "sleep", "data": {"ms": 1}},
                 _reply_at(BODY_HTML, ACS_ARTICLE, "A paper"),
             ]
@@ -445,7 +445,7 @@ def test_a_gate_title_that_clears_while_we_wait_is_not_a_wall(tmp_path: Path) ->
 
 
 def test_a_gate_title_that_never_clears_is_still_a_wall(tmp_path: Path) -> None:
-    """The wait must not turn a real wall into a capture."""
+    """The capture must not turn a real wall into an article."""
 
     from test_page_read import build_service
 
@@ -454,7 +454,7 @@ def test_a_gate_title_that_never_clears_is_still_a_wall(tmp_path: Path) -> None:
         [
             [
                 _goto_at(ACS_ARTICLE, "请稍候…", halted=True),
-                {"verb": "wait_for", "ok": False, "error": "action.timeout"},
+                *_wall_steps(ACS_ARTICLE),
             ]
         ],
     )
@@ -464,6 +464,32 @@ def test_a_gate_title_that_never_clears_is_still_a_wall(tmp_path: Path) -> None:
     assert result["status"] == "blocked", result
     assert result["quota_charged"] == 1, result
     assert not list(tmp_path.rglob("page.mhtml")), "a wall must not be saved"
+
+
+def _wall_steps(url: str, title: str = "请稍候…") -> list[dict[str, object]]:
+    """The settle and the capture that follow a gate title: the capture decides, not the title.
+
+    A gate title is a claim about the tab at the instant `goto` returned. The capture is free
+    and `_snapshot_locked` throws a wall's bytes away, so the page itself is the verdict
+    (audit 2026-11-26, F08: no `wait_for`, because the content script is not injected on
+    publisher domains).
+    """
+
+    wall = b"<html>please wait</html>"
+    return [
+        {"verb": "sleep", "data": {"ms": 1}},
+        {
+            "verb": "snapshot",
+            "data": {
+                "token": "t1",
+                "total": len(wall),
+                "base64": base64.b64encode(wall).decode("ascii"),
+                "url": url,
+                "title": title,
+                "captcha_visible": False,
+            },
+        },
+    ]
 
 
 def test_a_plain_title_that_merely_mentions_the_marker_is_not_a_wall() -> None:

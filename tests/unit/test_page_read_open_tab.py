@@ -18,9 +18,22 @@ from scholar_search.core.pageprobe import challenge_in_title
 
 DOI = "10.1002/pen.23634"
 URL = "https://onlinelibrary.wiley.com/doi/10.1002/pen.23634"
-# A gate title costs one free wait before the verdict (a transient interstitial clears; a real
-# wall does not). Every wall script carries it, in the order the kernel asks for it.
-_WALL_WAIT = {"verb": "wait_for", "ok": False, "error": "action.timeout"}
+# A gate title is followed by a settle and a capture: the page decides, not the title.
+_WALL_HTML = b"<html>please wait</html>"
+_WALL_STEPS: list[dict[str, object]] = [
+    {"verb": "sleep", "data": {"ms": 1}},
+    {
+        "verb": "snapshot",
+        "data": {
+            "token": "t1",
+            "total": len(_WALL_HTML),
+            "base64": base64.b64encode(_WALL_HTML).decode("ascii"),
+            "url": URL,
+            "title": "请稍候…",
+            "captcha_visible": False,
+        },
+    },
+]
 ARTICLE = (
     "<html><body><article><h1>A paper</h1><section id='s1'>"
     "<h2>1. Introduction</h2><p>Body text a reader came for.</p></section></article></body></html>"
@@ -56,7 +69,7 @@ def test_the_readers_own_tab_is_used_after_a_wall(tmp_path: Path) -> None:
     service = build_service(
         tmp_path,
         [
-            [{"verb": "goto", "data": {"url": URL, "title": "请稍候…"}}, _WALL_WAIT],
+            [{"verb": "goto", "data": {"url": URL, "title": "请稍候…"}}, *_WALL_STEPS],
             [_capture(blob, url=URL, title="A paper")],
         ],
     )
@@ -80,7 +93,7 @@ def test_a_second_wall_in_the_open_tab_does_not_navigate(tmp_path: Path) -> None
     service = build_service(
         tmp_path,
         [
-            [{"verb": "goto", "data": {"url": URL, "title": "请稍候…"}}, _WALL_WAIT],
+            [{"verb": "goto", "data": {"url": URL, "title": "请稍候…"}}, *_WALL_STEPS],
             [
                 {
                     "verb": "snapshot",
@@ -114,13 +127,13 @@ def test_an_unrelated_tab_is_not_taken_for_the_article(tmp_path: Path) -> None:
     service = build_service(
         tmp_path,
         [
-            [{"verb": "goto", "data": {"url": URL, "title": "请稍候…"}}, _WALL_WAIT],
+            [{"verb": "goto", "data": {"url": URL, "title": "请稍候…"}}, *_WALL_STEPS],
             # One transaction: the probe of the tab in front, then the navigation (the probe
             # runs under the browser lock now, so it shares the adapter).
             [
                 _capture(other, url="https://example.org/unrelated", title="Something else"),
                 {"verb": "goto", "data": {"url": URL, "title": "请稍候…"}},
-                _WALL_WAIT,
+                *_WALL_STEPS,
             ],
         ],
     )
@@ -150,7 +163,7 @@ def test_a_page_that_names_its_doi_is_reused_without_asking_the_site(tmp_path: P
     service = build_service(
         tmp_path,
         [
-            [{"verb": "goto", "data": {"url": URL, "title": "请稍候…"}}, _WALL_WAIT],
+            [{"verb": "goto", "data": {"url": URL, "title": "请稍候…"}}, *_WALL_STEPS],
             # One transaction: probe of the tab in front (which IS the article), nothing more.
             [_capture(blob, url="https://onlinelibrary.wiley.com/doi/abs/XYZ9", title="A paper")],
         ],
@@ -178,11 +191,11 @@ def test_a_page_naming_another_doi_is_not_reused(tmp_path: Path) -> None:
     service = build_service(
         tmp_path,
         [
-            [{"verb": "goto", "data": {"url": URL, "title": "请稍候…"}}, _WALL_WAIT],
+            [{"verb": "goto", "data": {"url": URL, "title": "请稍候…"}}, *_WALL_STEPS],
             [
                 _capture(blob, url="https://onlinelibrary.wiley.com/doi/abs/XYZ9", title="A paper"),
                 {"verb": "goto", "data": {"url": URL, "title": "请稍候…"}},
-                _WALL_WAIT,
+                *_WALL_STEPS,
             ],
         ],
     )
@@ -194,11 +207,47 @@ def test_a_page_naming_another_doi_is_not_reused(tmp_path: Path) -> None:
     assert not list(tmp_path.rglob("page.mhtml")), "the guess must be deleted"
 
 
+def test_an_open_tab_that_holds_a_paywall_is_not_full_text(tmp_path: Path) -> None:
+    """Identity is not content: a DOI-matching page can still be a paywall (audit F06).
+
+    Before this, `source: open-tab` returned `status: ok` / `full_text: true` for whatever the
+    tab held, as long as the DOI matched — the classifier only ran on the navigation path.
+    """
+
+    from test_page_read import build_service
+
+    paywall = (
+        "<html><head>"
+        f'<meta name="citation_doi" content="{DOI}"/>'
+        "</head><body><h1>A paper</h1><p>Purchase PDF</p><p>Sign in to view</p></body></html>"
+    )
+    blob = _mhtml(tmp_path / "paywall.mhtml", paywall).read_bytes()
+    service = build_service(
+        tmp_path,
+        [
+            [{"verb": "goto", "data": {"url": URL, "title": "请稍候…"}}, *_WALL_STEPS],
+            [
+                _capture(blob, url="https://onlinelibrary.wiley.com/doi/abs/XYZ9", title="A paper"),
+                {"verb": "goto", "data": {"url": URL, "title": "请稍候…"}},
+                *_WALL_STEPS,
+            ],
+        ],
+    )
+    assert service.read_page(doi=DOI)["status"] == "blocked"
+
+    again = service.read_page(doi=DOI)
+
+    assert again["source"] == "open-tab", again
+    assert again["quota_charged"] == 0, again
+    assert again["status"] != "ok", again
+    assert again["full_text"] is False, again
+
+
 def test_a_wall_marker_is_recorded_and_expires(tmp_path: Path) -> None:
     from test_page_read import build_service
 
     service = build_service(
-        tmp_path, [[{"verb": "goto", "data": {"url": URL, "title": "请稍候…"}}, _WALL_WAIT]]
+        tmp_path, [[{"verb": "goto", "data": {"url": URL, "title": "请稍候…"}}, *_WALL_STEPS]]
     )
     service.read_page(doi=DOI)
 

@@ -182,11 +182,6 @@ _PAGE_SLUG_CHARS = 60
 # change meaning: entries stamped with an older value are not served, so a fix takes effect
 # without asking the reader to clear anything. Pre-existing entries carry no stamp at all.
 _PAGE_JUDGE_REV = 1
-# A gate title is not a verdict: ACS clears its interstitial in tens of seconds (measured
-# 2026-11-26), so the article gets this long to announce itself before the wall stands. `wait_for`
-# is not a network verb, so the wait is free.
-_GATE_WAIT_MS = 12_000
-_ARTICLE_META_SELECTOR = 'meta[name="citation_doi"]'
 
 
 def _page_dir_slug(meta: dict[str, str]) -> str:
@@ -870,36 +865,6 @@ class ScholarService:
             "halt_titles": list(RISK_TITLE_MARKERS),
         }
 
-    def _waited_out_gate(self, publisher: Publisher, spec: ChannelSpec) -> bool:
-        """Give a gate title up to twelve seconds to turn out to be an interstitial. Free.
-
-        Measured 2026-11-26 on ACS: a navigation answered with Cloudflare's 「请稍候…」 and the
-        article itself was on screen minutes later — reporting a wall at the instant `goto`
-        returned called a readable page a challenge (the report's N1). `wait_for` is not a
-        network verb, so waiting costs nothing; the article's own `citation_doi` is the signal
-        that the body arrived. Publishers that never print that tag keep the old behaviour: the
-        wait expires and the wall stands.
-        """
-
-        try:
-            outcomes = self._run(
-                Plan(
-                    channel=f"page:{publisher.name}",
-                    purpose="detail",
-                    actions=(
-                        Action(
-                            "wait_for",
-                            {"selector": _ARTICLE_META_SELECTOR, "timeout_ms": _GATE_WAIT_MS},
-                            timeout_ms=_GATE_WAIT_MS + 2_000,
-                        ),
-                    ),
-                ),
-                spec,
-            )
-        except (ActionError, ScholarSearchError, RiskBlocked):
-            return False
-        return bool(outcomes) and all(outcome.ok for outcome in outcomes)
-
     def _follow_fulltext(
         self, url: str, publisher: Publisher, spec: ChannelSpec
     ) -> tuple[dict[str, Any], dict[str, Any], str, Sequence[ActionOutcome]] | None:
@@ -1057,19 +1022,26 @@ class ScholarService:
                         == identifier.casefold()
                     )
                 if reuse:
+                    # Identity is not content: a page whose DOI matches can still be a paywall
+                    # or an abstract (audit 2026-11-26, F06). The classifier the navigation path
+                    # uses decides here too, so `full_text` means the same thing on both paths.
+                    probe_tab = _classify_saved(open_tab, url=str(open_tab.get("url") or ""))
                     return {
-                        "status": "ok",
+                        **probe_tab,
                         "source": "open-tab",
                         "doi": identifier,
                         "publisher": publisher.name,
                         "final_url": open_tab.get("url"),
+                        "captured_url": str(open_tab.get("url") or ""),
                         "mhtml_path": open_tab.get("path"),
                         "bytes": open_tab.get("bytes"),
                         "title": open_tab.get("title"),
                         # It was already open: nothing was navigated, nothing was charged.
                         "quota_charged": 0,
                         "quota_reason": "open_tab",
-                        "next": _page_next({"status": "ok"}),
+                        "view_applied": False,
+                        "fulltext_url": None,
+                        "next": _page_next(probe_tab),
                     }
                 # Not the article: that capture was a guess, so it must not become a file.
                 with suppress(OSError):
@@ -1120,31 +1092,16 @@ class ScholarService:
                 str(last.get("url") or final_url), publisher, identifier
             ):
                 marker = None
-            if marker and self._waited_out_gate(publisher, spec):
-                # The title was an interstitial on its way out: the article is here now.
-                marker = None
             if marker:
-                # Capturing the wall (the old order) cost a quota point, saved bytes that are
-                # not the article, and replaced a body already captured — measured on Wiley
-                # 2026-11-24: title 「请稍候…」, 73 KB of wall (report D1/D2).
+                # The title is a claim about the tab at the instant `goto` returned, not a
+                # verdict about the page: measured 2026-11-26, ACS answered 「请稍候…」 and the
+                # article itself was on screen minutes later. So the marker is remembered (the
+                # next call prefers the reader's own tab) and the capture decides — it costs no
+                # quota, and a page that really is a wall is discarded by `_snapshot_locked`
+                # before it can reach the disk. There is no `wait_for` here: the content script
+                # is only injected into the two channels' domains (audit 2026-11-26, F08), so a
+                # wait on a publisher tab has no receiver and could only ever time out.
                 self._page_cache_put(target, {"status": "blocked", "title": wall_title})
-                return {
-                    "status": "blocked",
-                    "reason": "challenge",
-                    "signal": f"title:{marker}",
-                    "doi": identifier,
-                    "publisher": publisher.name,
-                    "final_url": final_url,
-                    "mhtml_path": None,
-                    "bytes": 0,
-                    "title": wall_title,
-                    # Billed per navigation that ran: `sleep` and `wait_for` are free, so a flat
-                    # price would charge for a capture that never happened. Two navigations (the
-                    # warmup patch) really do cost two.
-                    "quota_charged": _charged_units(outcomes),
-                    "quota_reason": "challenge",
-                    "next": _page_next({"status": "blocked", "reason": "challenge"}),
-                }
             # Publisher article bodies render after the load event: capturing straight after
             # `goto` returned 1.8 KB of "Highlights" from a ScienceDirect article page that
             # was fully accessible (0.12.59, real run after signing in).
@@ -1208,6 +1165,33 @@ class ScholarService:
                         outcomes = (*outcomes, *extra)
                         readable = Path(str(saved.get("path") or ""))
                         view_applied = probe.get("status") == "ok"
+
+            # Identity of the capture, not just of the request: the tab can move between the
+            # navigation and the snapshot, and a page that names a different DOI is another
+            # article (audit 2026-11-26, F05). Absent metadata proves nothing, so it does not
+            # block; contradictory metadata means the answer cannot be this article.
+            declared = citation_doi(readable) if readable.is_file() else ""
+            if identifier and declared and declared.casefold() != identifier.casefold():
+                with suppress(OSError):
+                    readable.unlink()
+                self._page_cache_put(target, {"status": "blocked", "title": "capture_mismatch"})
+                return {
+                    "status": "no_page",
+                    "reason": "capture_mismatch",
+                    "doi": identifier,
+                    "publisher": publisher.name,
+                    "final_url": final_url,
+                    "declared_doi": declared,
+                    "captured_url": str(saved.get("url") or ""),
+                    "mhtml_path": None,
+                    "bytes": 0,
+                    "quota_charged": _charged_units(outcomes),
+                    "quota_reason": "navigate",
+                    "next": (
+                        "the captured page names a different DOI, so it is not this article: "
+                        "ask again — the browser tab moved between the navigation and the capture."
+                    ),
+                }
 
             result = {
                 **probe,

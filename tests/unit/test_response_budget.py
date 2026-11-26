@@ -81,12 +81,24 @@ def test_a_wall_answer_is_small_and_says_nothing_else(tmp_path: Path) -> None:
     from test_page_read import build_service
 
     url = "https://onlinelibrary.wiley.com/doi/10.1002/pen.23634"
+    wall = b"<html>please wait</html>"
     service = build_service(
         tmp_path,
         [
             [
                 {"verb": "goto", "data": {"url": url, "title": "请稍候…"}},
-                {"verb": "wait_for", "ok": False, "error": "action.timeout"},
+                {"verb": "sleep", "data": {"ms": 1}},
+                {
+                    "verb": "snapshot",
+                    "data": {
+                        "token": "t1",
+                        "total": len(wall),
+                        "base64": base64.b64encode(wall).decode("ascii"),
+                        "url": url,
+                        "title": "请稍候…",
+                        "captcha_visible": False,
+                    },
+                },
             ]
         ],
     )
