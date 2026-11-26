@@ -181,6 +181,10 @@ def _page_evidence_site(url: str, publisher: Publisher, identifier: str) -> bool
 # How much of the title survives in the directory name. A person reads these folder names in a
 # file manager, so the readable part matters — but it is exactly the *prefix* that used to collide.
 _PAGE_SLUG_CHARS = 60
+# Which rule set produced a cached verdict. Bump it whenever the classifier or the wall rules
+# change meaning: entries stamped with an older value are not served, so a fix takes effect
+# without asking the reader to clear anything. Pre-existing entries carry no stamp at all.
+_PAGE_JUDGE_REV = 1
 
 
 def _page_dir_slug(meta: dict[str, str]) -> str:
@@ -767,7 +771,7 @@ class ScholarService:
         return state_dir / "page-read.json"
 
     def _page_cache_get(self, url: str) -> dict[str, Any] | None:
-        """A capture of this URL that is still on disk and still fresh, if there is one."""
+        """A capture of this URL that is still on disk, still fresh and still judged the same."""
 
         try:
             payload = json.loads(self._page_cache_path().read_text(encoding="utf-8"))
@@ -775,6 +779,11 @@ class ScholarService:
             return None
         entry = payload.get(url) if isinstance(payload, dict) else None
         if not isinstance(entry, dict) or entry.get("status", "ok") != "ok":
+            return None
+        # The fingerprint is the *rule set* that produced the verdict, not the page's state:
+        # entries written before it existed cannot be checked, so they are not served. Nothing
+        # is deleted — a later read simply navigates again and writes a stamped entry.
+        if entry.get("judge") != _PAGE_JUDGE_REV:
             return None
         if not Path(str(entry.get("mhtml_path") or "")).is_file():
             return None
@@ -818,6 +827,15 @@ class ScholarService:
                 "bytes": payload.get("bytes"),
                 "headings": payload.get("headings"),
                 "title": payload.get("title"),
+                # What the verdict was made of. Without it a later read cannot tell "this page
+                # was judged by a 3,700-word body" from "it was judged by a shell" — and the
+                # 2026-11-26 report showed exactly that: a capture that read as an abstract kept
+                # being served for an hour after the reader could see the article.
+                "judge": _PAGE_JUDGE_REV,
+                "reason": payload.get("reason"),
+                "prose_words": payload.get("prose_words"),
+                "final_url": payload.get("final_url"),
+                "captured_url": payload.get("captured_url"),
                 "at": time.time(),
             }
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -850,18 +868,22 @@ class ScholarService:
             "halt_titles": list(RISK_TITLE_MARKERS),
         }
 
-    def read_page(self, *, url: str = "", doi: str = "") -> dict[str, Any]:
+    def read_page(self, *, url: str = "", doi: str = "", refresh: bool = False) -> dict[str, Any]:
         """`_read_page`, plus the one field a caller should branch on: `full_text`.
 
         The 2026-11-26 report found the same `status: "no_html"` standing for a paywall, a
         PDF-only landing page and a site that never serves HTML — and the advice built on it told
         the reader they had no institutional access. `full_text` says what actually happened; the
         older `status` / `reason` keep their meanings so existing callers do not break.
+
+        `refresh` skips the capture cache and navigates again. It is explicit and off by default
+        because navigating again is what replaced a good capture with a wall once already
+        (2026-11-24, report D1/D2).
         """
 
-        return _page_full_text(self._read_page(url=url, doi=doi))
+        return _page_full_text(self._read_page(url=url, doi=doi, refresh=refresh))
 
-    def _read_page(self, *, url: str = "", doi: str = "") -> dict[str, Any]:
+    def _read_page(self, *, url: str = "", doi: str = "", refresh: bool = False) -> dict[str, Any]:
         """Open the article a reader asked for, then say what is on it.
 
         One navigation: the article URL is opened directly — a deep link, the
@@ -890,9 +912,12 @@ class ScholarService:
                 "publishers": [item.name for item in PUBLISHERS],
             }
         if not target:
-            target = f"https://doi.org/{identifier}"
+            # DOIs are case-insensitive, and two spellings used to be two entries — one blocked
+            # marker and one capture, neither protecting the other (measured 2026-11-26: the same
+            # DOI sat in `page-read.json` twice, differing only in case).
+            target = f"https://doi.org/{identifier.casefold()}"
 
-        cached = self._page_cache_get(target)
+        cached = None if refresh else self._page_cache_get(target)
         if cached is not None:
             # Idempotent on purpose: the page is already on disk, so navigating again could
             # only replace a good capture with whatever the publisher serves now.

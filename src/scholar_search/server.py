@@ -818,7 +818,7 @@ def build_server(service: ScholarService) -> FastMCP:
             return _payload(error if isinstance(error, Exception) else ValueError("bad record"))
 
     @mcp.tool()
-    def page_read(url: str = "", doi: str = "") -> dict[str, Any]:
+    def page_read(url: str = "", doi: str = "", refresh: bool = False) -> dict[str, Any]:
         """Open a publisher article page and say whether it holds the full text.
 
         Give `doi` (preferred — it also decides the publisher) or an article `url`. The
@@ -846,10 +846,14 @@ def build_server(service: ScholarService) -> FastMCP:
 
         Nothing is clicked or typed, and a page that only shows a preview is reported as
         such rather than passed off as the article.
+
+        `refresh: true` ignores a cached capture and navigates again — use it when the caller has
+        independent evidence the cached verdict is wrong (the reader can see the article in that
+        window). It costs another navigation, so it is off by default.
         """
 
         try:
-            return service.read_page(url=url, doi=doi)
+            return service.read_page(url=url, doi=doi, refresh=refresh)
         except (RiskBlocked, ScholarSearchError, OSError, ValueError) as error:
             return _payload(error)
 

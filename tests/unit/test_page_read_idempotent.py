@@ -71,7 +71,70 @@ def test_a_second_read_of_the_same_page_does_not_navigate_again(tmp_path: Path) 
     assert second["mhtml_path"] == first["mhtml_path"]
 
 
-def test_the_capture_is_not_reused_after_it_disappears_from_disk(tmp_path: Path) -> None:
+def test_a_capture_without_a_judge_stamp_is_not_served(tmp_path: Path) -> None:
+    """Entries written before the rule set changed must not outlive it.
+
+    Report 2026-11-26 (P0-2): the browser could show the full article while `page_read` kept
+    answering from an hour-old abstract capture, and nothing the caller could pass would help.
+    """
+
+    import json
+
+    from test_page_read import build_service
+
+    blob = _write_mhtml(tmp_path / "page.mhtml", ARTICLE_HTML)
+    service = build_service(tmp_path, [_one_capture(blob), _one_capture(blob)])
+
+    first = service.read_page(doi=DOI)
+    assert first["status"] == "ok", first
+
+    # Rewrite the entry the way the previous release wrote it: no stamp, no evidence.
+    state = json.loads((tmp_path / "page-read.json").read_text(encoding="utf-8"))
+    key = next(iter(state))
+    for field in ("judge", "reason", "prose_words", "final_url", "captured_url"):
+        state[key].pop(field, None)
+    (tmp_path / "page-read.json").write_text(json.dumps(state), encoding="utf-8")
+
+    second = service.read_page(doi=DOI)
+
+    assert not second.get("cached"), second
+    assert second["status"] == "ok", second
+
+
+def test_refresh_navigates_again_on_request(tmp_path: Path) -> None:
+    """The caller needs a way to say "the cached verdict is wrong" — and only that way."""
+
+    from test_page_read import build_service
+
+    blob = _write_mhtml(tmp_path / "page.mhtml", ARTICLE_HTML)
+    service = build_service(tmp_path, [_one_capture(blob), _one_capture(blob)])
+
+    assert service.read_page(doi=DOI)["status"] == "ok"
+    assert service.read_page(doi=DOI)["cached"] is True
+
+    refreshed = service.read_page(doi=DOI, refresh=True)
+
+    assert not refreshed.get("cached"), refreshed
+    assert refreshed["status"] == "ok", refreshed
+    assert refreshed["quota_charged"] > 0, refreshed
+
+
+def test_doi_case_does_not_create_a_second_entry(tmp_path: Path) -> None:
+    """DOIs are case-insensitive; two spellings used to be two entries, neither protecting the
+    other (measured 2026-11-26: the same DOI sat in `page-read.json` twice)."""
+
+    import json
+
+    from test_page_read import build_service
+
+    blob = _write_mhtml(tmp_path / "page.mhtml", ARTICLE_HTML)
+    service = build_service(tmp_path, [_one_capture(blob), _one_capture(blob)])
+
+    service.read_page(doi=DOI.upper())
+
+    state = json.loads((tmp_path / "page-read.json").read_text(encoding="utf-8"))
+    assert list(state) == [f"https://doi.org/{DOI.lower()}"], list(state)
+    assert service.read_page(doi=DOI)["cached"] is True
     from test_page_read import build_service
 
     blob = _write_mhtml(tmp_path / "page.mhtml", ARTICLE_HTML)

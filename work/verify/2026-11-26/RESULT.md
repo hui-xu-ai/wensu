@@ -170,4 +170,31 @@ $env:TEMP=$env:TMP=$env:TMPDIR="D:\Python\DeepSeek\DateWork\.tmp"; $env:PYTHONPA
 
 **`status: "busy"` 没做**。计划里"冲突时返回 busy"需要：新错误码 + `server.py` 映射 + 工具 schema/文档 + 与"锁内可以等 180 s"的既有设计做取舍，属于**新的设计决策**，不是修 bug 的必要条件。当前先用"锁覆盖选页 + 同源证据"消掉串话；是否再引入 busy 语义，建议单独一轮/单独 ADR 决定。
 
+---
+
+# T4 结果：旧缓存不再无法刷新（2026-11-26）
+
+**验证档位：单元测试 + 静态门**。
+
+## 改了什么
+
+| 改动 | 位置 | 为什么 |
+|---|---|---|
+| 缓存条目新增**判定指纹** `judge`（外加 `reason`/`prose_words`/`final_url`/`captured_url`）；`_page_cache_get` 要求 `judge == _PAGE_JUDGE_REV` | `service.py:154-166`、`:779-795`、`:816-835` | 报告 P0-2：同一 DOI 一小时内只能拿回同一份"判成摘要"的旧快照。指纹进**条目**而不是键，旧条目自动失效、**不删任何文件、不需要用户清缓存** |
+| `read_page(..., refresh: bool = False)`：`refresh=True` 跳过缓存重新导航 | `service.py:854-870`、`:917` | 用户唯一的强制手段；默认关，因为"再导航一次"正是 2026-11-24 D1/D2 事故的成因 |
+| DOI 建 target 时 `casefold()` | `service.py:914-918` | 实测同一 DOI 因大小写各存一条（一条 blocked、一条 ok），墙标记保护不到另一写法 |
+| MCP 工具签名 + docstring + `schemas/tools.json` 重生成 | `server.py:switch` | `additionalProperties: false` ⇒ 不重生成就拒收新参数 |
+
+## 测试（先红后绿）
+
+- `test_a_capture_without_a_judge_stamp_is_not_served`：把条目改回旧格式（无 `judge`）⇒ 必须不再被当作缓存命中，而是重新导航。
+- `test_refresh_navigates_again_on_request`：第二次普通调用 `cached=True/0 额度`（既有行为不变），`refresh=True` 必须重新导航且计费。
+- `test_doi_case_does_not_create_a_second_entry`：大写 DOI 写入后，`page-read.json` 里只有一条小写键。
+- 既有 `test_page_read_idempotent.py` 的"第二次 cached、0 额度"断言仍通过（默认路径一字未改）。
+
+## 影响面（对真实环境）
+
+本机 `%LOCALAPPDATA%\scholar-search\state\page-read.json` 现有 45 条旧条目**全部没有 `judge`** ⇒ 从这一版起它们不再被当作缓存命中（也不会被删除）；下一次读取会重新导航并写入带指纹的条目。这是有意的：那 45 条里有 6 条 blocked 标记与 1 条"判成摘要"的 ok 快照，正是报告里反复出现的元凶。
+
+
 
