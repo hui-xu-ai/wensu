@@ -294,12 +294,14 @@ def test_a_wall_on_another_site_is_not_evidence(tmp_path: Path) -> None:
     service = build_service(
         tmp_path,
         [
-            [_reply_at("<html>请稍候</html>", FOREIGN, "请稍候…", captcha=True)],
+            # One transaction: probe of the tab in front (another site here), then the
+            # navigation. The probe runs under the browser lock, so it shares the adapter.
             [
+                _reply_at("<html>请稍候</html>", FOREIGN, "请稍候…", captcha=True),
                 _goto_at(ACS_ARTICLE, "A paper", halted=True),
                 {"verb": "sleep", "data": {"ms": 1}},
                 _reply_at(BODY_HTML, ACS_ARTICLE, "A paper"),
-            ],
+            ]
         ],
     )
     _mark_walled(service, ACS_DOI)
@@ -334,6 +336,75 @@ def test_a_gate_title_that_did_not_persist_is_not_a_wall(tmp_path: Path) -> None
 
     assert result["status"] != "blocked", result
     assert int(result["bytes"] or 0) > 0, result
+
+
+def test_the_probe_of_the_tab_in_front_holds_the_browser_lock(
+    tmp_path: Path, monkeypatch: object
+) -> None:
+    """That probe is the only tab this read touches without navigating it.
+
+    It used to run *outside* the browser lock, so another read could navigate the shared tab
+    between the probe and the verdict — that is how one DOI's answer carried another article's
+    URL (2026-11-26 report L26/L27). The lock is the fix, so the lock is what the test pins.
+    """
+
+    from test_page_read import build_service
+
+    from scholar_search.core.locking import interprocess_lock
+
+    service = build_service(
+        tmp_path,
+        [
+            # One transaction: probe of the tab in front (another site here), then the
+            # navigation. The probe runs under the browser lock, so it shares the adapter.
+            [
+                _reply_at("<html>请稍候</html>", FOREIGN, "请稍候…", captcha=True),
+                _goto_at(ACS_ARTICLE, "A paper", halted=True),
+                {"verb": "sleep", "data": {"ms": 1}},
+                _reply_at(BODY_HTML, ACS_ARTICLE, "A paper"),
+            ]
+        ],
+    )
+    _mark_walled(service, ACS_DOI)
+
+    seen: list[str] = []
+    original = service._snapshot_locked
+
+    def probing(*, tab: str = "active") -> dict[str, object]:
+        lock = service._page_cache_path().parent / "browser.lock"
+        try:
+            with interprocess_lock(lock, timeout_s=0.05):
+                seen.append("unlocked")
+        except Exception:  # the transaction that called us holds the lock
+            seen.append("locked")
+        return original(tab=tab)
+
+    monkeypatch.setattr(service, "_snapshot_locked", probing)
+    service.read_page(doi=ACS_DOI)
+
+    assert seen, "the tab in front was never probed"
+    assert set(seen) == {"locked"}, seen
+
+
+def test_the_answer_names_the_page_it_captured(tmp_path: Path) -> None:
+    """A caller can check what it got instead of trusting `status: ok`."""
+
+    from test_page_read import build_service
+
+    service = build_service(
+        tmp_path,
+        [
+            [
+                _goto_at(ACS_ARTICLE, "A paper", halted=True),
+                {"verb": "sleep", "data": {"ms": 1}},
+                _reply_at(BODY_HTML, ACS_ARTICLE, "A paper"),
+            ]
+        ],
+    )
+
+    result = service.read_page(doi=ACS_DOI)
+
+    assert result["captured_url"] == ACS_ARTICLE, result
 
 
 def test_a_plain_title_that_merely_mentions_the_marker_is_not_a_wall() -> None:

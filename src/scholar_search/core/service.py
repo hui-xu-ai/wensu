@@ -910,52 +910,56 @@ class ScholarService:
                 "next": _page_next({"status": "ok"}),
             }
 
-        if self._page_cache_walled(target):
-            # This URL hit a wall recently. Before navigating again — which is what replaces
-            # a body the reader already captured — look at the tab the person is on: if they
-            # solved the challenge by hand, the article is right there and `snapshot` costs
-            # nothing and issues no request (ADR 0018/0022).
-            open_tab = self._snapshot_locked(tab="active")
-            # Only the page this read is about can carry its verdict: the tab in front may be
-            # another article, another site, or last night's challenge page.
-            if open_tab.get("status") == "blocked" and _page_evidence_site(
-                str(open_tab.get("url") or ""), publisher, identifier
-            ):
-                return {
-                    "status": "blocked",
-                    "reason": "challenge",
-                    "signal": "title:active-tab",
-                    "doi": identifier,
-                    "publisher": publisher.name,
-                    "final_url": open_tab.get("url") or target,
-                    "mhtml_path": None,
-                    "bytes": 0,
-                    "quota_charged": 0,
-                    "next": _page_next({"status": "blocked", "reason": "challenge"}),
-                }
-            if identifier and identifier in str(open_tab.get("url") or ""):
-                return {
-                    "status": "ok",
-                    "source": "open-tab",
-                    "doi": identifier,
-                    "publisher": publisher.name,
-                    "final_url": open_tab.get("url"),
-                    "mhtml_path": open_tab.get("path"),
-                    "bytes": open_tab.get("bytes"),
-                    "title": open_tab.get("title"),
-                    # It was already open: nothing was navigated, nothing was charged.
-                    "quota_charged": 0,
-                    "next": _page_next({"status": "ok"}),
-                }
-            # Not the article: that capture was a guess, so it must not become a file.
-            with suppress(OSError):
-                Path(str(open_tab.get("path") or "")).unlink()
-
         spec = _page_spec(publisher)
         # The navigation is its own plan, because what it returns decides whether anything
         # else may happen at all: on a wall (ADR 0004) the tool must not sleep, capture or
         # look again. The title arrives with the `goto` reply, so this check is free.
         with self._browser_transaction():
+            # The one tab this read touches without navigating it itself is the tab in front,
+            # so the look happens *under the browser lock*: doing it outside let another read
+            # navigate the shared tab in between, and the answer carried that article's URL
+            # (2026-11-26 report L26/L27: an RSC DOI answered with a `science.org` page).
+            if self._page_cache_walled(target):
+                # This URL hit a wall recently. Before navigating again — which is what replaces
+                # a body the reader already captured — look at the tab the person is on: if they
+                # solved the challenge by hand, the article is right there and `snapshot` costs
+                # nothing and issues no request (ADR 0018/0022).
+                open_tab = self._snapshot_locked(tab="active")
+                # Only the page this read is about can carry its verdict: the tab in front may
+                # be another article, another site, or last night's challenge page.
+                if open_tab.get("status") == "blocked" and _page_evidence_site(
+                    str(open_tab.get("url") or ""), publisher, identifier
+                ):
+                    return {
+                        "status": "blocked",
+                        "reason": "challenge",
+                        "signal": "title:active-tab",
+                        "doi": identifier,
+                        "publisher": publisher.name,
+                        "final_url": open_tab.get("url") or target,
+                        "mhtml_path": None,
+                        "bytes": 0,
+                        "quota_charged": 0,
+                        "next": _page_next({"status": "blocked", "reason": "challenge"}),
+                    }
+                if identifier and identifier in str(open_tab.get("url") or ""):
+                    return {
+                        "status": "ok",
+                        "source": "open-tab",
+                        "doi": identifier,
+                        "publisher": publisher.name,
+                        "final_url": open_tab.get("url"),
+                        "mhtml_path": open_tab.get("path"),
+                        "bytes": open_tab.get("bytes"),
+                        "title": open_tab.get("title"),
+                        # It was already open: nothing was navigated, nothing was charged.
+                        "quota_charged": 0,
+                        "next": _page_next({"status": "ok"}),
+                    }
+                # Not the article: that capture was a guess, so it must not become a file.
+                with suppress(OSError):
+                    Path(str(open_tab.get("path") or "")).unlink()
+
             try:
                 outcomes = self._run(
                     Plan(
@@ -1072,6 +1076,9 @@ class ScholarService:
                 "doi": identifier,
                 "publisher": publisher.name,
                 "final_url": final_url,
+                # What was actually captured, so a caller can check it instead of trusting it:
+                # the tab can move between the navigation and the snapshot.
+                "captured_url": str(saved.get("url") or ""),
                 "mhtml_path": str(readable),
                 "bytes": int(saved.get("bytes") or 0),
                 "title": str(saved.get("title") or probe.get("title") or ""),

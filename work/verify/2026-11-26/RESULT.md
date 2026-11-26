@@ -142,3 +142,32 @@ $env:TEMP=$env:TMP=$env:TMPDIR="D:\Python\DeepSeek\DateWork\.tmp"; $env:PYTHONPA
 2. **抓取路径的 `quota_charged` 仍是常量 `PAGE_READ_QUOTA=2`**：warmup 两次 goto + 抓取实扣 3、报价 2。改它会牵动 `bootstrap.py` 的报价表、`test_action_cost_matches_plans.py` 与 budget 文档，放到 T4（缓存/额度一起改）以免一处改动混两件事。
 3. **`bytes` 仍是"去 `<script>` 之前"的桥回传长度**（`test_snapshot_verb.py:123/205` 把它钉住了）。真正的问题是"给了路径却没有文件"，已用不变量测试覆盖；字节语义不在本轮改。
 
+---
+
+# T3 结果：并发串话（2026-11-26）
+
+**验证档位：单元测试 + 静态门**；实盘两路并发仍留到收尾（T0 已用确定性方式命中 L26 同一串 URL）。
+
+## 根因（已核实）
+
+锁只保护"导航 + 抓取"（`with self._browser_transaction()`），而**决定复用哪个标签页的那次读取在锁外**——于是 A 的"前台标签快照"与 B 的"工作标签导航"可以重叠，A 把 B 的页面当成本文（L26/L27）。同时 `_snapshot_locked` 的 docstring 自述"调用方已持锁"，那处调用却未持锁。
+
+## 改了什么
+
+| 改动 | 位置 | 为什么 |
+|---|---|---|
+| 把"墙标记 + 前台标签探测 + open-tab 复用"整段**移进** `with self._browser_transaction():` | `service.py:958-1001` | 消除"锁外读页 / 锁内导航"的重叠窗口；顺带恢复 `_snapshot_locked` 的契约 |
+| 缓存命中仍在锁外返回 | `service.py:895-911` | 0 额度的免费路径不该为了一把浏览器锁排队（这也是为什么要挑着搬，而不是整段包住） |
+| 响应新增 `captured_url`：**实际抓到的那个页面**的 URL | `service.py:1129-1132` | 计划里写的 `requested_doi`/`resolved_doi` 属于"让调用方能自检"；实际更有用的是"抓的是哪一页"，调用方可直接与 DOI/`final_url` 比对 |
+
+## 测试（先红后绿）
+
+- 新增 `test_the_probe_of_the_tab_in_front_holds_the_browser_lock`：monkeypatch `_snapshot_locked`，在里面对 `state_dir/browser.lock` 做一次 50 ms 的 `interprocess_lock`，断言**拿不到**（说明锁确实被持有）。这条是结构断言，不依赖时序，不会 flaky。
+- 新增 `test_the_answer_names_the_page_it_captured`：`captured_url` 必须是真相。
+- 夹具随之修正：探针进了同一个事务，就与导航**共用同一个 adapter 脚本**（`test_page_read_wall.py` 两条、`test_page_read_open_tab.py` 一条）——这是行为变更的正常后果，不是"改测试迁就实现"。
+
+## 没有做的（明确记录）
+
+**`status: "busy"` 没做**。计划里"冲突时返回 busy"需要：新错误码 + `server.py` 映射 + 工具 schema/文档 + 与"锁内可以等 180 s"的既有设计做取舍，属于**新的设计决策**，不是修 bug 的必要条件。当前先用"锁覆盖选页 + 同源证据"消掉串话；是否再引入 busy 语义，建议单独一轮/单独 ADR 决定。
+
+

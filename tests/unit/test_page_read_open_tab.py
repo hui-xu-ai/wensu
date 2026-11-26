@@ -112,8 +112,12 @@ def test_an_unrelated_tab_is_not_taken_for_the_article(tmp_path: Path) -> None:
         tmp_path,
         [
             [{"verb": "goto", "data": {"url": URL, "title": "请稍候…"}}],
-            [_capture(other, url="https://example.org/unrelated", title="Something else")],
-            [{"verb": "goto", "data": {"url": URL, "title": "请稍候…"}}],
+            # One transaction: the probe of the tab in front, then the navigation (the probe
+            # runs under the browser lock now, so it shares the adapter).
+            [
+                _capture(other, url="https://example.org/unrelated", title="Something else"),
+                {"verb": "goto", "data": {"url": URL, "title": "请稍候…"}},
+            ],
         ],
     )
     assert service.read_page(doi=DOI)["status"] == "blocked"
