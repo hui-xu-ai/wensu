@@ -546,7 +546,9 @@ def build_server(service: ScholarService) -> FastMCP:
         one screen was read — fetch more with `exclude_ut` (Web of Science) or `page`
         (CNKI). `total: 45, fetched: 45, returned: 40` means the fetch was complete and
         the year filter trimmed the answer; `truncated` is false, because nothing the
-        site matched is missing.
+        site matched is missing. **`truncated: null` means the channel cannot say** — Web
+        of Science answers from a BibTeX export, which carries the records but not the
+        site's hit count, so its `total` is null too. Read `fetched` there.
 
         min_impact_factor is honoured by channels that ship journal metrics
         (currently webofscience); records whose journal has no metric are dropped,

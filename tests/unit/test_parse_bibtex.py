@@ -25,7 +25,11 @@ def _parse(text: str | None = None, metrics: object = None):
 
 def test_the_real_export_parses_into_two_records() -> None:
     page = _parse()
-    assert page.total == 2
+    # An export says how many records it carries, never how many the query matched — so it
+    # reports no `total` at all (2026-11-26 report P2-7: `total: 50` for a topic with tens of
+    # thousands of hits was indistinguishable from a site that really has fifty).
+    assert page.total is None
+    assert len(page.records) == 2
     assert [record.doc_type for record in page.records] == ["article", "proceedings paper"]
 
 

@@ -362,7 +362,10 @@ class SearchPage:
     # for, so there may be more"; a range request (`records_from`/`records_to`) is not
     # truncated by definition and reports False.
     returned: int = 0
-    truncated: bool = False
+    # True: the fetch stopped short of what the site matched. False: the fetch is whole (a range
+    # request is whole by definition). None: this channel cannot say — Web of Science answers
+    # from a BibTeX export, which carries the records but not the hit count (2026-11-26 P2-7).
+    truncated: bool | None = None
     # How many records the fetch itself brought back, before this tool's own filters and
     # `limit`. `total` is the site's claim about the whole result set; without this number a
     # caller cannot tell "the site has fifty" from "the site has five thousand and I read one

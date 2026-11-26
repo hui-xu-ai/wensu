@@ -166,3 +166,27 @@ def test_a_range_request_is_never_called_truncated() -> None:
 
     assert presented.returned == 50
     assert presented.truncated is False
+
+
+def test_truncation_is_unknown_when_the_channel_never_learnt_a_total() -> None:
+    """Web of Science answers from a BibTeX export: records, but no hit count.
+
+    Saying `truncated: false` there would assert "you have everything", which the export cannot
+    support (2026-11-26 report P2-7). `None` is the honest value, and `total` is null too.
+    """
+
+    query = SearchQuery(text="ionic actuator", channel="webofscience", limit=5)
+
+    presented = _present(_page(50, None), query)
+
+    assert presented.total is None
+    assert presented.fetched == 50
+    assert presented.truncated is None
+    assert presented.returned == 5
+
+    from scholar_search.server import _page_payload
+
+    payload = _page_payload(presented, query, ["title"])
+    assert payload["truncated"] is None
+    assert payload["total"] is None
+    assert payload["fetched"] == 50

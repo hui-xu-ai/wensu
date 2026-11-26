@@ -108,10 +108,11 @@ status → bridge.ready = false，但 browser_profile 有值
 | **WoS** | **写进站点检索式**（`… AND PY=(2026)`，`query_effective` 能看到），**并且**再对抓到的那一页做一次本地过滤 |
 | **CNKI** | 只做本地过滤，不改变检索式 |
 
-所以 WoS 上 `total` 已经是年份限定的数量，而 `dropped_year` 通常很小；CNKI 上
-`total` 是全量，`dropped_year` 可能吞掉整页。
+所以 WoS 上 **`total` 是 `null`**（导出文件从来不带站点命中数，0.14.28 起不再拿"导出了几条"冒充它）：
+年份限定已经写进站点检索式，所以 `fetched`（这次导出带回来的条数）本身就是年份限定后的量，`dropped_year` 通常很小；
+CNKI 上 `total` 是站点全量，`dropped_year` 可能吞掉整页。
 
-后果：`records: []` 加 `total: 65` 意味着「**这一页没有符合年份的**」，**不是**「这个主题没有该年份的文献」。
+后果：`records: []` 加 `fetched: 45` 意味着「**这一页没有符合年份的**」，**不是**「这个主题没有该年份的文献」。
 
 **判断方法**——看 `dropped_year` 和 `dropped_filter`：
 
@@ -120,7 +121,7 @@ status → bridge.ready = false，但 browser_profile 有值
 | `records: []`，`total: 0`，`empty_reason: no_match` | 真的没有匹配 | 可以下「无文献」结论 |
 | `records: []`，`dropped_year: 30`，`empty_reason: all_dropped_by_year` | 这一页 30 条全被年份筛掉了 | **换检索式或翻页**，不要说无文献 |
 | `records: []`，`dropped_filter: 30`，`empty_reason: all_dropped_by_filter` | 全被影响因子/被引阈值筛掉 | 放宽阈值，不要说无文献 |
-| `records: [9 条]`，`total: 401` | 只有 9 条落在今年 | 引用时说明「共 401 条，本页 9 条符合年份」|
+| `records: [9 条]`，`fetched: 50`，`returned: 9` | 只有 9 条落在今年 | 引用时说明「本次取回 50 条，其中 9 条符合年份」|
 
 **看 `filters.year_scope` 判断年份作用在哪**：`page` = 只筛了这一页（知网）；
 `site_and_page` = 既写进了站点检索式、又筛了这一页（WoS）。
@@ -266,9 +267,12 @@ TI='生态' and KY='生态文明' and (AU % '陈' + '王')
 
 **年份有两个入口，效果按渠道不同**：
 
-- 写进检索式 `PY=(2026)` —— **站点侧过滤**，`total` 是站点在该年命中的数量；
+- 写进检索式 `PY=(2026)` —— **站点侧过滤**，`fetched` 就是该年限定后取回的条数；
 - 用参数 `year_from=2026` —— **WoS 上同样写进检索式**（`query_effective` 能看到），
   **CNKI 上只过滤当前页**，`total` 仍是全量，要配合 `dropped_year` 读。
+
+**WoS 上 `total` 是 `null`**：导出文件不带站点命中数，所以"站点到底命中多少"这个数拿不到；
+用 `fetched`（取回几条）+ `returned`（给你几条）读，别把 `total: null` 当成"零命中"。
 
 **`total` 不等于「该年有那么多篇」**：一条记录匹配 `PY=(2026)` 却可能带 `year=2027`
 （在线首发，或次年卷期的会议录）。按 `year` 分组显示是对的，看到一两条落在区间外

@@ -2112,9 +2112,12 @@ def _present(page: SearchPage, query: SearchQuery) -> SearchPage:
         # pulled all 50 and only the *answer* was trimmed. The old test compared the answer to
         # `total`, so any local filter (a year range on a 20-record page with a 45-hit site)
         # also reported `truncated: true` and told the caller to go fetch what they already had
-        # (2026-11-26 report P2-7). It now compares the *fetch*.
-        truncated=bool(
-            query.records_span is None and page.total is not None and fetched < page.total
+        # (2026-11-26 report P2-7). It compares the *fetch* now, and says `None` when the channel
+        # never learnt the site's total.
+        truncated=(
+            False
+            if query.records_span is not None
+            else (None if page.total is None else fetched < page.total)
         ),
     )
 

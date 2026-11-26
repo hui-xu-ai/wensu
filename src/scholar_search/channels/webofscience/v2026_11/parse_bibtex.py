@@ -204,10 +204,12 @@ def parse(
         records=tuple(records),
         # An export says how many records it *carries*, never how many the query matched.
         # Reporting that number as `total` was already wrong for a fifty-record page; with
-        # a range it is worse ("total: 1000" for a query with 63 000 hits). A range export
-        # therefore reports no total rather than a wrong one; the page path keeps the old
-        # behaviour because callers and the skill read it.
-        total=None if query.records_span is not None else len(records),
+        # a range it is worse ("total: 1000" for a query with 63 000 hits). The page path kept
+        # the old behaviour "because callers and the skill read it" — and that is exactly what
+        # the 2026-11-26 report saw: `total: 50` for a topic with tens of thousands of hits, and
+        # no way to tell it from a site that really has fifty (P2-7). `fetched` now carries the
+        # record count, so `total` can stop pretending: absent means "this answer cannot say".
+        total=None,
         page=query.page,
         # Left empty on purpose: the expression that ran is not `query.text`. This
         # channel appends `AND PY=(...)` (see `query.build`), and the service fills

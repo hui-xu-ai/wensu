@@ -323,15 +323,27 @@ page2md → 65,261 B，engine sections+trafilatura，warnings 含新的「正文
 
 ## P2-7 `total` 无法区分「站点就这么多」与「被抓取截断」
 
-取证：`parse_records.py:426-429` 的 `total` 取自站点自己的 `searchInfo.RecordsFound` —— 所以 `total` 语义本来就是对的；
-错的是一旁的 `truncated`：它用 `len(records) < total`，而 `len(records)` 是**过滤后**的条数，于是任何本地年筛都会让它为真
-（一份 20 条、站点 45 命中、年筛剩 10 的页面会说"站点还有更多"，把调用方赶去重抓手上已有的东西）。
+**先更正我上一版的判断**：一开始我读 `parse_records.py:426-429`，看到 `total` 取自 `searchInfo.RecordsFound`，就断定"total 语义是对的、错的是 truncated"。
+真实检索把它推翻了 —— `total: 50`，而 `TS=(perovskite AND "solar cell")` 在 2022–2026 不可能只有 50 篇。
 
-| 改动 | 位置 | 效果 |
+**病根**：WoS 的检索**不走 `parse_records`**。`service._search_locked` 里只要通道有 `parse_export` 就走 BibTeX 导出（`service.py:621`），
+而 `parse_bibtex.py:210` 是 `total = None if records_span else len(records)` —— 也就是说 **`total: 50` 是"我们导出了 50 条"**，
+而 `parse_bibtex` 自己的注释早就写着"导出只说它带了几条，从不说查询命中几条"，只是为了兼容一直留着。
+
+| 改动 | 位置 | 效果（真实检索实测） |
 |---|---|---|
-| `SearchPage` 新增 `fetched`：**过滤与 `limit` 之前**抓到的条数 | `contracts.py:SearchPage`、`service.py:_present`（进来就算） | `total: 5000, fetched: 50` = 读了一屏；`total: 45, fetched: 45` = 抓全了 |
-| `truncated` 改判据：`fetched < total` | `service.py:_present` | 本地过滤不再假报"站点还有更多" |
-| 响应新增 `fetched` | `server.py:_page_payload` | 三个数一起读就够：站点命中 / 抓到 / 给你 |
+| 导出路径 `total` 一律 `None`（不再拿导出条数冒充站点命中数） | `parse_bibtex.py:203-216` | `total: null`（此前 `50`） |
+| 新增 `fetched`：过滤与 `limit` 之前抓回多少 | `contracts.SearchPage`、`service._present` | `fetched: 50` |
+| `truncated` 改三态：区间请求 `False` / 站点总数未知 `None` / 否则 `fetched < total` | `service._present` | WoS 现在 `truncated: null`（此前 `false` 假称"你拿全了"） |
+| 响应新增 `fetched` | `server._page_payload` | 三个数一起读：站点命中（可能 null）/ 抓到 / 给你 |
+| 技能文档同步（`skills/scholar-search/SKILL.md` 3 处） | 同上 | 不再教"WoS 的 total 是年份限定后的数量" |
+
+真实检索实测（仓库代码 + 隔离家，8 额度）：
+
+```text
+before(0.14.27 安装版): total 50, returned 5, truncated true, query_effective "… AND PY=(2022-2026)"
+after(仓库代码):        total null, fetched 50, returned 5, truncated null, sort_applied false, effective_sort "site-default"
+```
 
 ## P2-8 `site_sort: relevance` 静默不生效
 
