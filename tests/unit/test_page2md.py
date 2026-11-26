@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import email.mime.base
 import email.mime.multipart
 import email.mime.text
 import json
@@ -106,6 +107,66 @@ def test_a_long_document_in_one_section_says_the_split_failed(tmp_path: Path) ->
 
     assert int(meta["sections_total"]) <= 2, meta["sections_total"]
     assert any("章节不足" in warning for warning in meta["warnings"]), meta["warnings"]
+
+
+def test_a_local_image_outside_the_document_directory_is_refused(
+    sample_dir: Path, tmp_path: Path
+) -> None:
+    """A page must not be able to copy arbitrary local files into `assets/` (audit F01).
+
+    The reference used to be resolved and read wherever it pointed, so a synthetic HTML could
+    pull any file the process can read. The check happens before any read.
+    """
+
+    secret = tmp_path / "secret.txt"
+    secret.write_text("TOP-SECRET-CONTENT", encoding="utf-8")
+    out = tmp_path / "out"
+    markdown = (
+        f"![escape](../secret.txt)\n\n![absolute]({secret.as_posix()})\n\n"
+        "![unc](//server/share/evil.png)\n"
+    )
+
+    localised, copied, missing = page2md._localise_images(markdown, sample_dir, out)
+
+    assert copied == 0
+    assert missing == 3
+    assert not (out / "assets").exists() or not any((out / "assets").iterdir())
+    assert "TOP-SECRET-CONTENT" not in localised
+
+
+def test_an_mhtml_resource_name_cannot_escape_the_assets_directory(tmp_path: Path) -> None:
+    """The name came from `Content-Location`, split on `/` only (audit F02).
+
+    On Windows a location carrying a backslash became a path component, and the write landed
+    outside `assets/`. Names are content hashes now.
+    """
+
+    payload = b"\x89PNG\r\n\x1a\nfake"
+    location = "..\\..\\evil.png"
+    parts = {location: (payload, page2md._asset_name(payload, location))}
+    out = tmp_path / "out"
+
+    localised, copied, missing = page2md._localise_images(
+        f"![evil]({location})", tmp_path / "doc", out, parts
+    )
+
+    assert (copied, missing) == (1, 0), (localised, copied, missing)
+    written = sorted(path.name for path in (out / "assets").iterdir())
+    assert len(written) == 1 and written[0].endswith(".png"), written
+    assert "\\" not in written[0] and "/" not in written[0]
+    assert not (tmp_path / "evil.png").exists(), "nothing may be created outside assets/"
+
+
+def test_asset_names_are_content_addressed_and_never_a_path() -> None:
+    """Two different resources cannot silently share a name, and no name carries a separator."""
+
+    import hashlib
+
+    for location in ("..\\..\\evil.png", "../../evil.png", "a/b/c.JPG?x=1", "C:/x.png", ""):
+        name = page2md._asset_name(b"payload", location)
+        assert name.startswith(hashlib.sha256(b"payload").hexdigest()[:16]), name
+        assert not set(name) & set("/\\:"), name
+    assert page2md._asset_name(b"one", "a/x.png") != page2md._asset_name(b"two", "a/x.png")
 
 
 def test_mathml_to_latex_handles_fraction_and_superscript() -> None:

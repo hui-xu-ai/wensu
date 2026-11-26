@@ -978,9 +978,31 @@ def _mhtml_parts(path: Path) -> dict[str, tuple[bytes, str]]:
         payload = part.get_payload(decode=True)
         if not location or not isinstance(payload, bytes):
             continue
-        name = location.rsplit("/", 1)[-1].split("?")[0] or "asset"
-        parts[location] = (payload, name)
+        # The name comes from the content, never from the page: a location with a Windows
+        # separator used to become a path component and the write landed outside `assets/`
+        # (audit 2026-11-26, F02). A hash cannot contain a separator and cannot collide.
+        parts[location] = (payload, _asset_name(payload, location))
     return parts
+
+
+def _asset_name(payload: bytes, location: str) -> str:
+    """A safe, content-addressed file name for an inline asset."""
+
+    digest = hashlib.sha256(payload).hexdigest()[:16]
+    suffix = Path(re.sub(r"[?#].*$", "", location)).suffix.lower()
+    if not re.fullmatch(r"\.[a-z0-9]{1,5}", suffix or ""):
+        suffix = ""
+    return f"{digest}{suffix}"
+
+
+def _inside(base: Path, candidate: Path) -> bool:
+    """Whether `candidate` really sits under `base` once links are resolved."""
+
+    try:
+        candidate.resolve().relative_to(base.resolve())
+    except (ValueError, OSError):
+        return False
+    return True
 
 
 def _localise_images(
@@ -1002,18 +1024,37 @@ def _localise_images(
             payload, name = inline[target]
             assets.mkdir(parents=True, exist_ok=True)
             destination = assets / name
+            if not _inside(assets, destination):
+                missing += 1
+                return match.group(0)
             if not destination.exists():
                 destination.write_bytes(payload)
             copied += 1
             return f"![{alt}](assets/{name})"
         if re.match(r"^(https?:|data:)", target):
             return match.group(0)
+        # A local image must stay inside the document's own directory: the reference used to be
+        # resolved and read wherever it pointed, so a synthetic page could copy any file the
+        # process can read into `assets/` (audit 2026-11-26, F01). Checked before any read.
+        if (
+            Path(target).is_absolute()
+            or re.match(r"^[A-Za-z]:", target)
+            or target.startswith(("\\\\", "//"))
+        ):
+            missing += 1
+            return match.group(0)
         candidate = (source.parent / target).resolve()
-        if not candidate.is_file():
+        if not _inside(source.parent, candidate) or not candidate.is_file():
             missing += 1
             return match.group(0)
         assets.mkdir(parents=True, exist_ok=True)
+        # A local file keeps its own name (it is the reader's file, and the name is meaningful);
+        # only its location is constrained. Inline MHTML assets are content-addressed instead,
+        # because there the name comes from the page.
         destination = assets / candidate.name
+        if not _inside(assets, destination):
+            missing += 1
+            return match.group(0)
         if not destination.exists():
             shutil.copy2(candidate, destination)
         copied += 1
