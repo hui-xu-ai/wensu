@@ -363,6 +363,11 @@ class SearchPage:
     # truncated by definition and reports False.
     returned: int = 0
     truncated: bool = False
+    # How many records the fetch itself brought back, before this tool's own filters and
+    # `limit`. `total` is the site's claim about the whole result set; without this number a
+    # caller cannot tell "the site has fifty" from "the site has five thousand and I read one
+    # screen" (2026-11-26 report P2-7).
+    fetched: int | None = None
 
 
 # --------------------------------------------------------------------------

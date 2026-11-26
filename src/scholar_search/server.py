@@ -183,7 +183,20 @@ def _page_payload(
         # second search resolving it (2026-11-24 report, D4).
         "returned": getattr(page, "returned", len(page.records)),
         "truncated": getattr(page, "truncated", False),
+        # How many records the capture held before this tool's own filters: `total` is the
+        # site's claim, this is what the fetch actually brought back. `total: 5000,
+        # fetched: 50` means one screen was read, not that the site has fifty
+        # (2026-11-26 report P2-7: `total` alone could not tell the two apart).
+        "fetched": page.fetched if page.fetched is not None else len(page.records),
     }
+    if query is not None:
+        # `relevance` is not an order the channels can impose — it means "do not touch the
+        # site's own order", which is often date-descending. Saying so is the difference
+        # between a caller who knows why 2026 fills the page and one who calls it a bug
+        # (2026-11-26 report P2-8).
+        sort_was_applied = query.sort in {"date", "citation"}
+        payload["sort_applied"] = sort_was_applied
+        payload["effective_sort"] = query.sort if sort_was_applied else "site-default"
     if query is not None:
         applied = _filters_payload(page, query)
         if applied is not None:
@@ -526,6 +539,15 @@ def build_server(service: ScholarService) -> FastMCP:
         page. `empty_reason: "all_dropped_by_year"` is the case where the whole page
         was filtered away.
 
+        Three numbers, read together, answer "how much is there and how much did I get":
+        `total` is what the site says it matched, `fetched` is how many records the
+        capture actually held (before this tool's own filters), and `returned` is what
+        this answer holds. `total: 5000, fetched: 50` means the site has thousands and
+        one screen was read — fetch more with `exclude_ut` (Web of Science) or `page`
+        (CNKI). `total: 45, fetched: 45, returned: 40` means the fetch was complete and
+        the year filter trimmed the answer; `truncated` is false, because nothing the
+        site matched is missing.
+
         min_impact_factor is honoured by channels that ship journal metrics
         (currently webofscience); records whose journal has no metric are dropped,
         which lowers recall by design.
@@ -533,7 +555,11 @@ def build_server(service: ScholarService) -> FastMCP:
         Two parameters sort and they are not interchangeable:
 
         * `site_sort` (`relevance` / `date` / `citation`) asks the site to re-sort.
-          That is two extra clicks and costs quota.
+          That is two extra clicks and costs quota. **`relevance` does not click
+          anything**: it means "leave the site's own order alone", and the site's
+          default is often date-descending, so a "relevance" search can come back as
+          the newest papers. `effective_sort` in the answer says which of the two
+          happened (`"site-default"`, `"date"` or `"citation"`).
         * `local_sort` (`none` / `citations` / `year`) re-orders the page already in
           hand: free, no browser action, no quota.
 

@@ -315,6 +315,45 @@ page2md → 65,261 B，engine sections+trafilatura，warnings 含新的「正文
 2. **extension 需要 reload 一次**：`actions.js` 的 CAPTCHA 选择器改动属于内容脚本，`doctor` 报的 0.14.27 读的是磁盘 manifest；
    要让新选择器真正生效，需在 Edge 的扩展页点一次「重新加载」（或重启浏览器）。我没动你的浏览器。
 
+---
+
+# P2-7 / P2-8 结果（2026-11-26，第三轮）
+
+**验证档位：单元测试 + 静态门**；真实检索未跑（WoS 一次约 8 额度，留到下一轮或你放行时做）。
+
+## P2-7 `total` 无法区分「站点就这么多」与「被抓取截断」
+
+取证：`parse_records.py:426-429` 的 `total` 取自站点自己的 `searchInfo.RecordsFound` —— 所以 `total` 语义本来就是对的；
+错的是一旁的 `truncated`：它用 `len(records) < total`，而 `len(records)` 是**过滤后**的条数，于是任何本地年筛都会让它为真
+（一份 20 条、站点 45 命中、年筛剩 10 的页面会说"站点还有更多"，把调用方赶去重抓手上已有的东西）。
+
+| 改动 | 位置 | 效果 |
+|---|---|---|
+| `SearchPage` 新增 `fetched`：**过滤与 `limit` 之前**抓到的条数 | `contracts.py:SearchPage`、`service.py:_present`（进来就算） | `total: 5000, fetched: 50` = 读了一屏；`total: 45, fetched: 45` = 抓全了 |
+| `truncated` 改判据：`fetched < total` | `service.py:_present` | 本地过滤不再假报"站点还有更多" |
+| 响应新增 `fetched` | `server.py:_page_payload` | 三个数一起读就够：站点命中 / 抓到 / 给你 |
+
+## P2-8 `site_sort: relevance` 静默不生效
+
+取证：`plan_search.sort_actions()` 只在 `date`/`citation` 时点击排序菜单，`relevance` **不发任何动作**（CNKI 同理：`cnki/__init__.py:81-82` 对 relevance 直接 return）。
+设计意图是"relevance = 站点默认序，别浪费两次点击"，但站点默认常按日期倒序 —— 于是"按相关度检索"返回清一色 2026 年，且无人告知。
+
+| 改动 | 位置 |
+|---|---|
+| 响应新增 `sort_applied` / `effective_sort`（`site-default` / `date` / `citation`） | `server.py:_page_payload` |
+| 工具文档写明：`relevance` 不点击任何东西，`effective_sort` 会告诉你实际发生了什么 | `server.py` search docstring |
+
+**没有**让 `relevance` 真去点站点排序控件：那要多两次点击（2 额度）且 2026-11-22 实测过 `site_sort` 计划会烧掉 5 额度后失败（见 `sort_actions` docstring）。回显事实比假装生效更便宜也更诚实。
+
+## 测试
+
+- 新增 `test_fetched_says_what_the_fetch_brought_back`、`test_the_year_filter_trims_the_answer_without_making_the_fetch_partial`、
+  `test_the_payload_reports_fetched_beside_total_and_returned`、`test_the_payload_echoes_the_sort_that_was_actually_applied`。
+- 改写两条按旧语义写的用例（`truncated` 曾经在"本地过滤"时也为真），注释里写明为什么改。
+- 全量 `pytest tests/unit` 通过；`release-check` 10 门 PASS。
+
+**注意**：这一轮改动**没有**进已发布的 0.14.27（那是上一批），需要随 0.14.28 一起发。
+
 
 
 

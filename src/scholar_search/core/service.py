@@ -2055,6 +2055,10 @@ def _present(page: SearchPage, query: SearchQuery) -> SearchPage:
     """
 
     records = page.records
+    # Before any filter and before `limit`: what the fetch actually brought back. `total` is
+    # the site's claim; the two together say whether a screen was read or the result set is
+    # exhausted (2026-11-26 report P2-7).
+    fetched = page.fetched if page.fetched is not None else len(records)
     dropped_year = 0
     if query.year_from is not None or query.year_to is not None:
         # The site's year control is unreliable, so filter what we fetched.
@@ -2101,13 +2105,16 @@ def _present(page: SearchPage, query: SearchQuery) -> SearchPage:
     return replace(
         page,
         returned=len(records),
-        # "Does this answer hold everything the site matched?" Measured live 2026-11-24:
+        # What the fetch itself brought back, before the filters above and before `limit`.
+        fetched=fetched,
+        # "Is there more at the site than this fetch brought back?" Measured live 2026-11-24:
         # `limit: 3` against `total: 50` answered `truncated: false`, because the fetch had
-        # pulled all 50 and only the *answer* was trimmed — which is exactly the question the
-        # caller asked. Why something is missing is still visible in `dropped_year` /
-        # `dropped_filter`; the fetch itself is described by `returned` vs `total`.
+        # pulled all 50 and only the *answer* was trimmed. The old test compared the answer to
+        # `total`, so any local filter (a year range on a 20-record page with a 45-hit site)
+        # also reported `truncated: true` and told the caller to go fetch what they already had
+        # (2026-11-26 report P2-7). It now compares the *fetch*.
         truncated=bool(
-            query.records_span is None and page.total is not None and len(records) < page.total
+            query.records_span is None and page.total is not None and fetched < page.total
         ),
     )
 

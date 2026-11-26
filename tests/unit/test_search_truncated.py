@@ -60,12 +60,73 @@ def test_a_small_limit_against_a_big_result_set_is_truncated() -> None:
     assert presented.truncated is True
 
 
-def test_a_year_filter_also_leaves_records_out_and_says_so() -> None:
-    """A filter that drops records still means this answer is not everything.
+def test_fetched_says_what_the_fetch_brought_back() -> None:
+    """`total: 5000, fetched: 50` is one screen, not a site that has fifty (2026-11-26 P2-7)."""
 
-    Measured live 2026-11-24: `limit: 3` against `total: 50` answered `truncated: false`,
-    because the fetch had pulled all 50 and only the answer was trimmed — the caller's
-    question ("is anything missing from what I got?") went unanswered.
+    query = SearchQuery(text="ionic actuator", channel="webofscience", limit=3)
+
+    presented = _present(_page(50, 6304), query)
+
+    assert presented.fetched == 50
+    assert presented.returned == 3
+    assert presented.truncated is True
+
+
+def test_the_year_filter_trims_the_answer_without_making_the_fetch_partial() -> None:
+    """A complete fetch that a local filter trims is not "there is more at the site"."""
+
+    page = SearchPage(
+        records=tuple(
+            _record(i, year=2026 if index % 2 else 2010) for index, i in enumerate(range(20))
+        ),
+        total=20,
+    )
+    query = SearchQuery(text="ionic actuator", channel="webofscience", limit=50, year_from=2020)
+
+    presented = _present(page, query)
+
+    assert presented.fetched == 20
+    assert presented.returned == 10
+    assert presented.truncated is False
+
+
+def test_the_payload_reports_fetched_beside_total_and_returned() -> None:
+    from scholar_search.server import _page_payload
+
+    query = SearchQuery(text="ionic actuator", channel="webofscience", limit=3)
+    payload = _page_payload(_present(_page(50, 6304), query), query)
+
+    assert payload["total"] == 6304
+    assert payload["fetched"] == 50
+    assert payload["returned"] == 3
+
+
+def test_the_payload_echoes_the_sort_that_was_actually_applied() -> None:
+    """`relevance` is not an order any channel can impose: it leaves the site's own order.
+
+    The site's default is often date-descending, which is why a "relevance" search came back
+    as one year only (2026-11-26 report P2-8). Saying which of the two happened is the fix.
+    """
+
+    from scholar_search.server import _page_payload
+
+    asked = SearchQuery(text="x", channel="webofscience")
+    default = _page_payload(_page(3, 50), asked)
+    assert default["sort_applied"] is False
+    assert default["effective_sort"] == "site-default"
+
+    dated = _page_payload(_page(3, 50), SearchQuery(text="x", channel="webofscience", sort="date"))
+    assert dated["sort_applied"] is True
+    assert dated["effective_sort"] == "date"
+
+
+def test_a_year_filter_keeps_the_reason_visible_without_calling_the_fetch_partial() -> None:
+    """The site matched 50, the fetch brought 50, the year filter left 49.
+
+    Nothing the site matched is missing, so this is not truncation — the reason is
+    `dropped_year`, and `returned` says the answer is smaller than `fetched`
+    (2026-11-26 report P2-7: the old rule compared the answer to `total`, so any local
+    filter sent the caller to re-fetch what they already had).
     """
 
     query = SearchQuery(text="ionic actuator", channel="webofscience", limit=50, year_from=2026)
@@ -77,19 +138,21 @@ def test_a_year_filter_also_leaves_records_out_and_says_so() -> None:
     presented = _present(page, query)
 
     assert presented.returned == 49
-    assert presented.truncated is True
+    assert presented.fetched == 50
+    assert presented.truncated is False
     assert presented.dropped_year == 1, "the reason stays visible next to it"
 
 
-def test_trimming_the_answer_to_the_limit_is_truncation() -> None:
-    """The live case: the fetch had 50, the caller asked for 3."""
+def test_trimming_the_answer_to_the_limit_is_not_a_partial_fetch() -> None:
+    """The fetch had all 50; the caller asked for 3. Nothing is left at the site."""
 
     query = SearchQuery(text="ionic actuator", channel="webofscience", limit=3)
 
     presented = _present(_page(50, 50), query)
 
     assert presented.returned == 3
-    assert presented.truncated is True
+    assert presented.fetched == 50
+    assert presented.truncated is False
 
 
 def test_a_range_request_is_never_called_truncated() -> None:
