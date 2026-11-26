@@ -30,7 +30,17 @@ NETWORK_VERBS: frozenset[str] = frozenset({"goto", "click", "select", "type"})
 # `snapshot` is a read: it touches the tab the user already has open and asks the
 # site for nothing, so it belongs here rather than with the network verbs.
 READ_VERBS: frozenset[str] = frozenset(
-    {"wait_for", "read_html", "read_text", "scroll", "sleep", "snapshot"}
+    {
+        "wait_for",
+        "read_html",
+        "read_text",
+        "scroll",
+        "sleep",
+        "snapshot",
+        # Watches the tab's title until a person clears the gate (ADR 0027). No request is
+        # issued, so it costs nothing; the plan still stops if the title never clears.
+        "await_gate_clear",
+    }
 )
 
 

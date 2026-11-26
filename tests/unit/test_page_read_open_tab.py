@@ -18,21 +18,18 @@ from scholar_search.core.pageprobe import challenge_in_title
 
 DOI = "10.1002/pen.23634"
 URL = "https://onlinelibrary.wiley.com/doi/10.1002/pen.23634"
-# A gate title is followed by a settle and a capture: the page decides, not the title.
-_WALL_HTML = b"<html>please wait</html>"
+# A gate title is followed by one bounded wait for the person (ADR 0027). Nothing is captured
+# while the gate is up, so a wall script stops right here.
 _WALL_STEPS: list[dict[str, object]] = [
-    {"verb": "sleep", "data": {"ms": 1}},
     {
-        "verb": "snapshot",
+        "verb": "await_gate_clear",
         "data": {
-            "token": "t1",
-            "total": len(_WALL_HTML),
-            "base64": base64.b64encode(_WALL_HTML).decode("ascii"),
+            "cleared": False,
             "url": URL,
             "title": "请稍候…",
-            "captcha_visible": False,
+            "reason": "verification_timeout",
         },
-    },
+    }
 ]
 ARTICLE = (
     "<html><body><article><h1>A paper</h1><section id='s1'>"

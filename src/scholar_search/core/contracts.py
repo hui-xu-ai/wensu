@@ -32,6 +32,7 @@ Verb = Literal[
     "scroll",
     "sleep",
     "snapshot",
+    "await_gate_clear",
 ]
 
 VERBS: frozenset[str] = frozenset(
@@ -46,6 +47,9 @@ VERBS: frozenset[str] = frozenset(
         "scroll",
         "sleep",
         "snapshot",
+        # Waits for a human to clear a verification page by watching the tab's title (ADR 0027).
+        # It issues no request of its own: it reads what the browser already shows.
+        "await_gate_clear",
     }
 )
 

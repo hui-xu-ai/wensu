@@ -54,7 +54,7 @@ S9 终态      terminal + stage + reason + evidence + quota + next
    扩展内部每 2 s 读一次 `tabs.get(tabId).title`：
    - 标题不再命中门规则 ⇒ 回 `{cleared: true}`（**这就是"用户点完了"的信号**）；
    - 到点仍未清 ⇒ 回 `{cleared: false, reason: "verification_timeout"}`。
-4. 内核：`cleared: true` ⇒ 回到 S4 继续抓；`false` ⇒ `terminal: blocked, reason: verification_timeout`。
+4. 内核：`cleared: true` ⇒ 回到 S4 继续抓；`false` ⇒ `terminal: timeout, reason: verification_timeout`（批量层据此跳过该出版商）。`blocked` 留给"不等就能确定的墙"（可见验证码、403/429）。
 5. 该动作**不产生文档请求**（只读标签页标题），按 `policy.py` 的 `NETWORK_VERBS` 定义不计费；但它属于动作词汇表的新动词 ⇒ **需要 ADR**（AGENTS.md 6）。
 
 > 为什么不复用 `wait_for`：内容脚本只注入知网/WoS 两个域名（`manifest.json`），出版社页没有接收端，这正是 0.14.28 那次"幽灵等待"的教训（审计 F08）。

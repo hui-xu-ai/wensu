@@ -672,7 +672,10 @@ def test_a_wall_answer_says_it_stopped_at_the_wall(tmp_path: Path) -> None:
 
     blocked = service.read_page(doi="10.1002/pen.23634")
 
-    assert blocked["terminal"] == "blocked", blocked
+    # "A human was asked and did not clear it" is its own terminal: a batch skips the publisher
+    # on `timeout`, while `blocked` is a wall that was recognised without waiting.
+    assert blocked["terminal"] == "timeout", blocked
+    assert blocked["reason"] == "verification_timeout", blocked
     assert blocked["stage"] == "wall", blocked
     assert blocked["full_text"] is False
 

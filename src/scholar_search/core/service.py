@@ -337,6 +337,10 @@ _PROBE_TTL_S = 3600.0
 # change meaning: entries stamped with an older value are not served, so a fix takes effect
 # without asking the reader to clear anything. Pre-existing entries carry no stamp at all.
 _PAGE_JUDGE_REV = 2
+# How long a person gets to clear a verification page, and how often the extension looks at the
+# tab title while waiting (ADR 0027). Both are action parameters, not verbs.
+_GATE_WAIT_MS = 10_000
+_GATE_POLL_MS = 2_000
 # How far a cache timestamp may sit in the future before it is treated as corrupt rather than as
 # a small clock difference between two machines (audit F13).
 _CLOCK_SKEW_S = 300.0
@@ -398,7 +402,7 @@ def _page_spec(publisher: Publisher) -> ChannelSpec:
         schema_version=1,
         min_core=__version__,
         domains=(*publisher.hosts(), "doi.org"),
-        verbs=("goto", "read_html", "wait_for", "sleep"),
+        verbs=("goto", "read_html", "wait_for", "sleep", "snapshot", "await_gate_clear"),
         capabilities=(),
     )
     return ChannelSpec(name=manifest.channel, site_version="v1", manifest=manifest, package="")
@@ -1069,6 +1073,45 @@ class ScholarService:
             "halt_titles": list(RISK_TITLE_MARKERS),
         }
 
+    def _await_gate_clear(self, publisher: Publisher, spec: ChannelSpec) -> dict[str, Any]:
+        """Bring the working tab to the person and wait, bounded, for the gate to go away.
+
+        The one thing this function asks of a human is a click. It runs a single action that
+        issues no request — the extension polls the tab's title (ADR 0027) — so waiting costs no
+        quota; if the title never clears the read still stops (`verification_timeout`) and the
+        batch layer skips this publisher.
+        """
+
+        try:
+            outcomes = self._run(
+                Plan(
+                    channel=f"page:{publisher.name}",
+                    purpose="detail",
+                    actions=(
+                        Action(
+                            "await_gate_clear",
+                            {
+                                "halt_titles": list(RISK_TITLE_MARKERS),
+                                "halt_url_markers": [],
+                                "timeout_ms": _GATE_WAIT_MS,
+                                "poll_ms": _GATE_POLL_MS,
+                            },
+                            timeout_ms=_GATE_WAIT_MS + 5_000,
+                        ),
+                    ),
+                ),
+                spec,
+            )
+        except (ActionError, ScholarSearchError, RiskBlocked):
+            return {"cleared": False, "title": "", "url": "", "reason": "action_failed"}
+        last = outcomes[-1].data if outcomes and isinstance(outcomes[-1].data, dict) else {}
+        return {
+            "cleared": last.get("cleared") is True,
+            "title": str(last.get("title") or ""),
+            "url": str(last.get("url") or ""),
+            "reason": str(last.get("reason") or ""),
+        }
+
     def _follow_fulltext(self, url: str, publisher: Publisher, spec: ChannelSpec) -> _FollowResult:
         """One navigation to the page's own full-text view.
 
@@ -1325,13 +1368,32 @@ class ScholarService:
             if marker:
                 # The title is a claim about the tab at the instant `goto` returned, not a
                 # verdict about the page: measured 2026-11-26, ACS answered 「请稍候…」 and the
-                # article itself was on screen minutes later. So the marker is remembered (the
-                # next call prefers the reader's own tab) and the capture decides — it costs no
-                # quota, and a page that really is a wall is discarded by `_snapshot_locked`
-                # before it can reach the disk. There is no `wait_for` here: the content script
-                # is only injected into the two channels' domains (audit 2026-11-26, F08), so a
-                # wait on a publisher tab has no receiver and could only ever time out.
+                # article itself was on screen minutes later. A person can clear it in one click,
+                # so ask them — the window comes to the front and the extension watches the title
+                # for ten seconds (ADR 0027). Cleared means the article is there; not cleared
+                # means this read stops, and a batch skips the publisher (plan 2026-11-26 §三).
                 self._page_cache_put(target, {"status": "blocked", "title": wall_title})
+                gate = self._await_gate_clear(publisher, spec)
+                if not gate["cleared"]:
+                    return {
+                        "status": "blocked",
+                        "reason": "verification_timeout",
+                        "signal": f"title:{marker}",
+                        "doi": identifier,
+                        "publisher": publisher.name,
+                        "final_url": gate["url"] or final_url,
+                        "mhtml_path": None,
+                        "bytes": 0,
+                        "title": gate["title"] or wall_title,
+                        "action_required": "manual_verification",
+                        "quota_charged": _charged_units(outcomes),
+                        "quota_reason": "challenge",
+                        "next": (
+                            "the verification page did not clear in ten seconds: solve it in the "
+                            "browser, then ask again (or call `snapshot` yourself once you have), "
+                            "or skip this publisher for now."
+                        ),
+                    }
             # Publisher article bodies render after the load event: capturing straight after
             # `goto` returned 1.8 KB of "Highlights" from a ScienceDirect article page that
             # was fully accessible (0.12.59, real run after signing in).

@@ -57,6 +57,9 @@ ALLOWED_KEYS: dict[str, frozenset[str]] = {
     # No parameters for a capture; `token`/`offset` read the bytes back in chunks, because
     # the browser's download manager blocks every `.mhtml` it writes (ADR 0018).
     "snapshot": frozenset({"token", "offset", "tab"}),
+    # Waiting for a person: the markers to watch for and the two budgets. Nothing here makes a
+    # request — the extension polls `tabs.get().title` (ADR 0027).
+    "await_gate_clear": frozenset({"halt_titles", "halt_url_markers", "timeout_ms", "poll_ms"}),
 }
 
 WAIT_STATES = frozenset({"visible", "hidden"})

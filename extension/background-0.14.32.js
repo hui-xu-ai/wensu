@@ -719,6 +719,47 @@ async function onHostMessage(message, channel) {
       return;
     }
 
+    if (action === "await_gate_clear") {
+      // Waiting for the person to clear a verification page (ADR 0027). It issues no request:
+      // the loop reads the tab's title, which the browser already knows. `wait_for` cannot do
+      // this — the content script is only injected into the channels' domains, so on a publisher
+      // page it has no receiver and could only time out (audit 2026-11-26, F08).
+      const markers = gateMarkers(params || {});
+      const budget = Math.max(1_000, Number((params && params.timeout_ms) || 10_000));
+      const poll = Math.max(500, Math.min(5_000, Number((params && params.poll_ms) || 2_000)));
+      const tabId = boundTabId !== null ? boundTabId : (await activeTab())?.id;
+      if (!tabId) throw new Error("no_active_tab");
+      // A person has to look at it, so bring it into view once: a minimized window is a gate
+      // nobody can click.
+      const current = await chrome.tabs.get(tabId).catch(() => null);
+      if (current && Number.isInteger(current.windowId)) {
+        await within(chrome.windows.update(current.windowId, { state: "maximized" }), 1_500).catch(
+          () => null,
+        );
+        await within(chrome.tabs.update(tabId, { active: true }), 1_500).catch(() => null);
+      }
+      const deadline = Date.now() + budget;
+      let last = current;
+      let cleared = false;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, poll));
+        last = await chrome.tabs.get(tabId).catch(() => null);
+        if (!looksLikeGate(last, markers)) {
+          cleared = true;
+          break;
+        }
+      }
+      return reply({
+        ok: true,
+        data: {
+          cleared,
+          url: (last && last.url) || "",
+          title: (last && last.title) || "",
+          ...(cleared ? {} : { reason: "verification_timeout" }),
+        },
+      });
+    }
+
     if (action === "goto") {
       // `open: "new"` opens a separate tab for this navigation; the next `goto` blanks it
       // (`close: "disposable"`) and continues in it, so a caller can chain two navigations

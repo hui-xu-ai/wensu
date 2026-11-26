@@ -432,6 +432,7 @@ def test_a_gate_title_on_a_page_that_is_not_a_wall_is_not_a_wall(tmp_path: Path)
         [
             [
                 _goto_at(ACS_ARTICLE, "请稍候…", halted=True),
+                *_cleared_steps(ACS_ARTICLE, "A paper"),
                 {"verb": "sleep", "data": {"ms": 1}},
                 _reply_at(BODY_HTML, ACS_ARTICLE, "A paper"),
             ]
@@ -467,29 +468,29 @@ def test_a_gate_title_that_never_clears_is_still_a_wall(tmp_path: Path) -> None:
 
 
 def _wall_steps(url: str, title: str = "请稍候…") -> list[dict[str, object]]:
-    """The settle and the capture that follow a gate title: the capture decides, not the title.
+    """What follows a gate title: one bounded wait for the person, which does not clear.
 
-    A gate title is a claim about the tab at the instant `goto` returned. The capture is free
-    and `_snapshot_locked` throws a wall's bytes away, so the page itself is the verdict
-    (audit 2026-11-26, F08: no `wait_for`, because the content script is not injected on
-    publisher domains).
+    The kernel brings the window forward and asks the extension to watch the tab title for ten
+    seconds (ADR 0027). Nothing is captured here on purpose: an uncleared gate stops the read.
     """
 
-    wall = b"<html>please wait</html>"
     return [
-        {"verb": "sleep", "data": {"ms": 1}},
         {
-            "verb": "snapshot",
+            "verb": "await_gate_clear",
             "data": {
-                "token": "t1",
-                "total": len(wall),
-                "base64": base64.b64encode(wall).decode("ascii"),
+                "cleared": False,
                 "url": url,
                 "title": title,
-                "captcha_visible": False,
+                "reason": "verification_timeout",
             },
-        },
+        }
     ]
+
+
+def _cleared_steps(url: str, title: str = "请稍候…") -> list[dict[str, object]]:
+    """The same wait, but the person clicked: the article is on screen now."""
+
+    return [{"verb": "await_gate_clear", "data": {"cleared": True, "url": url, "title": title}}]
 
 
 def test_a_plain_title_that_merely_mentions_the_marker_is_not_a_wall() -> None:
