@@ -366,6 +366,50 @@ after(仓库代码):        total null, fetched 50, returned 5, truncated null, 
 
 **注意**：这一轮改动**没有**进已发布的 0.14.27（那是上一批），需要随 0.14.28 一起发。
 
+---
+
+# P1-4 结果：落地页只给摘要（2026-11-26，第四轮）
+
+**验证档位：单元测试 + 真实产物上的解析验证**；ACS 现场验收被真墙挡住，未重试（见"未完成"）。
+
+## 与报告建议不同的做法（有意偏离）
+
+报告建议两条路：①内置各社 URL 模板（ACS `/doi/full/`、Wiley `/doi/full/`、RSC `articlehtml`）并在判定失败时**自动重试**；②提供 `view` 参数。
+
+我选了②，并换掉了①的机制：
+
+* **不做模板表**：URL 形状会随出版社改版漂移，维护一张表等于埋一排会过期的常量。
+* **改为读页面自己声明的地址**：`<meta name="citation_fulltext_html_url">`。这是出版社（Highwire 系）本来就在页面里写的机器可读事实 —— **实测 5 份真实 Wiley 抓取全部命中**：
+
+```text
+A-Multifunctional-Ionograsper-…   doi=10.1002/adma.74981    https://onlinelibrary.wiley.com/doi/full/10.1002/adma.74981
+Acid-Controlled-Synthesis-of-…    doi=10.1002/chem.201901671 https://onlinelibrary.wiley.com/doi/full/10.1002/chem.201901671
+Ag2Au50PET36-Nanoclusters…        doi=10.1002/anie.202005087 https://onlinelibrary.wiley.com/doi/full/10.1002/anie.202005087
+```
+
+* **不做自动重试**：多一次导航就是多一份额度与多一次撞墙机会，什么时候付这笔钱应该由调用方决定。
+
+## 实现
+
+| 改动 | 位置 |
+|---|---|
+| `pageprobe.meta_content()` 通用化；新增 `citation_fulltext_url()` | `pageprobe.py:117-160` |
+| `read_page(..., view="landing"\|"full")`：落地页抓完若分类不是 `ok` 且页面声明了**不同**的全文地址，就**再导航一次**并重抓 | `service.py:_read_page`、`service.py:_follow_fulltext` |
+| `_follow_fulltext()`：最多一次；撞墙 / 标题像墙 / 抓取被判 blocked / 重抓后仍不是 `ok` ⇒ 一律放弃，保留第一次的诚实答案 | `service.py:_follow_fulltext` |
+| 响应新增 `view_applied`（第二次看有没有成功）与 `fulltext_url`（试了哪个地址） | `service.py`、`server.py` |
+| 工具参数 + 文档 + `schemas/tools.json` 重生成 | `server.py` |
+
+## 测试
+
+- `test_view_full_follows_the_pages_own_fulltext_url`：落地页（abstract_only）声明全文地址 ⇒ `view="full"` 时第二次导航，`status ok`、`view_applied true`、`quota_charged 2`（两次导航，抓取免费）。
+- `test_the_default_view_navigates_once_even_when_the_page_names_a_fulltext_url`：默认 `landing` ⇒ 不跟随，`no_html`、`view_applied false`、`quota_charged 1`。
+- `release-check` 10 门 PASS。
+
+## 未完成 / 残留
+
+1. **ACS 现场验收没做成**：对报告里那份摘要落地页（`10.1021/acs.inorgchem.1c03019`）实测时，ACS 又起了 Cloudflare 挑战（第一次 `blocked / quota 1`，第二次走 open-tab 分支 `0 额度`）。按"遇风控即停"**没有重试**。等风控过去后由一次 `page_read(doi=…, view="full")` 即可验收。
+2. **RSC 的 `articlehtml` 形态没有样本**：机制上不依赖模板（读 meta 即可），所以不需要为它写常量，但也没有真实样本证明 RSC 页面声明了该 meta。
+
 
 
 

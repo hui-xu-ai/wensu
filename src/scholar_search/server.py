@@ -846,7 +846,9 @@ def build_server(service: ScholarService) -> FastMCP:
             return _payload(error if isinstance(error, Exception) else ValueError("bad record"))
 
     @mcp.tool()
-    def page_read(url: str = "", doi: str = "", refresh: bool = False) -> dict[str, Any]:
+    def page_read(
+        url: str = "", doi: str = "", refresh: bool = False, view: str = "landing"
+    ) -> dict[str, Any]:
         """Open a publisher article page and say whether it holds the full text.
 
         Give `doi` (preferred — it also decides the publisher) or an article `url`. The
@@ -878,10 +880,16 @@ def build_server(service: ScholarService) -> FastMCP:
         `refresh: true` ignores a cached capture and navigates again — use it when the caller has
         independent evidence the cached verdict is wrong (the reader can see the article in that
         window). It costs another navigation, so it is off by default.
+
+        `view: "full"` reads the landing page, then follows the page's own
+        `citation_fulltext_html_url` once more when the landing page holds no body — ACS lands on
+        an abstract-only tab and only injects the article in its full-text view. That is a second
+        navigation (one more quota unit) and it is opt-in; `view_applied` says whether the second
+        look produced the article, and `fulltext_url` names the address that was tried.
         """
 
         try:
-            return service.read_page(url=url, doi=doi, refresh=refresh)
+            return service.read_page(url=url, doi=doi, refresh=refresh, view=view)
         except (RiskBlocked, ScholarSearchError, OSError, ValueError) as error:
             return _payload(error)
 

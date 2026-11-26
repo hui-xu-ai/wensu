@@ -134,6 +134,23 @@ _META_TAG = re.compile(r"<meta\b[^>]*>", re.IGNORECASE)
 _META_CONTENT = re.compile(r"""content\s*=\s*["']([^"']*)""", re.IGNORECASE)
 
 
+def meta_content(markup: str, name: str) -> str:
+    """The `content` of the page's own `<meta name="…">`, or "".
+
+    Publishers print facts about the page in machine-readable tags. Reading the page's own claim
+    is how a capture can be identified without trusting the tab's address, and how a full-text
+    view can be found without hard-coding one URL shape per publisher.
+    """
+
+    for tag in _META_TAG.findall(markup):
+        if name not in tag.casefold():
+            continue
+        found = _META_CONTENT.search(tag)
+        if found:
+            return found.group(1).strip()
+    return ""
+
+
 def citation_doi(path: Path) -> str:
     """The DOI the page says it is, from its own `<meta name="citation_doi">`, or "".
 
@@ -146,13 +163,23 @@ def citation_doi(path: Path) -> str:
         raw = _html_of(path)
     except OSError:
         return ""
-    for tag in _META_TAG.findall(raw):
-        if "citation_doi" not in tag.casefold():
-            continue
-        found = _META_CONTENT.search(tag)
-        if found:
-            return found.group(1).strip()
-    return ""
+    return meta_content(raw, "citation_doi")
+
+
+def citation_fulltext_url(path: Path) -> str:
+    """The page's own full-text HTML address, from `<meta name="citation_fulltext_html_url">`.
+
+    Nearly every Highwire-style publisher prints it (measured 2026-11-26 on a Wiley page:
+    `https://onlinelibrary.wiley.com/doi/full/10.1002/chem.201901671`). A landing page that only
+    shows the abstract therefore carries the address of the view that has the body — a per-page
+    fact, which beats a per-publisher URL template table that has to be guessed and maintained.
+    """
+
+    try:
+        raw = _html_of(path)
+    except OSError:
+        return ""
+    return meta_content(raw, "citation_fulltext_html_url")
 
 
 SECTION_MARKERS: tuple[str, ...] = ('class="section-title"', "<section id=")

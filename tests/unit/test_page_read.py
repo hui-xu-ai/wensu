@@ -95,6 +95,123 @@ def write_mhtml(path: Path, html: str) -> Path:
     return path
 
 
+def test_view_full_follows_the_pages_own_fulltext_url(tmp_path: Path) -> None:
+    """A landing page that shows only the abstract often names the view that has the body.
+
+    ACS lands on `/jacsat/article/…` with the Abstract tab active and injects the article only in
+    its full-text view (2026-11-26 report P1-4). The address comes from the page's own
+    `<meta name="citation_fulltext_html_url">`, so no per-publisher template table is needed.
+    """
+
+    landing = (
+        "<!DOCTYPE html><html><head>"
+        '<meta name="citation_fulltext_html_url" content="https://pubs.acs.org/doi/full/10.1021/jacs.6c13448"/>'
+        "</head><body><h1>A paper</h1>"
+        '<section id="a1"><h2>Abstract</h2><p>Short teaser only, no body.</p></section>'
+        "</body></html>"
+    )
+    full = (
+        "<!DOCTYPE html><html><body><h1>A paper</h1>"
+        '<section id="s1"><h2>1. Introduction</h2><p>Body text a reader came for.</p></section>'
+        "</body></html>"
+    )
+    landing_blob = write_mhtml(tmp_path / "landing.mhtml", landing).read_bytes()
+    full_blob = write_mhtml(tmp_path / "full.mhtml", full).read_bytes()
+
+    def reply(blob: bytes, url: str, title: str) -> dict[str, object]:
+        return {
+            "verb": "snapshot",
+            "data": {
+                "token": "t1",
+                "total": len(blob),
+                "base64": base64.b64encode(blob).decode("ascii"),
+                "url": url,
+                "title": title,
+                "captcha_visible": False,
+            },
+        }
+
+    service = build_service(
+        tmp_path,
+        [
+            [
+                {"verb": "goto", "data": {"url": "https://doi.org/10.1021/jacs.6c13448"}},
+                {"verb": "sleep", "data": {"ms": 1}},
+                reply(landing_blob, "https://pubs.acs.org/doi/10.1021/jacs.6c13448", "A paper"),
+                # the abstract page triggers one extra look at the same tab
+                {"verb": "sleep", "data": {"ms": 1_500}},
+                reply(landing_blob, "https://pubs.acs.org/doi/10.1021/jacs.6c13448", "A paper"),
+                {
+                    "verb": "goto",
+                    "data": {"url": "https://pubs.acs.org/doi/full/10.1021/jacs.6c13448"},
+                },
+                reply(full_blob, "https://pubs.acs.org/doi/full/10.1021/jacs.6c13448", "A paper"),
+            ]
+        ],
+    )
+
+    result = service.read_page(doi="10.1021/jacs.6c13448", view="full")
+
+    assert result["status"] == "ok", result
+    assert result["view_applied"] is True, result
+    assert result["fulltext_url"] == "https://pubs.acs.org/doi/full/10.1021/jacs.6c13448"
+    # Two navigations ran; the captures are free.
+    assert result["quota_charged"] == 2, result
+
+
+def test_the_default_view_navigates_once_even_when_the_page_names_a_fulltext_url(
+    tmp_path: Path,
+) -> None:
+    """Opt-in, because the second look costs a navigation."""
+
+    landing = (
+        "<!DOCTYPE html><html><head>"
+        '<meta name="citation_fulltext_html_url" content="https://pubs.acs.org/doi/full/x"/>'
+        "</head><body><h1>A paper</h1>"
+        '<section id="a1"><h2>Abstract</h2><p>Short teaser only, no body.</p></section>'
+        "</body></html>"
+    )
+    blob = write_mhtml(tmp_path / "landing.mhtml", landing).read_bytes()
+    service = build_service(
+        tmp_path,
+        [
+            [
+                {"verb": "goto", "data": {"url": "https://doi.org/10.1021/jacs.6c13448"}},
+                {"verb": "sleep", "data": {"ms": 1}},
+                {
+                    "verb": "snapshot",
+                    "data": {
+                        "token": "t1",
+                        "total": len(blob),
+                        "base64": base64.b64encode(blob).decode("ascii"),
+                        "url": "https://pubs.acs.org/doi/10.1021/jacs.6c13448",
+                        "title": "A paper",
+                        "captcha_visible": False,
+                    },
+                },
+                {"verb": "sleep", "data": {"ms": 1_500}},
+                {
+                    "verb": "snapshot",
+                    "data": {
+                        "token": "t1",
+                        "total": len(blob),
+                        "base64": base64.b64encode(blob).decode("ascii"),
+                        "url": "https://pubs.acs.org/doi/10.1021/jacs.6c13448",
+                        "title": "A paper",
+                        "captcha_visible": False,
+                    },
+                },
+            ]
+        ],
+    )
+
+    result = service.read_page(doi="10.1021/jacs.6c13448")
+
+    assert result["status"] == "no_html", result
+    assert result["view_applied"] is False, result
+    assert result["quota_charged"] == 1, result
+
+
 def test_doi_prefixes_map_to_the_right_publisher() -> None:
     assert publisher_for_doi("10.1016/j.cej.2023.145123").name == "elsevier"  # type: ignore[union-attr]
     assert publisher_for_doi("https://doi.org/10.1038/s41586-024-00001-0").name == "nature"  # type: ignore[union-attr]

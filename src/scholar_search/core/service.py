@@ -44,7 +44,7 @@ from .errors import (
 from .export import to_csv, to_endnote, to_markdown, to_ris
 from .locking import interprocess_lock
 from .page_nav import article_navigation
-from .pageprobe import challenge_in_title, citation_doi, classify_mhtml
+from .pageprobe import challenge_in_title, citation_doi, citation_fulltext_url, classify_mhtml
 from .planner import Planner
 from .policy import NETWORK_VERBS, PolicyEngine
 from .publishers import PUBLISHERS, Publisher, publisher_for_doi, publisher_for_host
@@ -865,7 +865,44 @@ class ScholarService:
             "halt_titles": list(RISK_TITLE_MARKERS),
         }
 
-    def read_page(self, *, url: str = "", doi: str = "", refresh: bool = False) -> dict[str, Any]:
+    def _follow_fulltext(
+        self, url: str, publisher: Publisher, spec: ChannelSpec
+    ) -> tuple[dict[str, Any], dict[str, Any], str, Sequence[ActionOutcome]] | None:
+        """One navigation to the page's own full-text view. None when it did not help.
+
+        Called only for an explicit `view="full"`, and only when the captured page named a
+        different address for its body. A wall, a render that never finishes, or a page that is
+        still not the article all mean "no benefit": the first (honest) answer stands, and the
+        caller is told it stands in `view_applied`.
+        """
+
+        try:
+            outcomes = self._run(
+                Plan(
+                    channel=f"page:{publisher.name}",
+                    purpose="detail",
+                    actions=article_navigation(self, url, publisher),
+                ),
+                spec,
+            )
+        except RiskBlocked:
+            return None
+        final_url = outcomes[-1].url or url
+        last = outcomes[-1].data if isinstance(outcomes[-1].data, dict) else {}
+        title = last.get("title") if isinstance(last.get("title"), str) else ""
+        if last.get("halted") is not False and challenge_in_title(str(title)):
+            return None
+        saved = self._snapshot_locked(tab="work")
+        if saved.get("status") == "blocked":
+            return None
+        probe = _classify_saved(saved, url=final_url)
+        if probe.get("status") != "ok":
+            return None
+        return saved, probe, final_url, outcomes
+
+    def read_page(
+        self, *, url: str = "", doi: str = "", refresh: bool = False, view: str = "landing"
+    ) -> dict[str, Any]:
         """`_read_page`, plus the one field a caller should branch on: `full_text`.
 
         The 2026-11-26 report found the same `status: "no_html"` standing for a paywall, a
@@ -876,11 +913,17 @@ class ScholarService:
         `refresh` skips the capture cache and navigates again. It is explicit and off by default
         because navigating again is what replaced a good capture with a wall once already
         (2026-11-24, report D1/D2).
+
+        `view="full"` follows the page's own `citation_fulltext_html_url` one extra time when the
+        landing page holds no body. It costs a navigation, so it is off by default; `view_applied`
+        says whether the second look produced the article.
         """
 
-        return _page_full_text(self._read_page(url=url, doi=doi, refresh=refresh))
+        return _page_full_text(self._read_page(url=url, doi=doi, refresh=refresh, view=view))
 
-    def _read_page(self, *, url: str = "", doi: str = "", refresh: bool = False) -> dict[str, Any]:
+    def _read_page(
+        self, *, url: str = "", doi: str = "", refresh: bool = False, view: str = "landing"
+    ) -> dict[str, Any]:
         """Open the article a reader asked for, then say what is on it.
 
         One navigation: the article URL is opened directly — a deep link, the
@@ -1111,6 +1154,23 @@ class ScholarService:
                     "next": _page_next({"status": "blocked", "reason": "challenge"}),
                 }
 
+            # A landing page that shows only the abstract often carries the address of the view
+            # that holds the body (`citation_fulltext_html_url`) — ACS lands on
+            # `/jacsat/article/…` and injects the body only on "Full Text" (2026-11-26 report
+            # P1-4). This is opt-in because it costs another navigation: a caller that wants the
+            # body asks for `view="full"` and pays for the second look.
+            view_applied = False
+            fulltext_declared = ""
+            if view == "full" and readable.is_file():
+                fulltext_declared = citation_fulltext_url(readable)
+                if fulltext_declared and fulltext_declared != final_url:
+                    follow = self._follow_fulltext(fulltext_declared, publisher, spec)
+                    if follow is not None:
+                        saved, probe, final_url, extra = follow
+                        outcomes = (*outcomes, *extra)
+                        readable = Path(str(saved.get("path") or ""))
+                        view_applied = probe.get("status") == "ok"
+
             result = {
                 **probe,
                 "doi": identifier,
@@ -1127,6 +1187,8 @@ class ScholarService:
                 # the live ledger and in `policy.py:354`).
                 "quota_charged": _charged_units(outcomes),
                 "quota_reason": "navigate",
+                "view_applied": view_applied,
+                "fulltext_url": fulltext_declared or None,
                 "next": _page_next(probe),
             }
             if probe.get("status") == "ok":
