@@ -228,6 +228,27 @@ $env:TEMP=$env:TMP=$env:TMPDIR="D:\Python\DeepSeek\DateWork\.tmp"; $env:PYTHONPA
 - `test_a_long_document_in_one_section_says_the_split_failed`：长文单节 ⇒ `sections_total ≤ 2` 且 warnings 含"章节不足"。
 - 全量 `pytest tests/unit` 通过（606 passed）。
 
+---
+
+# 真实链路复验（2026-11-26，仓库代码 + 正在运行的浏览器）
+
+**做法**：`SCHOLAR_SEARCH_HOME=…\wensu-test-home` + `PYTHONPATH=src`（复刻 HANDOFF 的真机套路），复制运行中宿主发布的桥接端点，**不启动第二个宿主**。额度记在隔离家里，**用户额度未消耗**（仍 298）。
+
+## 结果（三条都符合预期）
+
+| 观察 | 说明 |
+|---|---|
+| 第一次 `page_read(10.1021/jacs.4c07518)` → `blocked`，`signal=title:请稍候`，`final_url` 是文章 URL（同源），`quota_charged: 1` | 真墙（Cloudflare 中间页）**如实拦下**；T1 的同源规则没有把真墙放过，报价 1 也与"只跑了一次 goto"一致 |
+| 等 15 s（挑战页自清）后 `page_read` → **`ok`**，`full_text: true`，`captured_url` = 文章 URL，`bytes 4,807,928`，`quota_charged: 2` | T2 的 `full_text`、T3 的 `captured_url` 在真实返回里成立 |
+| 同一份抓取 `page2md` → `bytes_md 61,272`，`engine: sections`，warnings 含**新的"正文章节不足"** | T6 的告警在真实页面上真的出现 |
+
+## 复验发现的一条新事实（记为 TODO，不在本轮修）
+
+**0 额度的 open-tab 复用对 ACS 这类站点实际不生效**：`service.py:936` 的复用判据是 `identifier in open_tab["url"]`，而 ACS 的落地 URL 是 `/jacsat/article/146/41/28131/...`，**不含 DOI**。于是即使人已经把文章摊在屏幕上，读取仍会重新导航（2 额度）并可能再次撞墙。本次实测就是这样：上一个答案已经写了墙标记，15 s 后那次调用仍然重新导航。
+
+修法（下一轮）＝把复用判据从"URL 含 DOI"放宽到"同域名 + 抓到的页面自证是文章（`full_text` 或 `prose_words` 达标）"，同时保留 T3 的同源校验。这属于策略变更（放宽复用＝放宽"只读眼前这一页"的边界），建议单独一轮 + 真实样本推演，不塞进本轮。
+
+
 
 
 
