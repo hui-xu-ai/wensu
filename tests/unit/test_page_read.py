@@ -621,6 +621,62 @@ def test_a_stopped_first_navigation_reports_one_unit(
     assert result["quota_charged"] == 1, result
 
 
+def test_every_answer_says_where_it_stopped(tmp_path: Path) -> None:
+    """`job_id` + `terminal` + `stage` + `evidence`: the caller should not have to infer.
+
+    These four fields are what the batch skill branches on — "did it succeed, and if not, at
+    which step" — so an answer without them is a caller guessing from a status string.
+    """
+
+    html = (
+        "<html><body><article><h1>A paper</h1><section id='s1'>"
+        "<h2>1. Introduction</h2><p>Body text a reader came for, long enough to count.</p>"
+        "</section></article></body></html>"
+    )
+    blob = write_mhtml(tmp_path / "page.mhtml", html).read_bytes()
+    service = build_service(
+        tmp_path,
+        [
+            [
+                {"verb": "goto", "data": {"url": "https://pubs.acs.org/doi/10.1021/jacs.6c13450"}},
+                {"verb": "sleep", "data": {"ms": 1}},
+                {
+                    "verb": "snapshot",
+                    "data": {
+                        "token": "t1",
+                        "total": len(blob),
+                        "base64": base64.b64encode(blob).decode("ascii"),
+                        "url": "https://pubs.acs.org/doi/10.1021/jacs.6c13450",
+                        "title": "A paper",
+                        "captcha_visible": False,
+                    },
+                },
+            ]
+        ],
+    )
+
+    ok = service.read_page(doi="10.1021/jacs.6c13450")
+
+    assert ok["terminal"] == "ok", ok
+    assert ok["stage"] == "publish", ok
+    assert ok["job_id"], ok
+    assert ok["evidence"]["title"] == "A paper", ok["evidence"]
+    assert "mhtml_path" not in ok["evidence"], "evidence quotes observations, not paths"
+
+
+def test_a_wall_answer_says_it_stopped_at_the_wall(tmp_path: Path) -> None:
+    from test_page_read_wall import _goto, _wall_steps
+
+    step_url = "https://onlinelibrary.wiley.com/doi/10.1002/pen.23634"
+    service = build_service(tmp_path, [[*_goto("请稍候…"), *_wall_steps(step_url)]])
+
+    blocked = service.read_page(doi="10.1002/pen.23634")
+
+    assert blocked["terminal"] == "blocked", blocked
+    assert blocked["stage"] == "wall", blocked
+    assert blocked["full_text"] is False
+
+
 def test_doi_prefixes_map_to_the_right_publisher() -> None:
     assert publisher_for_doi("10.1016/j.cej.2023.145123").name == "elsevier"  # type: ignore[union-attr]
     assert publisher_for_doi("https://doi.org/10.1038/s41586-024-00001-0").name == "nature"  # type: ignore[union-attr]

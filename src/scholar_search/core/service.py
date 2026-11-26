@@ -13,6 +13,7 @@ import math
 import os
 import re
 import time
+import uuid
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, suppress
 from dataclasses import dataclass, replace
@@ -138,6 +139,73 @@ def _network_actions(actions: Sequence[Action]) -> int:
     """How many of these actions the policy would bill: one unit per network verb that runs."""
 
     return sum(1 for action in actions if action.verb in NETWORK_VERBS)
+
+
+def _page_stage(payload: dict[str, Any]) -> str:
+    """Which step the read stopped at: `cache|navigate|wall|capture|identity|publish`.
+
+    Derived from the answer's own fields, so every exit is covered without each exit having to
+    remember to label itself — the failure mode this field exists to prevent.
+    """
+
+    if payload.get("cached"):
+        return "cache"
+    status = str(payload.get("status") or "")
+    reason = str(payload.get("reason") or "")
+    if status == "blocked" or reason == "challenge":
+        return "wall"
+    if reason == "capture_mismatch":
+        return "identity"
+    if status == "unsupported_site":
+        return "navigate"
+    if status == "ok":
+        return "publish" if payload.get("mhtml_path") else "capture"
+    if status == "no_page":
+        return "navigate"
+    return "capture" if payload.get("mhtml_path") else "render"
+
+
+def _page_terminal(payload: dict[str, Any]) -> str:
+    """One word for how the read ended, so a caller branches on it instead of on a status.
+
+    `ok` — the body was read; `partial` — a page was read but not the article's body;
+    `blocked` — a human has to act; `timeout` / `no_page` / `unsupported_site` as they say.
+    """
+
+    status = str(payload.get("status") or "")
+    reason = str(payload.get("reason") or "")
+    code = str(payload.get("code") or "")
+    if status == "ok":
+        return "ok"
+    if status == "blocked" or "RISK_" in code:
+        return "timeout" if reason == "verification_timeout" else "blocked"
+    if "timeout" in reason or "timeout" in code.casefold():
+        return "timeout"
+    if status == "unsupported_site":
+        return "unsupported_site"
+    if status == "no_page":
+        return "no_page"
+    return "partial"
+
+
+def _page_evidence(payload: dict[str, Any]) -> dict[str, Any]:
+    """What was observed, quoted rather than summarised — the answer to "why did it stop?"."""
+
+    evidence: dict[str, Any] = {}
+    for key in (
+        "title",
+        "captured_url",
+        "final_url",
+        "declared_doi",
+        "identity",
+        "prose_words",
+        "sections",
+        "navigation_attempts",
+    ):
+        value = payload.get(key)
+        if value not in (None, "", 0):
+            evidence[key] = value
+    return evidence
 
 
 def _page_full_text(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1065,9 +1133,20 @@ class ScholarService:
         `view="full"` follows the page's own `citation_fulltext_html_url` one extra time when the
         landing page holds no body. It costs a navigation, so it is off by default; `view_applied`
         says whether the second look produced the article.
+
+        `job_id`, `terminal`, `stage` and `evidence` are what a caller reads to know *where* the
+        read stopped, instead of inferring it from a status string: `stage` names the step
+        (`navigate`/`wall`/`render`/`capture`/`identity`/`publish`) and `evidence` quotes what was
+        actually observed at that step.
         """
 
-        return _page_full_text(self._read_page(url=url, doi=doi, refresh=refresh, view=view))
+        job_id = uuid.uuid4().hex[:12]
+        answer = self._read_page(url=url, doi=doi, refresh=refresh, view=view)
+        answer["job_id"] = job_id
+        answer["stage"] = _page_stage(answer)
+        answer["evidence"] = _page_evidence(answer)
+        answer["terminal"] = _page_terminal(answer)
+        return _page_full_text(answer)
 
     def _read_page(
         self, *, url: str = "", doi: str = "", refresh: bool = False, view: str = "landing"
