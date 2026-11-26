@@ -36,6 +36,46 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.31] - 2026-11-26
+
+0.14.30 的导航/并发评估（`docs/reviews/wensu-0.14.30-navigation-concurrency-2026-11-26.md`）发现的
+两条 P1，加上并发与归属方面的两处收紧。
+
+### Fixed — a reference's DOI was reported as the article's own
+
+`meta_content` asked whether the wanted field name appeared *anywhere* in a `<meta>` tag. MDPI
+prints `citation_reference` tags whose content quotes `citation_doi=…`, so the reference won and
+the page declared a Nano Letters DOI: `declared_doi` was a whole bibliographic description, and
+the read was then — correctly, but for the wrong reason — refused as "another article" (measured
+on `10.3390/s26041303`). Only `<head>` is read now, and the `name` attribute must match exactly.
+
+### Fixed — an article with no section containers converted to almost nothing
+
+ACS prints its body in none of the shapes the section walk recognises, and `trafilatura` is an
+optional dependency the default install does not have: a 3,626-word capture became 44 bytes of
+body plus "Supporting Information", with `status: ok` and one MathJax warning. Two changes:
+
+* a fallback that needs no containers — headings and paragraphs straight from the document,
+  used only when the walk produced almost nothing (`engine: "paragraphs"`);
+* `meta.json` now carries `coverage: {source_words, extracted_words, ratio}`, and a conversion
+  that kept less than 30 % of the source says so in `warnings`. A call that succeeds is not the
+  same as an article that arrived.
+
+### Fixed — two readers of the same page each paid for it
+
+The cache was checked before the browser lock, so a second request that queued behind the first
+navigated all over again: two answers, four units, neither `cached` (offline concurrency test).
+It is checked again once the lock is held.
+
+### Fixed — a capture was accepted from any subdomain of the same public suffix
+
+The identity check derived "same organisation" from the last two labels, which made
+`unrelated.edu.cn` a sibling of `whxb.pku.edu.cn`. Only a subdomain of a *curated* domain is a
+mirror now; a publisher whose mirrors live elsewhere needs an entry in `publishers.py`, not a
+guess about public suffixes.
+
+`background-0.14.31.js`, as the cache-busting rule requires (worker unchanged since 0.14.29).
+
 ## [0.14.30] - 2026-11-26
 
 复验 0.14.29（`docs/reviews/wensu-retest-0.14.29-2026-11-26.md`）发现的残留。两条是 0.14.29 自己引入的。
