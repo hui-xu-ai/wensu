@@ -82,7 +82,13 @@ def test_a_wall_answer_is_small_and_says_nothing_else(tmp_path: Path) -> None:
 
     url = "https://onlinelibrary.wiley.com/doi/10.1002/pen.23634"
     service = build_service(
-        tmp_path, [[{"verb": "goto", "data": {"url": url, "title": "请稍候…"}}]]
+        tmp_path,
+        [
+            [
+                {"verb": "goto", "data": {"url": url, "title": "请稍候…"}},
+                {"verb": "wait_for", "ok": False, "error": "action.timeout"},
+            ]
+        ],
     )
 
     _assert_budget("page_read.blocked", service.read_page(doi="10.1002/pen.23634"))

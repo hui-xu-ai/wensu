@@ -182,6 +182,11 @@ _PAGE_SLUG_CHARS = 60
 # change meaning: entries stamped with an older value are not served, so a fix takes effect
 # without asking the reader to clear anything. Pre-existing entries carry no stamp at all.
 _PAGE_JUDGE_REV = 1
+# A gate title is not a verdict: ACS clears its interstitial in tens of seconds (measured
+# 2026-11-26), so the article gets this long to announce itself before the wall stands. `wait_for`
+# is not a network verb, so the wait is free.
+_GATE_WAIT_MS = 12_000
+_ARTICLE_META_SELECTOR = 'meta[name="citation_doi"]'
 
 
 def _page_dir_slug(meta: dict[str, str]) -> str:
@@ -865,6 +870,36 @@ class ScholarService:
             "halt_titles": list(RISK_TITLE_MARKERS),
         }
 
+    def _waited_out_gate(self, publisher: Publisher, spec: ChannelSpec) -> bool:
+        """Give a gate title up to twelve seconds to turn out to be an interstitial. Free.
+
+        Measured 2026-11-26 on ACS: a navigation answered with Cloudflare's 「请稍候…」 and the
+        article itself was on screen minutes later — reporting a wall at the instant `goto`
+        returned called a readable page a challenge (the report's N1). `wait_for` is not a
+        network verb, so waiting costs nothing; the article's own `citation_doi` is the signal
+        that the body arrived. Publishers that never print that tag keep the old behaviour: the
+        wait expires and the wall stands.
+        """
+
+        try:
+            outcomes = self._run(
+                Plan(
+                    channel=f"page:{publisher.name}",
+                    purpose="detail",
+                    actions=(
+                        Action(
+                            "wait_for",
+                            {"selector": _ARTICLE_META_SELECTOR, "timeout_ms": _GATE_WAIT_MS},
+                            timeout_ms=_GATE_WAIT_MS + 2_000,
+                        ),
+                    ),
+                ),
+                spec,
+            )
+        except (ActionError, ScholarSearchError, RiskBlocked):
+            return False
+        return bool(outcomes) and all(outcome.ok for outcome in outcomes)
+
     def _follow_fulltext(
         self, url: str, publisher: Publisher, spec: ChannelSpec
     ) -> tuple[dict[str, Any], dict[str, Any], str, Sequence[ActionOutcome]] | None:
@@ -1084,6 +1119,9 @@ class ScholarService:
             if marker and not _page_evidence_site(
                 str(last.get("url") or final_url), publisher, identifier
             ):
+                marker = None
+            if marker and self._waited_out_gate(publisher, spec):
+                # The title was an interstitial on its way out: the article is here now.
                 marker = None
             if marker:
                 # Capturing the wall (the old order) cost a quota point, saved bytes that are

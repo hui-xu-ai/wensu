@@ -410,6 +410,44 @@ Ag2Au50PET36-Nanoclusters…        doi=10.1002/anie.202005087 https://onlinelib
 1. **ACS 现场验收没做成**：对报告里那份摘要落地页（`10.1021/acs.inorgchem.1c03019`）实测时，ACS 又起了 Cloudflare 挑战（第一次 `blocked / quota 1`，第二次走 open-tab 分支 `0 额度`）。按"遇风控即停"**没有重试**。等风控过去后由一次 `page_read(doi=…, view="full")` 即可验收。
 2. **RSC 的 `articlehtml` 形态没有样本**：机制上不依赖模板（读 meta 即可），所以不需要为它写常量，但也没有真实样本证明 RSC 页面声明了该 meta。
 
+---
+
+# 更正 + 补修：判墙的"标题采样时刻"仍未解决（2026-11-26，第五轮）
+
+## 先更正我的错误判断
+
+P1-4 验收时 ACS 返回 `blocked/challenge`，我在汇报里写成"**ACS 又撞真墙**"。**这是错的，而且是没有证据的断言**：我当时那个探针**没打印 `signal` 和 `title`**，只看到 `status: blocked` 就下了结论。用户当场指出"刚才没有撞墙"。
+
+复查证据（隔离家 `state/page-read.json` + `audit.jsonl`）：
+
+```text
+https://doi.org/10.1021/acs.inorgchem.1c03019  status=blocked title='请稍候…' at=15:37:44
+audit 15:37:44  page:acs detail goto ok=True        ← 只有一条 goto，没有 snapshot
+```
+
+即：一次导航后，`goto` 回来的标题是「请稍候…」，代码据此判墙、**没抓页面**就返回了；四分钟后的 `snapshot` 显示同一标签页是**正常文章**（`Hydrolysis-Promoted Building Block Assembly…`，4.6 MB）。
+⇒ Cloudflare 中间页是**暂态**的，而判定用的是 `goto` 返回**那一瞬**的标题。上一轮修的 `halted`（门标题是否持续 1.5 s）挡不住它：中间页确实持续了超过 1.5 s。
+
+## 补的修法：判墙前先免费等一等
+
+| 改动 | 位置 |
+|---|---|
+| 标题命中门规则且同源校验通过后，先跑一次 `wait_for('meta[name="citation_doi"]')`（**不是网络动作，免费**），最多 12 s；文章自己的元数据出现 ⇒ 不判墙，继续抓取 | `service.py:_waited_out_gate`、`:974-984`；常量 `_GATE_WAIT_MS`/`_ARTICLE_META_SELECTOR` |
+| 等待超时 / 报错 ⇒ 墙照旧成立（真墙只是多花 12 s，不多花额度） | 同上 |
+
+选 `citation_doi` 作信号的理由有实测支撑：ACS 那份真实抓取**声明了** `citation_doi = 10.1021/acs.inorgchem.1c03019`，而 Cloudflare 中间页不会有。
+
+## 验证
+
+- 新增 `test_a_gate_title_that_clears_while_we_wait_is_not_a_wall`（等到 ⇒ `ok`）与 `test_a_gate_title_that_never_clears_is_still_a_wall`（等不到 ⇒ `blocked`、`quota 1`、不落盘）。
+- 9 个旧夹具补上 `wait_for` 步骤（契约变了：判墙前多一个免费动作）；`pytest tests/unit` 全绿，`release-check` 10 门 PASS。
+- **真实链路**：同一 DOI 现在返回 `ok`、真实文章标题、`full_text true`、`4,347,351 B`、`quota 1`。
+  ⚠ 但这次**中间页没有复现**，`audit` 里没有 `wait_for` 记录 ⇒ **等待逻辑本身仍只有单测覆盖，未被真实中间页触发过**。要说它解决了"暂态墙"，还差一次撞上中间页的实测。
+
+## 顺带修正：P1-4 对 ACS 无效（不是 bug）
+
+ACS 页面声明 `citation_doi`，但**不声明** `citation_fulltext_html_url`；而 Wiley 的 5 份抓取都声明。所以 `view="full"` 只对 Wiley 这类页面有第二次机会；ACS 的落地页在有权限时本身就是全文（实测 4.3 MB、`prose_words` 数千），没有"摘要页 → 全文页"这一步。
+
 
 
 
