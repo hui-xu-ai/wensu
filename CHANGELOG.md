@@ -36,6 +36,48 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.28] - 2026-11-26
+
+### Fixed — Web of Science's `total` was the size of the export, not of the result set
+
+`search` answered `total: 50` for a topic with tens of thousands of hits. The number came from
+`parse_bibtex`, whose own comment said an export "never says how many the query matched" — the
+page path kept that shape anyway "because callers and the skill read it" (2026-11-26 report,
+P2-7). It now reports **no total at all**, and the answer carries the three numbers that can be
+read together:
+
+* `total` — what the site said it matched; `null` when the channel cannot learn it;
+* `fetched` — how many records the fetch actually brought back, before this tool's own filters;
+* `returned` — how many records this answer holds.
+
+`truncated` follows the fetch, not the answer (`fetched < total`), and is `null` when the total is
+unknown, so a local year filter no longer sends the caller to fetch what they already had.
+
+### Added — `effective_sort`, because `relevance` does not click anything
+
+`site_sort: "relevance"` takes no browser action: the channels cannot impose relevance, so the
+site's own order stands — and that order is often date-descending, which is why a "relevance"
+search came back as one year only (2026-11-26 report, P2-8). The answer now says which of the two
+happened: `sort_applied` and `effective_sort` (`site-default`, `date` or `citation`).
+
+### Added — `page_read(view="full")` follows the page's own full-text address
+
+ACS lands on an abstract tab and injects the article only in its full-text view (2026-11-26
+report, P1-4). Instead of a per-publisher URL template table that goes stale, the second look
+follows `<meta name="citation_fulltext_html_url">` — a fact the page prints about itself; every
+captured Wiley page carries it. Off by default, because it costs a navigation; `view_applied`
+says whether the second look produced the article and `fulltext_url` names what was tried.
+
+### Fixed — a gate title is not a verdict
+
+The wall was decided from the title the `goto` reply carried *at that instant*. Measured live on
+ACS: the title read 「请稍候…」 while the article was on screen minutes later, so a readable page
+was reported as a challenge. The gate title now gets a free twelve-second `wait_for` on the
+article's own `citation_doi` before the verdict — waiting is not a network action, so a real wall
+costs time and no quota, and an interstitial that clears costs nothing at all.
+
+`background-0.14.28.js`, as the cache-busting rule requires (worker unchanged).
+
 ## [0.14.27] - 2026-11-26
 
 ### Fixed — a wall is only claimed when the evidence belongs to this read
