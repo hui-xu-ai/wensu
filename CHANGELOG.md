@@ -36,6 +36,70 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.29] - 2026-11-26
+
+审计（`docs/reviews/wensu-audit-0.14.28-2026-11-26.md`，8 项 P1 + 6 项 P2）的修复版本。
+
+### Security — the converter could read and write outside the directories it was given
+
+* **F01** a local image reference was resolved and read wherever it pointed, so a synthetic page
+  could copy any file the process could read into `assets/`. Absolute paths, drive letters and
+  UNC names are refused, and the resolved target must stay inside the document's directory —
+  checked before any read.
+* **F02** an MHTML resource's file name came from its `Content-Location`, split on `/` only: on
+  Windows a backslash became a path component and the write landed outside `assets/`. Names are
+  content hashes now, and both write paths verify the resolved destination.
+* **F04** the native host turned "the caller specified domains that survive nothing" into "use
+  the default trusted list" (`effective or None`), which is the opposite of narrowing. It now
+  refuses with `policy.domains`.
+* **F11** a quota state file holding `used: -20` was read as-is, so `status` reported 320
+  remaining out of a 300 daily limit. Only a whole, non-negative count, a finite timestamp and a
+  real date are accepted; anything else is reported as corrupt, never as fresh quota.
+* **F12** an empty `http-token` file was accepted as the credential — every request that omitted
+  the header compared equal to `""`. An unusable token now refuses to start the transport.
+
+### Fixed — the page result could describe a page that was not the one asked for
+
+* **F05** a capture whose own `citation_doi` names a different article is now `no_page` /
+  `capture_mismatch`, and its bytes are deleted instead of cached as a success.
+* **F06** `source: "open-tab"` returned `full_text: true` for whatever the tab held as long as the
+  DOI matched. It runs the same classifier as the navigation path.
+* **F07** a full-text follow-up that hit a wall was folded into "no benefit", losing both the stop
+  and the charge. `RiskBlocked` propagates, the answer is `blocked`, and the cost follows the
+  ledger.
+* **F08** the gate-title wait was a `wait_for` on publisher pages, where no content script is
+  injected: it could only ever time out. The capture decides instead, and the wall's bytes are
+  discarded as before.
+* **F13** a cache hit dropped `captured_url`, `judge` and `prose_words`, and filled `final_url`
+  with the *requested* address. It now carries the same verdict the live answer carried, and a
+  timestamp from the future is treated as corrupt rather than fresh.
+
+### Fixed — one conversion could borrow another's sections
+
+* **F09** sections travelled through a module-level list that `convert` read after the extraction
+  returned, so two conversions in parallel produced one document's `page.md` next to the other
+  document's `index.json`. They are a return value now; the counters that remain module state are
+  used under a lock. A test that had been passing on the previous test's leftovers now provides
+  its own sections.
+* **F10** a second conversion into the same output kept the first run's figure, and two inline
+  resources with the same name resolved to one file. Local images are copied every time; inline
+  ones are content-addressed.
+
+### Added — the handshake says what is running, and a missing verb is refused before navigating
+
+* `hello_ack` now reports the running worker's `version`, `worker` file and its capabilities:
+  the verbs the background can serve anywhere, and the ones that need the content script (and so
+  exist only on the channels' domains). `status` reports it as `bridge_build`, asked of the host
+  rather than read off the manifest on disk.
+* A plan that asks for a verb the connected build cannot serve where it is going is refused
+  before anything is navigated (`action.unsupported`, no quota spent). An older extension that
+  advertises nothing keeps the previous behaviour.
+* **F14** the fixture adapter reports the landing address in `outcome.url` (as the bridge does)
+  and the asked-for address in `data.requested_url`, so URL-attribution tests exercise the shape
+  a real run produces.
+
+`background-0.14.29.js`, as the cache-busting rule requires.
+
 ## [0.14.28] - 2026-11-26
 
 ### Fixed — Web of Science's `total` was the size of the export, not of the result set

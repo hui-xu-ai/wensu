@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "wensu"
-version = "0.14.28"
+version = "0.14.29"
 description = "文溯 · 文献题录检索 MCP（只读，知网 + Web of Science，含期刊影响因子）"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -63,7 +63,7 @@ packages = ["src/scholar_search"]
 "native-host/install.ps1" = "scholar_search/assets/native-host/install.ps1"
 "native-host/README.md" = "scholar_search/assets/native-host/README.md"
 "extension/manifest.json" = "scholar_search/assets/extension/manifest.json"
-"extension/background-0.14.28.js" = "scholar_search/assets/extension/background-0.14.28.js"
+"extension/background-0.14.29.js" = "scholar_search/assets/extension/background-0.14.29.js"
 "extension/content/actions.js" = "scholar_search/assets/extension/content/actions.js"
 # `capture.js` was missing here until an independent acceptance run found that a
 # clean install produced an extension whose manifest referenced a file the wheel did
