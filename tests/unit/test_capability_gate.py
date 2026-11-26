@@ -70,12 +70,27 @@ def test_a_universal_verb_is_allowed_anywhere() -> None:
     _gate(_Adapter(dict(ADVERTISED)), "page:wiley", "goto", "sleep", "snapshot")
 
 
-def test_an_adapter_that_cannot_be_asked_leaves_the_gate_silent() -> None:
-    class _Silent:
-        def info(self) -> dict[str, Any]:
-            return {}
+def test_an_unknown_capability_set_is_not_permission() -> None:
+    """The gate used to return here, so the plan navigated and only then timed out (§2)."""
 
-    _gate(_Silent(), "page:acs", "wait_for")
+    with pytest.raises(ActionError) as error:
+        _gate(_Adapter({}), "page:mdpi", "goto", "wait_for")
+
+    assert error.value.code == "action.unsupported"
+
+
+def test_a_host_that_never_answered_the_handshake_is_named_as_such() -> None:
+    with pytest.raises(ActionError) as error:
+        _gate(_Adapter({"handshake": "timeout"}), "page:mdpi", "goto")
+
+    assert error.value.code == "bridge.handshake"
+
+
+def test_an_older_worker_that_cannot_describe_itself_is_refused() -> None:
+    with pytest.raises(ActionError) as error:
+        _gate(_Adapter({"handshake": "old"}), "cnki", "goto")
+
+    assert error.value.code == "action.unsupported"
 
 
 def test_the_capability_list_reaches_the_native_host() -> None:

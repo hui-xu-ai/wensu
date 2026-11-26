@@ -153,10 +153,32 @@ class BridgeHost:
         self._handshaked = True
         return True
 
-    def build_info(self) -> dict[str, Any]:
-        """The running extension's own account of itself, for `status`."""
+    def ensure_handshake(self, timeout_s: float = 5.0) -> bool:
+        """Run the handshake if it has not happened yet, and say whether it succeeded.
 
-        return dict(self.build)
+        `cmd=info` used to answer from `self.build`, which is empty until *some other* call
+        happens to handshake. A freshly started host therefore reported nothing but its own
+        version, and the capability gate — reading "no capabilities" as "no opinion" — let a
+        plan through (retest 2026-11-26, §1/§2). Asking now performs the handshake first.
+        """
+
+        return self._handshake(self._clock() + timeout_s)
+
+    def build_info(self) -> dict[str, Any]:
+        """The running extension's own account of itself, for `status`.
+
+        `handshake` says which of three situations this is: `ok` (the worker answered and
+        described itself), `timeout` (a host is up but the extension did not answer), or
+        `old` (the worker answered without a capability list, i.e. a build from before it
+        advertised anything). Collapsing those three into "empty" is what made the gate silent.
+        """
+
+        info = dict(self.build)
+        if self._handshaked:
+            info["handshake"] = "ok" if info.get("capabilities") else "old"
+        else:
+            info["handshake"] = "timeout"
+        return info
 
     def request(
         self,

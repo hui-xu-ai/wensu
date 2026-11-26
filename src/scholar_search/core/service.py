@@ -133,6 +133,12 @@ def _page_next(probe: dict[str, Any]) -> str:
     return "no full text on the page: offer the PDF route instead"
 
 
+def _network_actions(actions: Sequence[Action]) -> int:
+    """How many of these actions the policy would bill: one unit per network verb that runs."""
+
+    return sum(1 for action in actions if action.verb in NETWORK_VERBS)
+
+
 def _page_full_text(payload: dict[str, Any]) -> dict[str, Any]:
     """Say whether the full text was actually read, in a field worth branching on.
 
@@ -902,18 +908,25 @@ class ScholarService:
         (audit 2026-11-26, F07). A refusal is now its own outcome, not "no benefit".
         """
 
+        actions = article_navigation(self, url, publisher)
         try:
             outcomes = self._run(
                 Plan(
                     channel=f"page:{publisher.name}",
                     purpose="detail",
-                    actions=article_navigation(self, url, publisher),
+                    actions=actions,
                 ),
                 spec,
             )
         except RiskBlocked as blocked:
-            # One navigation ran before the planner stopped; the ledger was charged for it.
-            return _FollowResult(outcomes=(), blocked=dict(blocked.to_payload()), charged=1)
+            # One navigation ran before the planner stopped — or two, when the warmup patch adds
+            # a front page. Counting the plan is honest; the old constant `1` under-reported the
+            # private shape (retest 2026-11-26, F07).
+            return _FollowResult(
+                outcomes=(),
+                blocked=dict(blocked.to_payload()),
+                charged=_network_actions(actions),
+            )
         final_url = outcomes[-1].url or url
         last = outcomes[-1].data if isinstance(outcomes[-1].data, dict) else {}
         title = last.get("title") if isinstance(last.get("title"), str) else ""
@@ -1084,13 +1097,14 @@ class ScholarService:
                 with suppress(OSError):
                     Path(str(open_tab.get("path") or "")).unlink()
 
+            navigation_actions = article_navigation(self, target, publisher)
             try:
                 outcomes = self._run(
                     Plan(
                         channel=f"page:{publisher.name}",
                         purpose="detail",
                         # One navigation to the article, built in one place (ADR 0025).
-                        actions=article_navigation(self, target, publisher),
+                        actions=navigation_actions,
                     ),
                     spec,
                 )
@@ -1107,8 +1121,9 @@ class ScholarService:
                     "final_url": target,
                     "mhtml_path": None,
                     "bytes": 0,
-                    # The navigation itself ran and was charged; the capture never did.
-                    "quota_charged": 1,
+                    # Counted from the plan, not assumed: publicly one navigation, two with the
+                    # warmup patch (retest 2026-11-26, F07 — a constant under-reported the cost).
+                    "quota_charged": _network_actions(navigation_actions),
                     "quota_reason": "challenge",
                     "next": _page_next({"status": "blocked", "reason": "challenge"}),
                 }
@@ -1201,12 +1216,19 @@ class ScholarService:
                     follow = self._follow_fulltext(fulltext_declared, publisher, spec)
                     # Counted whether or not it helped: the ledger was charged for what ran.
                     outcomes = (*outcomes, *follow.outcomes)
-                    if follow.blocked is not None:
-                        # The site refused during the follow-up. That is a stop, not "no benefit":
-                        # the caller must see the risk state and the full charge (audit F07).
+                    if follow.blocked is not None or (
+                        isinstance(follow.saved, dict) and follow.saved.get("status") == "blocked"
+                    ):
+                        # The site refused during the follow-up — either the planner raised, or
+                        # the snapshot itself recognized the wall. Both are a stop, and folding
+                        # the second one into "no benefit" reported the initial paywall instead
+                        # (retest 2026-11-26, §3).
+                        payload = dict(follow.blocked or {})
+                        payload.setdefault("status", "blocked")
+                        payload.setdefault("reason", "challenge")
+                        payload.setdefault("action_required", "manual_verification")
                         return {
-                            **follow.blocked,
-                            "reason": "challenge",
+                            **payload,
                             "doi": identifier,
                             "publisher": publisher.name,
                             "final_url": follow.final_url or final_url,
@@ -1526,10 +1548,31 @@ class ScholarService:
         try:
             info = describe()
         except (ActionError, ScholarSearchError, OSError):
-            return
-        universal = info.get("capabilities") if isinstance(info, dict) else None
+            info = {}
+        if not isinstance(info, dict):
+            info = {}
+        universal = info.get("capabilities")
+        planned = tuple(getattr(plan, "actions", ()) or ())
+        first_verb = planned[0].verb if planned else "goto"
         if not isinstance(universal, list) or not universal:
-            return
+            # Unknown is not permission. The first version of this gate returned here, so a plan
+            # asking for `wait_for` on a publisher page ran, navigated, spent a quota point and
+            # only then timed out (retest 2026-11-26, §2). Refusing costs nothing and says what
+            # to do; the `handshake` field distinguishes "not yet answered" from "old worker".
+            handshake = str(info.get("handshake") or "")
+            if handshake == "timeout":
+                raise ActionError(
+                    "the browser extension has not answered the handshake, so it cannot be "
+                    "asked what it supports: reload the extension, then try again",
+                    verb=first_verb,
+                    code="bridge.handshake",
+                )
+            raise ActionError(
+                "the running browser extension does not advertise what it supports (it is older "
+                "than this build): reload the extension, then try again",
+                verb=first_verb,
+                code="action.unsupported",
+            )
         advertised = {str(item) for item in universal}
         # The DOM verbs need `content/actions.js`, which the manifest injects into the two
         # channels' domains only. A publisher page gets the universal set and nothing else — this

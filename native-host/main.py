@@ -124,7 +124,12 @@ def serve_client(
             if request.get("cmd") == "info":
                 # What is *running*, not what is installed: the host build and whatever the
                 # extension said in its handshake. `status` reports both, because "the manifest
-                # says 0.14.28" and "the worker runs 0.14.28" are different facts (audit D batch).
+                # says 0.14.29" and "the worker runs 0.14.29" are different facts (audit D batch).
+                # The handshake is performed here on purpose: a cold host used to answer with
+                # nothing but its own version (retest 2026-11-26, §1).
+                ensure = getattr(host, "ensure_handshake", None)
+                if ensure is not None:
+                    ensure()
                 describe = getattr(host, "build_info", None)
                 build = describe() if describe is not None else {}
                 payload = {

@@ -12,6 +12,7 @@ import pytest
 
 from scholar_search.adapters.fixture import FixtureAdapter
 from scholar_search.core.cache import Cache
+from scholar_search.core.contracts import Action
 from scholar_search.core.pageprobe import classify_mhtml
 from scholar_search.core.params import validate_params
 from scholar_search.core.planner import Planner
@@ -320,6 +321,118 @@ def test_a_fulltext_follow_up_that_hits_a_wall_is_reported_as_a_wall(tmp_path: P
     # One outer navigation plus the refused one: the charge follows what ran.
     assert result["quota_charged"] == 2, result
     assert result["quota_reason"] == "challenge", result
+
+
+def test_a_fulltext_follow_up_whose_snapshot_is_a_wall_is_reported_as_a_wall(
+    tmp_path: Path,
+) -> None:
+    """The planner's exception was handled; the snapshot's own verdict was not (retest §3).
+
+    A wall recognized by the capture came back as `_FollowResult.saved` with `status: blocked`,
+    and the caller only looked at `follow.blocked`, so the initial paywall answer survived.
+    """
+
+    landing = (
+        "<html><head>"
+        '<meta name="citation_fulltext_html_url" content="https://pubs.acs.org/doi/full/10.1021/jacs.6c13449"/>'
+        "</head><body><h1>A paper</h1>"
+        '<section id="a1"><h2>Abstract</h2><p>Short teaser, no body.</p></section></body></html>'
+    )
+    wall = b"<html>please wait</html>"
+    blob = write_mhtml(tmp_path / "landing.mhtml", landing).read_bytes()
+    doi_url = "https://doi.org/10.1021/jacs.6c13449"
+    article_url = "https://pubs.acs.org/doi/10.1021/jacs.6c13449"
+
+    def landing_reply() -> dict[str, object]:
+        return {
+            "verb": "snapshot",
+            "data": {
+                "token": "t1",
+                "total": len(blob),
+                "base64": base64.b64encode(blob).decode("ascii"),
+                "url": article_url,
+                "title": "A paper",
+                "captcha_visible": False,
+            },
+        }
+
+    service = build_service(
+        tmp_path,
+        [
+            [
+                {"verb": "goto", "data": {"url": doi_url}},
+                {"verb": "sleep", "data": {"ms": 1}},
+                landing_reply(),
+                {"verb": "sleep", "data": {"ms": 1_500}},
+                landing_reply(),
+                # the follow-up lands on a normal title; the capture is what recognizes the wall
+                {
+                    "verb": "goto",
+                    "data": {
+                        "url": "https://pubs.acs.org/doi/full/10.1021/jacs.6c13449",
+                        "title": "A paper",
+                    },
+                },
+                {
+                    "verb": "snapshot",
+                    "data": {
+                        "token": "t2",
+                        "total": len(wall),
+                        "base64": base64.b64encode(wall).decode("ascii"),
+                        "url": "https://pubs.acs.org/doi/full/10.1021/jacs.6c13449",
+                        "title": "请稍候…",
+                        "captcha_visible": False,
+                    },
+                },
+            ]
+        ],
+    )
+
+    result = service.read_page(doi="10.1021/jacs.6c13449", view="full")
+
+    assert result["status"] == "blocked", result
+    assert result["mhtml_path"] is None, result
+    assert result["full_text"] is False, result
+    assert result["quota_charged"] == 2, result
+
+
+def test_a_wall_on_a_two_navigation_plan_reports_both_navigations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The private warmup patch navigates twice; the charge said one (retest §补充 F07)."""
+
+    from scholar_search.core import service as service_module
+
+    monkeypatch.setattr(
+        service_module,
+        "article_navigation",
+        lambda *args, **kwargs: (
+            Action("goto", {"url": "https://pubs.acs.org/"}),
+            Action("goto", {"url": args[1]}),
+        ),
+    )
+
+    service = build_service(
+        tmp_path,
+        [
+            [
+                {"verb": "goto", "data": {"url": "https://pubs.acs.org/"}},
+                {
+                    "verb": "goto",
+                    "data": {
+                        "url": "https://pubs.acs.org/doi/10.1021/jacs.6c13449",
+                        "title": "请稍候…",
+                        "captcha_visible": True,
+                    },
+                },
+            ]
+        ],
+    )
+
+    result = service.read_page(doi="10.1021/jacs.6c13449")
+
+    assert result["status"] == "blocked", result
+    assert result["quota_charged"] == 2, result
 
 
 def test_doi_prefixes_map_to_the_right_publisher() -> None:
