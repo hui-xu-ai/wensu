@@ -632,6 +632,22 @@ CORE_MARKERS: tuple[str, ...] = (
 )
 
 
+def _core_titles(sections: list[tuple[str, int, list[str]]]) -> set[str]:
+    """Which section titles count as "core reading".
+
+    Normally the abstract/introduction/conclusion ones. A body recovered by the paragraph
+    fallback has whatever headings the page used and may match none of them — an ACS article
+    whose index was rebuilt from the body still reported `core_tokens: 0` (audit 2026-11-26,
+    R31-02). When nothing matches, the first section is the honest stand-in: it is the only
+    body text there is, and reporting zero hides the article from a core reading.
+    """
+
+    chosen = {title for title, _level, _paragraphs in sections if _is_core(title)}
+    if not chosen and sections:
+        chosen = {sections[0][0]}
+    return chosen
+
+
 def _is_core(title: str) -> bool:
     lowered = re.sub(r"^[\d.\s]+", "", title).casefold()
     return any(marker in lowered for marker in CORE_MARKERS)
@@ -923,6 +939,31 @@ def _word_count(text: str | None) -> int:
     return len([token for token in re.split(r"\s+", stripped) if len(token) > 1])
 
 
+def _sections_from_markdown(markdown: str) -> list[tuple[str, int, list[str]]]:
+    """Sections from the merged body, so every output derives from one representation.
+
+    Used when the fallback replaced the body: a document with no headings becomes a single
+    honest block titled 正文 rather than an empty index that silently hides the text.
+    """
+
+    sections: list[tuple[str, int, list[str]]] = []
+    title, level = "", 2
+    paragraphs: list[str] = []
+    for block in [part.strip() for part in markdown.split("\n\n") if part.strip()]:
+        heading = re.match(r"^(#{1,6})\s+(.*)$", block)
+        if heading:
+            if title or paragraphs:
+                sections.append((title or "正文", level, paragraphs))
+            level = len(heading.group(1))
+            title = heading.group(2).strip()
+            paragraphs = []
+            continue
+        paragraphs.append(block)
+    if title or paragraphs:
+        sections.append((title or "正文", level, paragraphs))
+    return sections
+
+
 def _paragraph_fallback(markup: str) -> str:
     """Headings and paragraphs straight from the document, when sections found nothing.
 
@@ -1025,6 +1066,11 @@ def _extract_body(html: str) -> tuple[str | None, dict[str, object]]:
             body = _cut_tail(_dedupe_blocks(fallback))
             info["engine"] = "paragraphs"
             info["paragraph_fallback"] = True
+            # The sections have to come from the body too: the walk above failed for this page,
+            # and `index.json`, the brief, the selection and `page.core.md` are all built from
+            # `sections_found`. Replacing only `page.md` left an ACS article with 16 KB of body
+            # and an index holding "Supporting Information" (audit 2026-11-26, R31-02).
+            info["sections_found"] = _sections_from_markdown(body)
 
     figures = ""
     try:
@@ -1563,13 +1609,14 @@ def _write_chunks(out: Path, sections: list[tuple[str, int, list[str]]]) -> dict
     core_tokens = 0
     figures = _figures_of(sections)
     captions = [_normalise(figure["caption"]) for figure in figures]
+    core_titles = _core_titles(sections)
     for index, (title, level, paragraphs) in enumerate(sections, start=1):
         text = "\n\n".join(paragraphs)
         slug = re.sub(r"[^A-Za-z0-9._-]+", "-", title)[:60].strip("-").lower() or f"section-{index}"
         name = f"{index:02d}-{slug}.md"
         (directory / name).write_text(f"{'#' * level} {title}\n\n{text}\n", encoding="utf-8")
         tokens = _estimate_tokens(text)
-        core = _is_core(title)
+        core = title in core_titles
         if core:
             core_tokens += tokens
         numbers = _numbers(paragraphs)
@@ -1617,10 +1664,11 @@ def _write_chunks(out: Path, sections: list[tuple[str, int, list[str]]]) -> dict
 
 
 def _core_markdown(sections: list[tuple[str, int, list[str]]]) -> str:
+    titles = _core_titles(sections)
     blocks = [
         f"{'#' * level} {title}\n\n" + "\n\n".join(paragraphs)
         for title, level, paragraphs in sections
-        if _is_core(title)
+        if title in titles
     ]
     return "\n\n".join(blocks)
 
@@ -1684,7 +1732,13 @@ def convert(
         "ratio": round(extracted_words / source_words, 3) if source_words else None,
     }
     ratio = meta["coverage"]["ratio"] if isinstance(meta["coverage"], dict) else None
-    if source_words >= 500 and isinstance(ratio, float) and ratio < 0.3:
+    # Nothing at all out of a page that had text is always worth saying, whatever its size: the
+    # 500-word floor let a 404-word page convert to 0 words in silence (audit 2026-11-26, R31-08).
+    if source_words > 0 and extracted_words == 0:
+        cast(list[str], meta["warnings"]).append(
+            f"正文未提取到内容：源页面约 {source_words} 词，转换结果为空。请核对原文或改用 PDF。"
+        )
+    elif source_words >= 300 and isinstance(ratio, float) and ratio < 0.3:
         cast(list[str], meta["warnings"]).append(
             f"正文可能大量缺失：源页面约 {source_words} 词，转换后仅 {extracted_words} 词"
             f"（{ratio:.0%}）。请核对原文，必要时看 PDF。"

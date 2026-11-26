@@ -147,6 +147,19 @@ def test_a_name_that_merely_starts_the_same_is_not_a_match() -> None:
     assert meta_content(markup, "citation_doi") == "10.1021/right"
 
 
+def test_a_data_name_attribute_is_not_the_meta_name() -> None:
+    """`\\bname` matched the tail of `data-name` (audit 2026-11-26, R31-07)."""
+
+    markup = (
+        "<html><head>"
+        '<meta data-name="citation_doi" name="citation_reference" content="10.9999/wrong"/>'
+        '<meta name="citation_doi" content="10.9999/right"/>'
+        "</head></html>"
+    )
+
+    assert meta_content(markup, "citation_doi") == "10.9999/right"
+
+
 def test_a_challenge_page_is_not_an_abstract_shell(tmp_path: Path) -> None:
     probe = classify_mhtml(_saved(tmp_path, _WALL))
 

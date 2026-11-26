@@ -789,8 +789,16 @@ async function onHostMessage(message, channel) {
         // closure because Edge rejects the update on a work tab the previous run left behind
         // ("Navigation rejected."), and that is exactly the first navigation after a browser
         // start — measured 2026-11-25: the first search failed and the immediate retry worked.
+        // Whether the navigation was actually issued. A failed *wait* must not be retried: the
+        // tab is already loading the article, and sending `tabs.update` again is a second
+        // navigation the kernel never asked for, never billed and cannot see — the retry used to
+        // cover the whole closure, so "update accepted, wait failed" navigated twice (audit
+        // 2026-11-26, R31-01: two accepted updates, 300 ms apart, one `goto` in the audit log).
+        let issued = false;
         const navigate = async () => {
           await chrome.tabs.update(tab.id, { url: params.url });
+          // Only now is the navigation really on its way: a rejected update threw above.
+          issued = true;
           // Read the tab back only once it has moved: `tabs.get` immediately after
           // `update` can return the previous URL, which looked like a redirect out of scope.
           //
@@ -826,9 +834,17 @@ async function onHostMessage(message, channel) {
         try {
           await navigate();
         } catch (error) {
-          // Only a rejected *update* is retried, not a failed wait: a page that did not load is
-          // the site's business, while an update Edge refused on our own tab is ours. The caller
-          // never sees this attempt, so a second one costs it nothing.
+          // Only a *rejected update* is retried — the one case where the browser refused to start
+          // the navigation at all (Edge refuses the first update on a tab a previous run left
+          // behind). Once the update was accepted the page is loading: a failed wait is the
+          // site's business, and re-navigating would be a second request nobody asked for.
+          if (issued) {
+            // Report the attempt so the caller can tell "unknown" from "never sent".
+            throw Object.assign(error instanceof Error ? error : new Error(String(error)), {
+              navigationIssued: true,
+              navigationAttempts: 1,
+            });
+          }
           await new Promise((resolve) => setTimeout(resolve, 300));
           await navigate();
         }
@@ -879,6 +895,10 @@ async function onHostMessage(message, channel) {
         url: finalUrl,
         title: updated.title || "",
         status: status || undefined,
+        // How many navigations this action actually sent. `1` is the normal case and is reported
+        // anyway: an internal retry that the kernel cannot see is how one `goto` became two
+        // requests (audit 2026-11-26, R31-01).
+        navigation_attempts: 1,
         // Reported only when it happened, so every existing caller reads the same shape it did
         // before this parameter existed.
         ...(halted ? { halted: true } : {}),
@@ -1084,11 +1104,15 @@ async function onHostMessage(message, channel) {
     // failure wording. The kernel turns a `url` into `[reached <host>]`, which is how
     // an auth redirect was told apart from a slow page.
     const detail = error && typeof error === "object" ? error.detail : undefined;
-    return reply({
-      ok: false,
-      error: String((error && error.message) || error),
-      data: detail && typeof detail === "object" ? { ...detail } : {},
-    });
+    const data = detail && typeof detail === "object" ? { ...detail } : {};
+    // A navigation that was sent and whose wait then failed is not "nothing happened": the page
+    // is loading. Saying so is what lets the kernel report "unknown" instead of "never reached"
+    // (audit 2026-11-26, R31-01).
+    if (error && typeof error === "object" && error.navigationIssued) {
+      data.navigation_issued = true;
+      data.navigation_attempts = Number(error.navigationAttempts) || 1;
+    }
+    return reply({ ok: false, error: String((error && error.message) || error), data });
   }
 }
 

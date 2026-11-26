@@ -64,10 +64,20 @@ class RiskBlocked(ScholarSearchError):
     still carry the 24 h cooldown from ADR 0004.
     """
 
-    def __init__(self, message: str, *, signal: str, cooldown_until: str | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        signal: str,
+        cooldown_until: str | None = None,
+        charged: int = 1,
+    ) -> None:
         super().__init__(message)
         self.signal = signal
         self.cooldown_until = cooldown_until
+        # How many network actions ran before the stop. The planner knows; a caller that only has
+        # the plan would have to guess (and guessed wrong when the first navigation was refused).
+        self.charged = charged
 
     def to_payload(self) -> dict[str, str]:
         payload: dict[str, str] = {

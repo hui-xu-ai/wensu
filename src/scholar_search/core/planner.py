@@ -129,6 +129,10 @@ class Planner:
 
             signal = self.risk.inspect(outcome)
             if signal is not None:
+                # How many network actions actually ran, so a caller can report the real cost
+                # instead of guessing from the plan (audit 2026-11-26, R31-06: a plan whose first
+                # navigation was refused reported 2 while the ledger had used 1).
+                charged = sum(1 for item in outcomes if item.action.verb in NETWORK_VERBS)
                 if _stops_without_cooldown(signal):
                     # A verification wall: stop the plan, save nothing, and let
                     # the person click through it. Cooling the machine down for a day would
@@ -143,8 +147,10 @@ class Planner:
                         _risk_reason(signal, action, outcome),
                         signal=signal.value,
                         cooldown_until=None,
+                        charged=charged,
                     )
                 blocked = self.risk.trip(signal, _risk_reason(signal, action, outcome))
+                blocked.charged = charged
                 self.audit.risk(
                     channel=plan.channel,
                     signal=signal.value,

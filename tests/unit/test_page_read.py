@@ -516,6 +516,111 @@ def test_a_capture_on_the_publishers_own_mirror_is_accepted(tmp_path: Path) -> N
     assert result["status"] == "ok", result
 
 
+def test_another_article_on_the_same_publisher_is_refused(tmp_path: Path) -> None:
+    """Publisher attribution is not article identity (audit 2026-11-26, R31-03).
+
+    Requesting one Wiley DOI and capturing another Wiley DOI passed on the host alone.
+    """
+
+    body = (
+        "<html><body><h1>A different paper</h1><section id='s1'><h2>1. Introduction</h2>"
+        "<p>Body text of an article this read never asked for.</p></section></body></html>"
+    )
+    blob = write_mhtml(tmp_path / "other.mhtml", body).read_bytes()
+    service = build_service(
+        tmp_path,
+        [
+            [
+                {
+                    "verb": "goto",
+                    "data": {"url": "https://onlinelibrary.wiley.com/doi/10.1002/another-paper"},
+                },
+                {"verb": "sleep", "data": {"ms": 1}},
+                {
+                    "verb": "snapshot",
+                    "data": {
+                        "token": "t1",
+                        "total": len(blob),
+                        "base64": base64.b64encode(blob).decode("ascii"),
+                        "url": "https://onlinelibrary.wiley.com/doi/10.1002/another-paper",
+                        "title": "A different paper",
+                        "captcha_visible": False,
+                    },
+                },
+            ]
+        ],
+    )
+
+    result = service.read_page(doi="10.1002/pen.23634")
+
+    assert result["status"] == "no_page", result
+    assert result["reason"] == "capture_mismatch", result
+
+
+def test_a_page_addressed_by_pii_is_accepted_as_unconfirmed(tmp_path: Path) -> None:
+    """ScienceDirect addresses an article by PII: no DOI anywhere, and that is not a mismatch."""
+
+    body = (
+        "<html><body><h1>A paper</h1><section id='s1'><h2>1. Introduction</h2>"
+        "<p>Body text a reader came for.</p></section></body></html>"
+    )
+    blob = write_mhtml(tmp_path / "pii.mhtml", body).read_bytes()
+    service = build_service(
+        tmp_path,
+        [
+            [
+                {
+                    "verb": "goto",
+                    "data": {"url": "https://www.sciencedirect.com/science/article/pii/X"},
+                },
+                {"verb": "sleep", "data": {"ms": 1}},
+                {
+                    "verb": "snapshot",
+                    "data": {
+                        "token": "t1",
+                        "total": len(blob),
+                        "base64": base64.b64encode(blob).decode("ascii"),
+                        "url": "https://www.sciencedirect.com/science/article/pii/X",
+                        "title": "A paper",
+                        "captcha_visible": False,
+                    },
+                },
+            ]
+        ],
+    )
+
+    result = service.read_page(doi="10.1016/j.cej.2023.145123")
+
+    assert result["status"] == "ok", result
+    assert result["identity"] == "publisher_only", result
+
+
+def test_a_stopped_first_navigation_reports_one_unit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two navigations planned, the first one refused: the ledger used one (R31-06)."""
+
+    from scholar_search.core import service as service_module
+
+    monkeypatch.setattr(
+        service_module,
+        "article_navigation",
+        lambda *args, **kwargs: (
+            Action("goto", {"url": "https://pubs.acs.org/"}),
+            Action("goto", {"url": args[1]}),
+        ),
+    )
+    service = build_service(
+        tmp_path,
+        [[{"verb": "goto", "data": {"status": 403, "url": "https://pubs.acs.org/"}}]],
+    )
+
+    result = service.read_page(doi="10.1021/jacs.6c13449")
+
+    assert result["status"] == "blocked", result
+    assert result["quota_charged"] == 1, result
+
+
 def test_doi_prefixes_map_to_the_right_publisher() -> None:
     assert publisher_for_doi("10.1016/j.cej.2023.145123").name == "elsevier"  # type: ignore[union-attr]
     assert publisher_for_doi("https://doi.org/10.1038/s41586-024-00001-0").name == "nature"  # type: ignore[union-attr]

@@ -547,6 +547,14 @@ def test_a_page_without_section_containers_keeps_its_body(tmp_path: Path) -> Non
     # and the optional supplement is not installed.
     assert "Section 0 discusses the hydrolysis pathway" in markdown, markdown[:400]
     assert "Section 1 discusses the wheel geometry" in markdown, markdown[:400]
+    # The index has to come from the same body: replacing only page.md left an ACS article with
+    # 16 KB of text and an index holding just "Supporting Information" (R31-02).
+    index = json.loads((out / "index.json").read_text(encoding="utf-8"))
+    titles = [str(entry["title"]) for entry in index["sections"]]
+    assert any("Results" in title for title in titles), titles
+    assert int(index["core_tokens"]) > 0, index
+    brief = (out / "page.brief.md").read_text(encoding="utf-8")
+    assert "hydrolysis" in brief, brief[:300]
     coverage = meta["coverage"]
     assert isinstance(coverage, dict)
     assert coverage["source_words"] >= 300
@@ -568,7 +576,9 @@ def test_a_thin_conversion_says_the_body_may_be_missing(tmp_path: Path) -> None:
     meta = page2md.convert(source, tmp_path / "out")
 
     warnings = [str(item) for item in meta["warnings"]]
-    assert any("正文可能大量缺失" in warning for warning in warnings), warnings
+    assert any(
+        "正文未提取到内容" in warning or "正文可能大量缺失" in warning for warning in warnings
+    ), warnings
 
 
 def test_index_drops_bookkeeping_fields(

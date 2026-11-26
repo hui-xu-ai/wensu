@@ -135,8 +135,8 @@ _META_TAG = re.compile(r"<meta\b[^>]*>", re.IGNORECASE)
 # *anywhere* in the tag text made `citation_reference` win (its content quotes a DOI as
 # `citation_doi=…`), so MDPI pages reported a reference's DOI as the article's own (measured
 # 2026-11-26 on 10.3390/s26041303). The name attribute is the only place the field name lives.
-_META_NAME = re.compile(r"""\bname\s*=\s*["']([^"']*)["']""", re.IGNORECASE)
-_META_CONTENT = re.compile(r"""\bcontent\s*=\s*["']([^"']*)["']""", re.IGNORECASE)
+_META_NAME = re.compile(r"""(?:^|[\s<])name\s*=\s*["']([^"']*)["']""", re.IGNORECASE)
+_META_CONTENT = re.compile(r"""(?:^|[\s<])content\s*=\s*["']([^"']*)["']""", re.IGNORECASE)
 _HEAD = re.compile(r"<head\b[^>]*>(.*?)</head>", re.IGNORECASE | re.DOTALL)
 
 

@@ -213,36 +213,32 @@ def _page_cached_payload(
     }
 
 
-def _page_capture_belongs(
-    captured_url: str, declared_doi: str, publisher: Publisher, identifier: str
-) -> bool:
-    """Is the captured page plausibly *this* article, judged by where it came from?
+_DOI_IN_URL = re.compile(r"10\.\d{4,9}/[^\s?#'\"]+", re.IGNORECASE)
 
-    Four acceptances, cheapest first:
 
-    1. the page names the DOI that was asked for;
-    2. its host is the curated publisher's;
-    3. its host is a *mirror* of that publisher — same registered domain, different subdomain,
-       which is what a publisher redirecting to `pubsapp.acs.org` looks like;
-    4. the DOI appears in its address.
+def _page_identity(captured_url: str, declared_doi: str, identifier: str) -> tuple[bool, str]:
+    """(refused, evidence) — is this capture the article that was asked for?
 
-    Anything else is refused. The first version of this check accepted every page that failed to
-    declare a DOI, so a Wiley request answered with an ACS page came back `ok` with
-    `full_text: true` (retest 2026-11-26, §补充 F05).
+    Three strengths of evidence, because publisher attribution is not article identity (audit
+    2026-11-26, R31-03: a Wiley request answered with another Wiley DOI passed on the host alone):
+
+    * `declared` — the page prints the DOI that was asked for;
+    * `url` — the address carries that DOI;
+    * `publisher_only` — neither, but nothing contradicts it either: ScienceDirect addresses an
+      article by PII and a legitimate page can hold no DOI anywhere, so silence is not proof of
+      the wrong article;
+    * `mismatch` — the page prints or carries a *different* DOI, which is positive proof that it
+      is another article, and the only case that refuses.
     """
 
-    if declared_doi and declared_doi.casefold() == identifier.casefold():
-        return True
-    if _page_evidence_site(captured_url, publisher, identifier):
-        return True
-    host = (urlparse(captured_url).hostname or "").casefold()
-    # A subdomain of the curated domain is a mirror of the same publisher: `pubsapp.acs.org`
-    # under `pubs.acs.org` is still ACS. Nothing wider than that — deriving "the same
-    # organisation" from the last two labels made `unrelated.edu.cn` a sibling of
-    # `whxb.pku.edu.cn` (retest 2026-11-26, §标签和文章身份). Public suffixes are not a boundary
-    # this code may guess at, so a publisher whose mirrors live on another domain needs an entry
-    # in `publishers.py`, not a heuristic here.
-    return any(host == domain or host.endswith("." + domain) for domain in publisher.domains)
+    wanted = identifier.casefold()
+    if declared_doi:
+        return (False, "declared") if declared_doi.casefold() == wanted else (True, "mismatch")
+    found = _DOI_IN_URL.search(captured_url or "")
+    if found:
+        matched = found.group(0).casefold().startswith(wanted)
+        return (False, "url") if matched else (True, "mismatch")
+    return (False, "publisher_only")
 
 
 def _page_evidence_site(url: str, publisher: Publisher, identifier: str) -> bool:
@@ -268,7 +264,7 @@ _PAGE_SLUG_CHARS = 60
 # Which rule set produced a cached verdict. Bump it whenever the classifier or the wall rules
 # change meaning: entries stamped with an older value are not served, so a fix takes effect
 # without asking the reader to clear anything. Pre-existing entries carry no stamp at all.
-_PAGE_JUDGE_REV = 1
+_PAGE_JUDGE_REV = 2
 # How far a cache timestamp may sit in the future before it is treated as corrupt rather than as
 # a small clock difference between two machines (audit F13).
 _CLOCK_SKEW_S = 300.0
@@ -989,7 +985,7 @@ class ScholarService:
             return _FollowResult(
                 outcomes=(),
                 blocked=dict(blocked.to_payload()),
-                charged=_network_actions(actions),
+                charged=getattr(blocked, "charged", _network_actions(actions)),
             )
         final_url = outcomes[-1].url or url
         last = outcomes[-1].data if isinstance(outcomes[-1].data, dict) else {}
@@ -1171,9 +1167,11 @@ class ScholarService:
                     "final_url": target,
                     "mhtml_path": None,
                     "bytes": 0,
-                    # Counted from the plan, not assumed: publicly one navigation, two with the
-                    # warmup patch (retest 2026-11-26, F07 — a constant under-reported the cost).
-                    "quota_charged": _network_actions(navigation_actions),
+                    # What actually ran, reported by the planner: a plan of two navigations whose
+                    # first was refused used one unit, not two (audit 2026-11-26, R31-06).
+                    "quota_charged": getattr(
+                        blocked, "charged", _network_actions(navigation_actions)
+                    ),
                     "quota_reason": "challenge",
                     "next": _page_next({"status": "blocked", "reason": "challenge"}),
                 }
@@ -1304,13 +1302,9 @@ class ScholarService:
             # page and no DOI metadata still came back `ok`).
             declared = citation_doi(readable) if readable.is_file() else ""
             captured_url = str(saved.get("url") or "")
-            refused = (
-                bool(identifier)
-                and declared != ""
-                and (declared.casefold() != identifier.casefold())
-            )
-            if identifier and not refused and captured_url:
-                refused = not _page_capture_belongs(captured_url, declared, publisher, identifier)
+            refused, identity = _page_identity(captured_url, declared, identifier)
+            if declared and declared.casefold() != identifier.casefold():
+                refused = True
             if refused:
                 with suppress(OSError):
                     readable.unlink()
@@ -1345,6 +1339,11 @@ class ScholarService:
                 # Which rule set produced this verdict — the same stamp a cache hit reports, so
                 # the two answers are comparable (audit F13).
                 "judge": _PAGE_JUDGE_REV,
+                # How strongly the capture was tied to this article: `declared` (the page prints
+                # the DOI), `url` (the address carries it) or `publisher_only` (nothing
+                # contradicts it, nothing confirms it). A caller that needs article identity can
+                # treat `publisher_only` as "unconfirmed" instead of guessing (audit R31-03).
+                "identity": identity,
                 "mhtml_path": str(readable),
                 "bytes": int(saved.get("bytes") or 0),
                 "title": str(saved.get("title") or probe.get("title") or ""),
