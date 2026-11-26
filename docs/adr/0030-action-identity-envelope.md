@@ -31,20 +31,37 @@
 而现在的环境里还有私有导航补丁（两次 `goto`）与旧的扩展构建。先把字段发出去、让它真实链路里跑一轮，
 确认它们在**每次**读取里都存在且自洽，再让它们参与判定。
 
-## 未实施（第二片，需要单独决定）
+## 第二片（已实施，2026-11-27）
 
-1. 捕获必须带 `navigation_id`，否则 `terminal: no_page / unverified_capture`；
-2. 标签页租约：一个读取期间独占该 tab，超时后到终态前不派新任务（与"超时取消回执"合并做）；
-3. 动作信封里由内核**指定** `tab_id`（现在仍是扩展自选工作标签页）。
+第一片在真实链路里被证实：四条 goto 各有非空且互不相同的 `navigation_id`，`page_read` 顶层与
+`evidence` 都等于该篇最后一条 goto 的 id，`snapshot` 的 `tab_id` 与导航一致。据此改判定：
+
+1. **捕获必须跟随本次导航**。扩展按标签页记住最近一次导航 id，`snapshot` 回包带上它；内核把
+   `capture_navigation` 记为 `match` / `mismatch` / `absent`，`mismatch` ⇒
+   `no_page / unverified_capture`，字节不发布（`stage: identity`）。
+2. **缺失不算失败**。`absent` 只记事实不拒绝——三层（扩展、宿主、内核）是滚动升级，旧构建不会报这个
+   字段，把它当失败会让"更新了内核但没重载扩展"变成所有读取都失败。
+3. **导航未确认有了终态**。桥放弃一次导航（`bridge.timeout` 一类）时不再让错误冒出去当成"什么都没发生"：
+   返回 `status: timeout / reason: navigation_unconfirmed / stage: navigate / unconfirmed: true`，
+   并在 `next` 里要求先看 `status.browser_busy` 与标签页再决定是否重试——**标签页可能在你被告知超时之后
+   才落地**，这才是"超时取消确认"缺的那块。
+
+## 未实施（第三片）
+
+1. **内核指定 `tab_id`**：现在仍是扩展自选工作标签页，回包才告诉内核用的是哪一页；
+2. **租约超时后不派新任务**：现在只做到"报告未确认 + 让调用方自己看 `browser_busy`"，没有强制排队；
+3. **扩展在超时后主动上报收尾状态**（已中止 / 已落地及最终 URL）——需要给 `goto` 一个迟到的第二回执，
+   属协议新增。
 
 ## 影响面
 
 | 位置 | 改动 |
 |---|---|
-| `extension/background-*.js` | `goto` 生成并回报 `navigation_id`、`tab_id`；`snapshot` 记录并回报 `tab_id` |
-| `core/service.py` | `page_read` 回包与 `evidence` 带上这两个字段 |
-| 测试 | 跨层契约测试断言 worker 确实回报这两个字段 |
+| `extension/background-*.js` | 第一片：`goto` 回报 `navigation_id`/`tab_id`；第二片：按标签页记最近一次导航，`snapshot` 回包带上它 |
+| `core/service.py` | `_snapshot_locked` 保留 `tab_id`/`navigation_id`（此前在这里被丢掉，捕获永远显示 `absent`）；`page_read` 比较并与 `capture_navigation` 一起回报；导航未确认有独立终态 |
+| 测试 | 跨层契约（worker 必须回报）+ `test_capture_lease.py`（match/mismatch/absent/未确认四个用例） |
 
 ## 回滚
 
-字段是附加的：删掉 worker 里三处回报与内核两处透传即可；没有任何判定依赖它们。
+字段是附加的。要退回"只报不判"：删掉 `page_read` 里设置 `refused = True` 的那一行即可，其余字段保留
+（它们不影响任何判定）；要连字段一起退，再删 worker 三处回报与内核两处透传。

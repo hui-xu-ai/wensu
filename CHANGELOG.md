@@ -36,6 +36,30 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.43] - 2026-11-27
+
+ADR 0030 第二片：身份字段从"报告"变成"参与判定"，并给未确认的导航一个终态。
+
+### 判定：捕获必须跟随本次导航
+
+扩展按标签页记住最近一次导航 id，`snapshot` 回包带上它；内核比较后记 `capture_navigation`：
+
+* `match` — 捕获跟随了本次读取发出的导航；
+* `mismatch` — 跟随的是**另一次**导航 ⇒ `no_page / unverified_capture`，字节不发布（`stage: identity`）；
+* `absent` — 任一端没报 ⇒ 只记事实，不拒绝。三层是滚动升级，旧构建不会报这个字段，把它当失败会让
+  "更新了内核但没重载扩展"变成所有读取都失败。
+
+`_snapshot_locked` 之前会把这两个字段丢掉（只保留 `path`/`bytes`/`url`/`title`），所以捕获一直显示
+`absent` —— 那是实现漏掉的透传，不是 worker 没报。
+
+### 导航未确认不再冒充"什么都没发生"
+
+桥放弃一次导航（`bridge.timeout` 一类）时，此前错误直接冒到 MCP 层；现在返回读取形状的终态：
+`status: timeout / reason: navigation_unconfirmed / stage: navigate / unconfirmed: true`，`next` 要求
+先看 `status.browser_busy` 与标签页再决定是否重试 —— **标签页可能在你被告知超时之后才落地**。
+
+`background-0.14.43.js`。
+
 ## [0.14.42] - 2026-11-27
 
 0.14.41 复验（docs/reviews/wensu-0.14.41-retest-2026-11-27.md）的三项：2 条 P1、1 条 P2。三项都是

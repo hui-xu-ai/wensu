@@ -155,9 +155,12 @@ def _page_stage(payload: dict[str, Any]) -> str:
     reason = str(payload.get("reason") or "")
     if status == "blocked" or reason == "challenge":
         return "wall"
-    if reason == "capture_mismatch":
+    if reason in {"capture_mismatch", "unverified_capture"}:
         return "identity"
     if status == "unsupported_site":
+        return "navigate"
+    # A navigation that never confirmed sits at `navigate`, not at a render it never reached.
+    if status == "timeout" or reason == "navigation_unconfirmed":
         return "navigate"
     if status == "ok":
         return "publish" if payload.get("mhtml_path") else "capture"
@@ -183,6 +186,10 @@ def _page_terminal(payload: dict[str, Any]) -> str:
         # run at all (`gate_wait_unavailable`) stays `blocked` — a build problem, not a slow click.
         return "timeout" if reason == "verification_timeout" else "blocked"
     if "timeout" in reason or "timeout" in code.casefold():
+        return "timeout"
+    # A navigation the bridge gave up on: the tab may still land, so this is a timeout, not "a
+    # page without a body" (ADR 0030, second slice).
+    if status == "timeout" or reason == "navigation_unconfirmed":
         return "timeout"
     if status == "unsupported_site":
         return "unsupported_site"
@@ -1515,6 +1522,34 @@ class ScholarService:
                     "quota_reason": "challenge",
                     "next": _page_next({"status": "blocked", "reason": "challenge"}),
                 }
+            except ActionError as error:
+                # A navigation the bridge gave up on is not a navigation that did not happen: the
+                # tab may land after the caller has been told "timeout". Say so instead of letting
+                # the error escape as if nothing was in flight (ADR 0030, second slice).
+                code = getattr(error, "code", "") or "navigation_failed"
+                unconfirmed = "timeout" in code
+                return {
+                    "status": "timeout" if unconfirmed else "error",
+                    "reason": "navigation_unconfirmed" if unconfirmed else code,
+                    "stage": "navigate",
+                    "doi": identifier,
+                    "publisher": publisher.name,
+                    "final_url": target,
+                    "mhtml_path": None,
+                    "bytes": 0,
+                    "unconfirmed": unconfirmed,
+                    "error": str(error),
+                    "quota_charged": 0,
+                    "quota_reason": "unknown",
+                    "next": (
+                        "the navigation was not confirmed: the tab may still land. Check "
+                        "`status.browser_busy` (and the tab) before asking again — a second "
+                        "navigation while this one is in flight is what makes captures "
+                        "untrustworthy."
+                        if unconfirmed
+                        else "the navigation failed before it was issued: ask again."
+                    ),
+                }
             final_url = outcomes[-1].url or target
             # Only the last navigation's title can be this page's title. With two `goto`s (the
             # warmup patch) the first one belongs to another page, and an empty title means the
@@ -1684,10 +1719,39 @@ class ScholarService:
             # `abstract_only`, which reads like "this article has no body". Judging the address is
             # cheap and says what actually happened (2026-11-26).
             landing_home = identity == "publisher_only" and _is_home_page(captured_url)
+            # ADR 0030, second slice: did this capture follow the navigation this read issued?
+            # `match` / `mismatch` / `absent` — absence is not a failure, because a worker from an
+            # older build (or a build the user assembled) does not report it; a *mismatch* is.
+            capture_nav = str(saved.get("navigation_id") or "")
+            # The **navigation's** id, not the last outcome's: the capture step reports the same
+            # id, so reading it from there would compare a value with itself.
+            read_nav = next(
+                (
+                    str(outcome.data.get("navigation_id"))
+                    for outcome in outcomes
+                    if isinstance(outcome.data, dict) and outcome.data.get("navigation_id")
+                ),
+                "",
+            )
+            if not capture_nav or not read_nav:
+                capture_navigation = "absent"
+            elif capture_nav == read_nav:
+                capture_navigation = "match"
+            else:
+                capture_navigation = "mismatch"
+                # A tab the reader moved, or a navigation this read did not issue: either way the
+                # bytes are not the page we asked for.
+                refused = True
             if refused or landing_home:
                 with suppress(OSError):
                     readable.unlink()
-                reason = "capture_mismatch" if refused else "landing_home"
+                reason = (
+                    "capture_mismatch"
+                    if refused and capture_navigation != "mismatch"
+                    else "unverified_capture"
+                    if refused
+                    else "landing_home"
+                )
                 self._page_cache_put(target, {"status": "blocked", "title": reason})
                 return {
                     "status": "no_page",
@@ -1697,14 +1761,22 @@ class ScholarService:
                     "final_url": final_url,
                     "declared_doi": declared,
                     "captured_url": captured_url,
+                    "tab_id": saved.get("tab_id"),
+                    "navigation_id": capture_nav or None,
+                    "capture_navigation": capture_navigation,
                     "mhtml_path": None,
                     "bytes": 0,
                     "quota_charged": _charged_units(outcomes),
                     "quota_reason": "navigate",
                     "next": (
-                        "the captured page is not this article (its address or its own DOI says "
-                        "so): ask again — the browser tab moved between the navigation and the "
-                        "capture."
+                        "the capture followed a different navigation than the one this read "
+                        "issued (ADR 0030): ask again — something moved the tab."
+                        if capture_navigation == "mismatch"
+                        else (
+                            "the captured page is not this article (its address or its own DOI "
+                            "says so): ask again — the browser tab moved between the navigation "
+                            "and the capture."
+                        )
                         if refused
                         else (
                             "the publisher answered with its home page instead of the article "
@@ -1737,10 +1809,10 @@ class ScholarService:
                 # treat `publisher_only` as "unconfirmed" instead of guessing (audit R31-03).
                 "identity": identity,
                 "mhtml_path": str(readable),
-                # Which tab and which navigation produced this capture (ADR 0030, first slice).
-                # Reported, not yet enforced: the identity checks above still decide.
+                # Which tab and which navigation produced this capture (ADR 0030).
                 "tab_id": last.get("tab_id"),
-                "navigation_id": last.get("navigation_id"),
+                "navigation_id": read_nav or None,
+                "capture_navigation": capture_navigation,
                 # Which bytes this answer is about. A later capture of the same article replaces
                 # the file, so an answer that quotes a digest can be checked instead of trusted.
                 "capture_sha256": capture_sha256,
@@ -2040,6 +2112,12 @@ class ScholarService:
             "bytes": len(payload),
             **meta,
         }
+        # ADR 0030: which tab and which navigation these bytes came from. Dropped here once, and
+        # the capture then looked "absent" no matter what the worker reported.
+        if isinstance(data.get("tab_id"), int):
+            result["tab_id"] = data["tab_id"]
+        if isinstance(data.get("navigation_id"), str) and data["navigation_id"]:
+            result["navigation_id"] = data["navigation_id"]
         return result
 
     # -- internals ------------------------------------------------------

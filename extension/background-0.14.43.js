@@ -182,6 +182,9 @@ function waitNavigated(tabId, fromUrl, domains, timeoutMs = 10_000) {
 // cached here and read back by the kernel over the bridge, a chunk per round trip.
 const CHUNK_BYTES = 192 * 1024;
 const captures = new Map();
+// The last navigation this worker issued in each tab (ADR 0030). A capture can then say which
+// navigation it followed, so "did I capture the page I just navigated to" stops being a guess.
+const tabNavigation = new Map();
 
 function bytesToBase64(bytes) {
   let binary = "";
@@ -700,6 +703,7 @@ async function onHostMessage(message, channel) {
             // Which tab the bytes came from (ADR 0030): the address alone cannot tell two tabs
             // showing the same URL apart.
             ...(Number.isInteger(capture.tabId) ? { tab_id: capture.tabId } : {}),
+            ...(capture.navigationId ? { navigation_id: capture.navigationId } : {}),
           },
         });
         return;
@@ -725,6 +729,8 @@ async function onHostMessage(message, channel) {
         captchaVisible: meta.captcha_visible === true,
         // Kept with the bytes so the reply can say which tab they came from (ADR 0030).
         tabId: tab.id,
+        // The navigation this capture followed, as far as this worker knows (ADR 0030 slice 2).
+        navigationId: tabNavigation.get(tab.id) || "",
       };
       captures.set(fresh.token, fresh);
       // A capture nobody reads must not sit in memory forever.
@@ -739,8 +745,11 @@ async function onHostMessage(message, channel) {
           title: fresh.title,
           captcha_visible: fresh.captchaVisible,
           status: Number(meta.status) || 0,
-          // ADR 0030: the tab these bytes came from.
+          // ADR 0030: the tab these bytes came from, and the navigation this worker last issued
+          // in it. The kernel compares it with the `navigation_id` of the goto it sent; a capture
+          // that followed a *different* navigation is not this read's page.
           tab_id: tab.id,
+          ...(tabNavigation.has(tab.id) ? { navigation_id: tabNavigation.get(tab.id) } : {}),
         },
       });
       return;
@@ -880,6 +889,7 @@ async function onHostMessage(message, channel) {
             typeof crypto !== "undefined" && crypto.randomUUID
               ? crypto.randomUUID()
               : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+          tabNavigation.set(tab.id, navigationId);
           // Read the tab back only once it has moved: `tabs.get` immediately after
           // `update` can return the previous URL, which looked like a redirect out of scope.
           //
