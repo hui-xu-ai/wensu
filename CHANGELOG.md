@@ -36,6 +36,48 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.30] - 2026-11-26
+
+复验 0.14.29（`docs/reviews/wensu-retest-0.14.29-2026-11-26.md`）发现的残留。两条是 0.14.29 自己引入的。
+
+### Fixed — the capability gate treated "unknown" as permission
+
+`cmd=info` answered from a handshake that only ever ran on some other call, so a freshly started
+host reported nothing but its own version — and the gate read "no capabilities" as "no opinion"
+and let the plan run: the retest saw one `goto` execute, spend a quota point and time out 17 s
+later. `cmd=info` now performs a bounded handshake first, `build_info()` distinguishes `ok` /
+`old` / `timeout`, and an unknown capability set is **refused** (`bridge.handshake` when the
+extension never answered, `action.unsupported` when it is older than this build) before anything
+is navigated.
+
+### Fixed — a wall the follow-up's own capture recognized was folded into "no benefit"
+
+`_follow_fulltext` returns the capture it took, and a capture that recognized a wall came back
+as `saved: {status: blocked}`; the caller only looked at the raised `RiskBlocked`, so the initial
+paywall answer survived with its own path. Both shapes are one terminal state now: `blocked`,
+`mhtml_path: null`.
+
+### Fixed — a failed plan reported one unit whatever it actually ran
+
+The exception paths charged a constant `1`, so the private warmup patch's two navigations were
+reported as one (retest measured 4 charged against 3 reported). The charge is counted from the
+plan's network actions.
+
+### Fixed — a capture without DOI metadata was accepted whatever it held
+
+The identity check only fired when the page declared a *contradicting* `citation_doi`, so a Wiley
+request answered with an ACS page came back `ok` with `full_text: true`. The captured address is
+judged first — the requested DOI, the publisher's own host, a mirror subdomain of the same
+organisation, or the DOI in the URL — and `citation_doi` is the extra confirmation.
+
+### Fixed — two local figures with the same file name became one
+
+`assets/` used the figure's own name, so `a/figure.png` and `b/figure.png` in one page resolved to
+one file and the second silently replaced the first. Local images are content-addressed too, which
+also means a re-conversion with changed bytes gets a new file instead of keeping the old one.
+
+`background-0.14.30.js`, as the cache-busting rule requires (worker unchanged since 0.14.29).
+
 ## [0.14.29] - 2026-11-26
 
 审计（`docs/reviews/wensu-audit-0.14.28-2026-11-26.md`，8 项 P1 + 6 项 P2）的修复版本。
