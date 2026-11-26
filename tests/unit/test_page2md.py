@@ -581,6 +581,20 @@ def test_a_thin_conversion_says_the_body_may_be_missing(tmp_path: Path) -> None:
     ), warnings
 
 
+def test_ordinary_prose_containing_cited_by_is_not_truncated() -> None:
+    """`excited by` contains `cited by`; a bare substring search cut a real Conclusion (F33-04)."""
+
+    text = "The mode is excited by light.\n\n## Conclusion\n\nImportant result."
+
+    assert page2md._cut_tail_markers(text) == text
+
+
+def test_a_real_cited_by_heading_is_still_cut() -> None:
+    text = "## Results\n\nBody text.\n\n## Cited by\n\nOther papers."
+
+    assert page2md._cut_tail_markers(text).strip().endswith("Body text.")
+
+
 def test_index_drops_bookkeeping_fields(
     sample_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

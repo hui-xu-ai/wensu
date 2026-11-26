@@ -11,7 +11,7 @@ const PROTOCOL_VERSION = 1;
 // at the browser — for `wait_for` that was a whole release, because the content script is only
 // injected into the two channels' domains (audit 2026-11-26, F08). The host refuses such a plan
 // before it navigates.
-const CAPABILITIES = ["goto", "snapshot", "sleep"];
+const CAPABILITIES = ["goto", "snapshot", "sleep", "await_gate_clear"];
 // Verbs that need `content/actions.js`, which the manifest injects into the channels' domains
 // (and nowhere else). Advertising them for a publisher page is what made `wait_for` a phantom.
 const CHANNEL_CAPABILITIES = [

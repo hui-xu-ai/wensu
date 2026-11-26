@@ -417,6 +417,35 @@ def test_the_answer_names_the_page_it_captured(tmp_path: Path) -> None:
     assert result["captured_url"] == ACS_ARTICLE, result
 
 
+def test_a_wait_that_could_not_run_is_not_a_slow_click(tmp_path: Path) -> None:
+    """A protocol fault must not be reported as "the person did not click" (F33-02).
+
+    The P5 acceptance saw `verification_timeout` on a read whose whole life was 3.3 s and which
+    executed no wait at all: the capability gate had refused the action, and the caller was told
+    the user had been given ten seconds.
+    """
+
+    from test_page_read import build_service
+
+    service = build_service(
+        tmp_path,
+        [
+            [
+                _goto_at(ACS_ARTICLE, "请稍候…", halted=True),
+                {"verb": "await_gate_clear", "ok": False, "error": "action.unsupported"},
+            ]
+        ],
+    )
+
+    result = service.read_page(doi=ACS_DOI)
+
+    assert result["terminal"] == "blocked", result
+    assert result["reason"] != "verification_timeout", result
+    assert result["waited"] is False, result
+    assert result["stage"] == "wall", result
+    assert "capabilities" in result["next"], result["next"]
+
+
 def test_a_gate_title_on_a_page_that_is_not_a_wall_is_not_a_wall(tmp_path: Path) -> None:
     """Measured 2026-11-26 on ACS: the title said 「请稍候…」 while the page was the article.
 

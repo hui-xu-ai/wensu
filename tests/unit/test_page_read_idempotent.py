@@ -259,6 +259,25 @@ def test_warm_up_opens_one_kept_tab_per_publisher(tmp_path: Path) -> None:
     assert opened[-1]["ok"] is False and opened[-1]["reason"] == "unsupported_site", opened
 
 
+def test_a_refused_warm_up_stops_the_batch_and_reports_its_cost(tmp_path: Path) -> None:
+    """A 403 during warm-up must not read as `ok` with zero cost (P5 acceptance, F33-03)."""
+
+    from test_page_read import build_service
+
+    service = build_service(
+        tmp_path,
+        [[{"verb": "goto", "data": {"status": 403, "url": "https://pubs.acs.org/"}}]],
+    )
+
+    result = service.warm_up(["10.1021/jacs.6c13448", "10.1002/pen.23634"])
+
+    assert result["status"] == "blocked", result
+    assert result["signal"], result
+    assert result["quota_charged"] == 1, result
+    assert result["not_attempted"] == ["10.1002/pen.23634"], result
+    assert result["opened"][0]["ok"] is False, result["opened"]
+
+
 def test_blocked_tells_the_caller_to_read_again_once_the_wall_is_solved() -> None:
     """ADR 0022 rev 1: a solved wall leaves the article in the tab, so a second call is free.
 

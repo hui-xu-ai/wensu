@@ -178,6 +178,8 @@ def _page_terminal(payload: dict[str, Any]) -> str:
     if status == "ok":
         return "ok"
     if status == "blocked" or "RISK_" in code:
+        # `verification_timeout` is the only "we asked and waited" outcome; a wait that could not
+        # run at all (`gate_wait_unavailable`) stays `blocked` — a build problem, not a slow click.
         return "timeout" if reason == "verification_timeout" else "blocked"
     if "timeout" in reason or "timeout" in code.casefold():
         return "timeout"
@@ -1102,11 +1104,22 @@ class ScholarService:
                 ),
                 spec,
             )
-        except (ActionError, ScholarSearchError, RiskBlocked):
-            return {"cleared": False, "title": "", "url": "", "reason": "action_failed"}
+        except (ActionError, ScholarSearchError, RiskBlocked) as error:
+            # The wait did not run. Saying "the person did not clear it in ten seconds" here would
+            # be a lie that hides a protocol fault: the P5 acceptance saw `verification_timeout`
+            # on a read whose whole life was 3.3 s and which executed no wait at all
+            # (2026-11-26, F33-02). The failure keeps its own name and code.
+            return {
+                "cleared": False,
+                "ran": False,
+                "title": "",
+                "url": "",
+                "reason": getattr(error, "code", "") or type(error).__name__,
+            }
         last = outcomes[-1].data if outcomes and isinstance(outcomes[-1].data, dict) else {}
         return {
             "cleared": last.get("cleared") is True,
+            "ran": True,
             "title": str(last.get("title") or ""),
             "url": str(last.get("url") or ""),
             "reason": str(last.get("reason") or ""),
@@ -1240,7 +1253,38 @@ class ScholarService:
                         ),
                         spec,
                     )
-                except (ActionError, ScholarSearchError, RiskBlocked) as error:
+                except RiskBlocked as error:
+                    # A refusal ends the whole warm-up: the cooldown that came with it blocks the
+                    # remaining targets anyway, and a caller that only saw per-target `ok: false`
+                    # went on to the batch believing the publishers were cleared (P5 acceptance
+                    # 2026-11-26, F33-03).
+                    charged += getattr(error, "charged", 1)
+                    opened.append(
+                        {
+                            "target": target,
+                            "publisher": publisher.name,
+                            "ok": False,
+                            "reason": error.signal,
+                        }
+                    )
+                    return {
+                        "status": "blocked",
+                        "signal": error.signal,
+                        "cooldown_until": error.cooldown_until,
+                        "opened": opened,
+                        "not_attempted": [
+                            str(item)
+                            for item in targets[targets.index(raw) + 1 :]
+                            if str(item or "").strip()
+                        ],
+                        "quota_charged": charged,
+                        "quota_reason": "challenge",
+                        "next": (
+                            "the site refused a warm-up navigation: stop here, do not run the "
+                            "batch, and tell the user which publisher cooled down."
+                        ),
+                    }
+                except (ActionError, ScholarSearchError) as error:
                     opened.append(
                         {
                             "target": target,
@@ -1455,9 +1499,12 @@ class ScholarService:
                 self._page_cache_put(target, {"status": "blocked", "title": wall_title})
                 gate = self._await_gate_clear(publisher, spec)
                 if not gate["cleared"]:
+                    # Two different failures, two different names: "the wait ran and the person
+                    # did not clear it" versus "the wait could not run at all".
+                    waited = bool(gate.get("ran"))
                     return {
                         "status": "blocked",
-                        "reason": "verification_timeout",
+                        "reason": "verification_timeout" if waited else "gate_wait_unavailable",
                         "signal": f"title:{marker}",
                         "doi": identifier,
                         "publisher": publisher.name,
@@ -1466,12 +1513,20 @@ class ScholarService:
                         "bytes": 0,
                         "title": gate["title"] or wall_title,
                         "action_required": "manual_verification",
+                        "waited": waited,
+                        "wait_reason": gate["reason"],
                         "quota_charged": _charged_units(outcomes),
                         "quota_reason": "challenge",
                         "next": (
                             "the verification page did not clear in ten seconds: solve it in the "
                             "browser, then ask again (or call `snapshot` yourself once you have), "
                             "or skip this publisher for now."
+                            if waited
+                            else (
+                                "the wait for the verification page could not run "
+                                f"({gate['reason']}): a tool/build problem, not a slow click — "
+                                "check `status` for the running worker and its capabilities."
+                            )
                         ),
                     }
             # Publisher article bodies render after the load event: capturing straight after

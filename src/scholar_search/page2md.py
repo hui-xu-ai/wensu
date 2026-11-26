@@ -734,16 +734,22 @@ def _cut_tail(markdown: str) -> str:
 
 
 def _cut_tail_markers(text: str) -> str:
-    """The literal markers, kept for the publishers that do print them as a heading."""
+    """Cut the publisher's furniture that appears *as a heading*, and nothing else.
 
-    lowered = text.casefold()
+    The fallback used to look for the marker anywhere in the text, and "cited by" is a substring
+    of ordinary prose: the real Springer capture that read "The mode is excited by light" lost its
+    Fabrication Steps and Conclusion sections, with `terminal: ok` and `coverage: 0.365` — high
+    enough not to warn (P5 acceptance 2026-11-26, F33-04). A marker now has to start a line.
+    """
+
     cut = len(text)
     for marker in _TAIL_MARKERS:
-        position = lowered.find("## " + marker)
-        if position < 0:
-            position = lowered.find(marker)
-        if 0 <= position < cut:
-            cut = position
+        for pattern in (f"## {marker}", f"# {marker}", marker):
+            found = re.search(rf"(?m)^[#\s]*{re.escape(pattern)}\s*$", text, re.IGNORECASE)
+            if found is None:
+                continue
+            if found.start() < cut:
+                cut = found.start()
     return text[:cut].rstrip() + "\n" if cut < len(text) else text
 
 
