@@ -36,6 +36,19 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.38] - 2026-11-26
+
+### Fixed — 0.14.36 与 0.14.37 发布的 worker 里没有窗口聚焦
+
+那一版我只改了工作区的 xtension/background-*.js，没有 git add：tag 里没有这份改动，CI 从 tag
+构建，于是两个已发行版本的 worker 仍只设 state: "maximized"。本地 elease-check 的 ssets 门
+只校验"引用的文件存在"，而本地 wheel 读的是工作区——两边都看不见这个差异。
+
+本版把改动真正入库，并新增一道门 committed：**发行前先提交，门会比对 xtension/、src/、
+skills/、pyproject.toml 与 HEAD**，任何"只在磁盘上"的发售文件都会让它失败。发布流程因此改为
+"提交 → 跑门 → 打 tag"。
+
+`background-0.14.38.js`。
 ## [0.14.37] - 2026-11-26
 
 ### Added — 「上一个动作还在跑吗」现在能看见了

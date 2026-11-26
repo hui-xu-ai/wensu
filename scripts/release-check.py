@@ -106,6 +106,31 @@ def check_format() -> tuple[bool, str]:
     return ok, output.splitlines()[-1] if output else ""
 
 
+def check_shipped_files_are_committed() -> tuple[bool, str]:
+    """What will ship must be in the tag, not only in the working tree.
+
+    0.14.36 changed `extension/background-*.js` without `git add`, so the tag (and every wheel
+    CI built from it) carried the old worker while the local build — which reads the working
+    tree — carried the fix. Nothing noticed. Run the gates **after** committing the release bump,
+    and this check compares the shipped files with HEAD instead of with the disk.
+    """
+
+    paths = ["extension", "src", "skills", "pyproject.toml"]
+    result = subprocess.run(
+        ["git", "status", "--porcelain", "--", *paths],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return True, "not a git checkout — skipped"
+    dirty = [line for line in result.stdout.splitlines() if line.strip()]
+    if dirty:
+        return False, f"{len(dirty)} shipped file(s) not committed: {dirty[0].strip()[:60]}"
+    return True, "every shipped file is committed"
+
+
 def check_assets() -> tuple[bool, str]:
     """Every file the extension manifest references is inside the wheel.
 
@@ -175,6 +200,11 @@ CHECKS = [
     ("types", "mypy", check_types),
     ("plans", "every channel plan passes kernel and host validation", check_plans),
     ("assets", "the wheel holds every file the extension loads", check_assets),
+    (
+        "committed",
+        "the files that ship are in HEAD, not only on disk",
+        check_shipped_files_are_committed,
+    ),
     ("artifacts", "wheel carries both channels", check_artifacts),
 ]
 
