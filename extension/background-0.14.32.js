@@ -259,6 +259,9 @@ const WORK_TAB_KEY = "wensuWorkTabId";
 // Tabs opened for a single navigation (`goto` with `open: "new"`). They are blanked on the
 // next `goto`, so the browser never accumulates tabs.
 const DISPOSABLE_KEY = "wensuDisposableTabs";
+// Warm-up tabs the caller asked to keep open (ADR 0028). Separate from the disposable list so a
+// navigation never blanks them.
+const KEPT_KEY = "wensuKeptTabs";
 // Every tab this extension created, newest last. The work-tab id lives in `storage.local`,
 // but that id can still point at a tab the user closed — and older builds remembered the id
 // in `storage.session`, which is emptied when the extension reloads. Without this list the
@@ -293,6 +296,23 @@ async function rememberDisposable(tabId) {
     // A transient tab is still a tab of ours: it becomes the work tab when it is blanked,
     // so it belongs in the same list the fallback consults.
     [OWNED_KEY]: [...new Set([...owned, tabId])].slice(-8),
+  });
+}
+
+async function rememberKept(tabId) {
+  // A "kept" tab is one the caller asked to leave in place: warm-up pages whose verification
+  // pages a person clicks through before a batch (ADR 0028). It lives in its own list so
+  // `closeDisposableTabs()` — which blanks the transient tabs before every navigation — never
+  // touches it.
+  if (!Number.isInteger(tabId)) return;
+  const stored = (await chrome.storage.local.get(KEPT_KEY))[KEPT_KEY];
+  const ids = Array.isArray(stored) ? stored.filter((id) => Number.isInteger(id)) : [];
+  if (!ids.includes(tabId)) ids.push(tabId);
+  const known = (await chrome.storage.local.get(OWNED_KEY))[OWNED_KEY];
+  const owned = Array.isArray(known) ? known.filter((id) => Number.isInteger(id)) : [];
+  await chrome.storage.local.set({
+    [KEPT_KEY]: ids.slice(-8),
+    [OWNED_KEY]: [...new Set([...owned, tabId])].slice(-12),
   });
 }
 
@@ -772,7 +792,10 @@ async function onHostMessage(message, channel) {
         await closeDisposableTabs();
         const began = Date.now();
         const created = await chrome.tabs.create({ url: params.url, active: true });
-        await rememberDisposable(created && created.id);
+        // `keep: true` marks the tab as warm-up: it is left in place for a person to click
+        // through, and no later navigation blanks it (ADR 0028).
+        if (params.keep === true) await rememberKept(created && created.id);
+        else await rememberDisposable(created && created.id);
         // `wait: "none"` returns as soon as the navigation is issued: the caller is going to
         // replace the tab's contents anyway, so waiting for the load event only delays it.
         if (params.wait !== "none") {

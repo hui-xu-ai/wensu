@@ -1191,6 +1191,86 @@ class ScholarService:
         answer["terminal"] = _page_terminal(answer)
         return _page_full_text(answer)
 
+    def warm_up(self, targets: Sequence[str]) -> dict[str, Any]:
+        """Open one article per publisher in a kept tab, for the person to click through.
+
+        A verification page is per-site and short-lived: clearing it once for a publisher is what
+        lets the batch that follows read that publisher's articles without asking again. Each
+        target costs one navigation (a `goto`) and one site visit, so the caller is told exactly
+        that before it happens, and the tabs are left in place (ADR 0028) — a later navigation
+        blanks its own transient tabs, and these are not among them.
+        """
+
+        opened: list[dict[str, Any]] = []
+        charged = 0
+        with self._browser_transaction():
+            for raw in targets:
+                target = str(raw or "").strip()
+                if not target:
+                    continue
+                identifier = target if target.startswith("10.") else ""
+                url = (
+                    target
+                    if target.startswith(("http://", "https://"))
+                    else (f"https://doi.org/{identifier}" if identifier else "")
+                )
+                publisher = publisher_for_doi(identifier) if identifier else None
+                if publisher is None and url:
+                    publisher = publisher_for_host(urlparse(url).hostname or "")
+                if publisher is None or not url:
+                    opened.append({"target": target, "ok": False, "reason": "unsupported_site"})
+                    continue
+                spec = _page_spec(publisher)
+                try:
+                    outcomes = self._run(
+                        Plan(
+                            channel=f"page:{publisher.name}",
+                            purpose="detail",
+                            actions=(
+                                Action(
+                                    "goto",
+                                    {
+                                        "url": url,
+                                        "open": "new",
+                                        "keep": True,
+                                        "wait": "load",
+                                    },
+                                ),
+                            ),
+                        ),
+                        spec,
+                    )
+                except (ActionError, ScholarSearchError, RiskBlocked) as error:
+                    opened.append(
+                        {
+                            "target": target,
+                            "publisher": publisher.name,
+                            "ok": False,
+                            "reason": getattr(error, "code", "") or "action_failed",
+                        }
+                    )
+                    continue
+                cost = _charged_units(outcomes)
+                charged += cost
+                opened.append(
+                    {
+                        "target": target,
+                        "publisher": publisher.name,
+                        "ok": True,
+                        "quota_charged": cost,
+                    }
+                )
+        return {
+            "status": "ok",
+            "opened": opened,
+            "quota_charged": charged,
+            "quota_reason": "navigate",
+            "next": (
+                "ask the user to solve any verification page in these tabs, then run the batch: "
+                "each of these publishers is cleared for a while."
+            ),
+        }
+
     def _read_page(
         self, *, url: str = "", doi: str = "", refresh: bool = False, view: str = "landing"
     ) -> dict[str, Any]:

@@ -232,6 +232,33 @@ def test_a_cache_entry_whose_bytes_changed_is_not_served(tmp_path: Path) -> None
     assert str(again["capture_sha256"]) == hashlib.sha256(republished.read_bytes()).hexdigest()
 
 
+def test_warm_up_opens_one_kept_tab_per_publisher(tmp_path: Path) -> None:
+    """Warm-up keeps a tab open for the person; it is not the working tab (ADR 0028)."""
+
+    from test_page_read import build_service
+
+    service = build_service(
+        tmp_path,
+        [
+            [
+                {"verb": "goto", "data": {"url": "https://doi.org/10.1016/j.cej.2023.145123"}},
+                {
+                    "verb": "goto",
+                    "data": {"url": "https://onlinelibrary.wiley.com/doi/10.1002/pen.23634"},
+                },
+            ]
+        ],
+    )
+
+    result = service.warm_up(["10.1016/j.cej.2023.145123", "10.1002/pen.23634", "10.9999/nope"])
+
+    assert result["status"] == "ok"
+    assert result["quota_charged"] == 2, result
+    opened = result["opened"]
+    assert [item["publisher"] for item in opened if item["ok"]] == ["elsevier", "wiley"], opened
+    assert opened[-1]["ok"] is False and opened[-1]["reason"] == "unsupported_site", opened
+
+
 def test_blocked_tells_the_caller_to_read_again_once_the_wall_is_solved() -> None:
     """ADR 0022 rev 1: a solved wall leaves the article in the tab, so a second call is free.
 

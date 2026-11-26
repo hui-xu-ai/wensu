@@ -39,7 +39,9 @@ ALLOWED_KEYS: dict[str, frozenset[str]] = {
     # `halt_url_markers` / `halt_titles`: the gate markers a navigation may stop waiting for
     # (ADR 0025). Opaque to the extension — the kernel owns the lists in `core/risk.py` and
     # still decides what a wall is; these only end the wait early.
-    "goto": frozenset({"url", "reload", "open", "close", "wait", "dwell_ms", *_GOTO_HALT_KEYS}),
+    "goto": frozenset(
+        {"url", "reload", "open", "close", "wait", "dwell_ms", "keep", *_GOTO_HALT_KEYS}
+    ),
     "wait_for": frozenset({"selector", "timeout_ms", "state"}),
     "type": frozenset({"selector", "text", "clear"}),
     # `wait_until` lets a click report when the site finished the work it started.
@@ -72,6 +74,9 @@ GOTO_OPEN = frozenset({"work", "new"})
 # replace the tab's contents and do not need the load event.
 GOTO_WAIT = frozenset({"load", "none"})
 GOTO_CLOSE = frozenset({"disposable"})
+# `keep: true` leaves a tab the caller opened in place, for a warm-up page a person clicks
+# through before a batch (ADR 0028). It rides on `goto`'s parameters, not on a new verb.
+GOTO_KEEP = True
 READ_TEXT_MODES = frozenset({"inner", "text"})
 # Which tab a capture reads: the dedicated work tab, or whatever the user is looking at.
 SNAPSHOT_TABS = frozenset({"work", "active"})
@@ -116,6 +121,12 @@ def validate_params(verb: str, params: Any) -> str | None:
         if "close" in params and params["close"] not in GOTO_CLOSE:
             return "policy.params"
         if "wait" in params and params["wait"] not in GOTO_WAIT:
+            return "policy.params"
+        if "keep" in params and not isinstance(params["keep"], bool):
+            return "policy.params"
+        # A kept tab is a tab the caller opened on its own; keeping the work tab in place would
+        # leave the shared work tab pinned to a warm-up page (ADR 0028).
+        if params.get("keep") is True and params.get("open") != "new":
             return "policy.params"
         if "dwell_ms" in params:
             dwell = params["dwell_ms"]

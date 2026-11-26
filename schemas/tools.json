@@ -462,6 +462,32 @@
       }
     },
     {
+      "name": "warm_up",
+      "description": "Open one article per publisher in a tab of its own, for the user to clear verification.\n\nA verification page belongs to a site: clearing it once makes the batch that follows read\nthat publisher's articles without asking again. Give one DOI or URL per publisher you are\nabout to read (e.g. `[\"10.1007/s10853-020-12345-6\", \"10.1016/j.cej.2023.145123\"]`); each\none is opened in a **separate tab that stays open**, and `open` lists what happened.\n\n**Cost**: one navigation per target — 1 quota unit and one site visit each. Tell the user\nwhat it costs before calling it, then ask them to click through any verification page in\nthose tabs.\n\nThese tabs are not the working tab: later reads still use it, and they do not disturb the\npages opened here.",
+      "inputSchema": {
+        "properties": {
+          "targets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Targets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "targets"
+        ],
+        "title": "warm_upArguments",
+        "type": "object",
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "warm_upDictOutput",
+        "type": "object"
+      }
+    },
+    {
       "name": "snapshot",
       "description": "Save the page the user has open as MHTML — one file with its images and CSS.\n\nThis is the \"read this paper\" entry point for pages outside the two channels:\nthe user opens the article in the browser, `snapshot` writes\n`wensu-pages/<title> [<host>] <time>.mhtml` into the download folder, and\n`page2md` turns that file into Markdown.\n\nIt issues no request of its own — it reads the tab that is already open — so it\nspends **no quota** and is not limited to the channel domains. `status` still\nreports `bridge_ready`; a false value means the extension is not connected.",
       "inputSchema": {

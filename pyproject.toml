@@ -82,6 +82,7 @@ packages = ["src/scholar_search"]
 "skills/scholar-detail/SKILL.md" = "scholar_search/assets/skills/scholar-detail/SKILL.md"
 "skills/scholar-export/SKILL.md" = "scholar_search/assets/skills/scholar-export/SKILL.md"
 "skills/scholar-install/SKILL.md" = "scholar_search/assets/skills/scholar-install/SKILL.md"
+"skills/scholar-batch-read/SKILL.md" = "scholar_search/assets/skills/scholar-batch-read/SKILL.md"
 
 [tool.hatch.build.targets.sdist]
 include = [

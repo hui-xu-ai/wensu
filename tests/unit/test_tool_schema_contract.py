@@ -34,16 +34,19 @@ def schemas() -> dict[str, dict[str, Any]]:
     return _schemas()
 
 
-def test_the_eight_tools_are_advertised(schemas: dict[str, dict[str, Any]]) -> None:
+def test_the_nine_tools_are_advertised(schemas: dict[str, dict[str, Any]]) -> None:
     # `snapshot` is the sixth: it saves the open tab and spends no quota (ADR 0018).
     # `page2md` is the eighth: it converts that capture in-process, so the last link of
     # "read the paper" no longer needs a shell (2026-11-24).
+    # `warm_up` is the ninth: it opens one kept tab per publisher so a person can clear the
+    # verification pages before a batch (ADR 0028).
     assert set(schemas) == {
         "search",
         "detail",
         "detail_many",
         "export",
         "page_read",
+        "warm_up",
         "snapshot",
         "page2md",
         "status",

@@ -898,6 +898,28 @@ def build_server(service: ScholarService) -> FastMCP:
             return _payload(error)
 
     @mcp.tool()
+    def warm_up(targets: list[str]) -> dict[str, Any]:
+        """Open one article per publisher in a tab of its own, for the user to clear verification.
+
+        A verification page belongs to a site: clearing it once makes the batch that follows read
+        that publisher's articles without asking again. Give one DOI or URL per publisher you are
+        about to read (e.g. `["10.1007/s10853-020-12345-6", "10.1016/j.cej.2023.145123"]`); each
+        one is opened in a **separate tab that stays open**, and `open` lists what happened.
+
+        **Cost**: one navigation per target — 1 quota unit and one site visit each. Tell the user
+        what it costs before calling it, then ask them to click through any verification page in
+        those tabs.
+
+        These tabs are not the working tab: later reads still use it, and they do not disturb the
+        pages opened here.
+        """
+
+        try:
+            return service.warm_up(targets)
+        except (RiskBlocked, ScholarSearchError, OSError, ValueError) as error:
+            return _payload(error)
+
+    @mcp.tool()
     def snapshot() -> dict[str, Any]:
         """Save the page the user has open as MHTML — one file with its images and CSS.
 
