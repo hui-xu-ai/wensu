@@ -822,15 +822,19 @@ def build_server(service: ScholarService) -> FastMCP:
         """Open a publisher article page and say whether it holds the full text.
 
         Give `doi` (preferred — it also decides the publisher) or an article `url`. The
-        browser opens that address directly, then saves the page as MHTML; the navigation
-        plus the capture is charged as **2 quota units** — or **1** when the page turns out
-        to be a challenge wall, because nothing is captured then.
+        browser opens that address directly, then saves the page as MHTML; the navigation plus the
+        capture is charged per action that runs — **2** units normally, and a challenge wall is
+        charged only for the navigation(s) that ran (**1**, or 2 when the build opens the
+        publisher's home page first), because nothing is captured then.
 
-        Read `status` before anything else:
+        Read `full_text` first: it is `true` only when the article body was actually read. When it
+        is `false`, `full_text_reason` says why — `paywall`, `pdf_only`, `abstract_only`,
+        `doi_not_found`, `unsupported_site` or `blocked` — and **none of those is proof that this
+        browser lacks institutional access**. `status` keeps its older meanings:
 
         * `ok` — `mhtml_path` holds the article; call `page2md` with it;
-        * `no_html` — the page has no full text; `reason` says `paywall`, `abstract_only`,
-          `doi_not_found`, `pdf_only` or `unparsable`, and `pdf_url` may offer the PDF route;
+        * `no_html` — the page holds no article body; `reason` narrows it (`paywall`,
+          `abstract_only`, `pdf_only`, `doi_not_found`), and `pdf_url` may offer the PDF route;
         * `unsupported_site` — the DOI belongs to a publisher this build does not visit
           (the curated list is in `core/publishers.py`, ADR 0019), so nothing was opened;
         * `blocked` — the site showed a human-verification wall. It is recognized from the

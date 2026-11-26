@@ -23,7 +23,7 @@ from scholar_search.core.publishers import (
     publisher_for_host,
 )
 from scholar_search.core.risk import RiskGuard
-from scholar_search.core.service import ScholarService, _page_next
+from scholar_search.core.service import ScholarService, _page_full_text, _page_next
 from support import FakeChannel, StubRegistry, make_manifest
 
 ARTICLE_HTML = """<!DOCTYPE html><html><body>
@@ -142,17 +142,100 @@ def test_probe_rejects_an_abstract_page_that_wraps_sections(tmp_path: Path) -> N
     assert result["reason"] == "paywall"
 
 
-def test_next_asks_the_user_to_sign_in_instead_of_retrying() -> None:
-    paywall = _page_next({"status": "no_html", "reason": "paywall"})
-    abstract = _page_next({"status": "no_html", "reason": "abstract_only"})
-    ok = _page_next({"status": "ok", "reason": ""})
+def test_next_does_not_blame_the_readers_permissions() -> None:
+    """`no_html` used to advise "ask the user to sign in" for every reason.
 
-    for hint in (paywall, abstract):
-        assert "sign in" in hint
-        assert "ask the user" in hint
-        assert "page_read again" in hint
-        assert "Do not retry" in hint
-    assert "page2md" in ok
+    2026-11-26 report: a site that only offers a PDF, and a page that simply has no HTML body,
+    were both reported as "no institutional access". The advice must say *not read*, and name
+    the routes that actually exist.
+    """
+
+    for reason in ("paywall", "abstract_only", "pdf_only"):
+        hint = _page_next({"status": "no_html", "reason": reason})
+        assert "sign in" not in hint.lower(), hint
+        assert "no access" in hint, hint  # named only as the thing this is not
+        assert "pdf_url" in hint, hint
+        assert len(hint) <= 300, hint
+    assert "page2md" in _page_next({"status": "ok", "reason": ""})
+
+
+def test_full_text_is_the_field_to_branch_on() -> None:
+    """One field answers the question the caller actually asked."""
+
+    read = _page_full_text({"status": "ok"})
+    assert read["full_text"] is True
+    assert "full_text_reason" not in read
+
+    for status, reason in (
+        ("no_html", "paywall"),
+        ("no_html", "pdf_only"),
+        ("no_html", "abstract_only"),
+        ("unsupported_site", "no curated publisher matches"),
+        ("blocked", "challenge"),
+    ):
+        answered = _page_full_text({"status": status, "reason": reason})
+        assert answered["full_text"] is False, answered
+        assert answered["full_text_reason"] == reason, answered
+        # The older fields are untouched: existing callers must not break.
+        assert answered["status"] == status
+
+    # A payload with no reason still names something.
+    assert _page_full_text({"status": "blocked"})["full_text_reason"] == "blocked"
+
+
+def test_a_pdf_only_landing_page_says_pdf_only(tmp_path: Path) -> None:
+    """A site that offers only the PDF is neither an abstract nor a permission problem."""
+
+    html = (
+        "<!DOCTYPE html><html><body><h1>A paper</h1>"
+        '<p><a href="https://example.org/article.pdf">Download PDF</a></p></body></html>'
+    )
+    result = classify_mhtml(write_mhtml(tmp_path / "pdfonly.mhtml", html))
+
+    assert result["status"] == "no_html", result
+    assert result["reason"] == "pdf_only", result
+    assert str(result["pdf_url"]).endswith(".pdf"), result
+
+
+def test_a_paywall_answer_points_at_a_file_it_actually_wrote(tmp_path: Path) -> None:
+    """Report L32: a `no_html` answer carried a byte count and a path, and `page2md` found no file.
+
+    Paywall / abstract captures *are* kept — they are what `page2md` can still summarise — so the
+    path must name a file that exists. (The byte count describes the bridge reply, before
+    `<script>` stripping, which is why it is never compared to the file size.)
+    """
+
+    paywall = write_mhtml(tmp_path / "paywall.mhtml", PAYWALL_HTML).read_bytes()
+    service = build_service(
+        tmp_path,
+        [
+            [
+                {
+                    "verb": "goto",
+                    "data": {"url": "https://onlinelibrary.wiley.com/doi/10.1002/pen.23634"},
+                },
+                {"verb": "sleep", "data": {"ms": 1}},
+                {
+                    "verb": "snapshot",
+                    "data": {
+                        "token": "t1",
+                        "total": len(paywall),
+                        "base64": base64.b64encode(paywall).decode("ascii"),
+                        "url": "https://onlinelibrary.wiley.com/doi/10.1002/pen.23634",
+                        "title": "A paper",
+                        "captcha_visible": False,
+                    },
+                },
+            ]
+        ],
+    )
+
+    result = service.read_page(doi="10.1002/pen.23634")
+
+    assert result["status"] == "no_html", result
+    assert result["full_text"] is False, result
+    assert result["mhtml_path"], result
+    assert Path(str(result["mhtml_path"])).is_file(), result
 
 
 def test_page_read_takes_a_second_look_when_the_body_is_still_rendering(tmp_path: Path) -> None:

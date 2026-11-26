@@ -46,7 +46,7 @@ from .locking import interprocess_lock
 from .page_nav import article_navigation
 from .pageprobe import challenge_in_title, classify_mhtml
 from .planner import Planner
-from .policy import PolicyEngine
+from .policy import NETWORK_VERBS, PolicyEngine
 from .publishers import PUBLISHERS, Publisher, publisher_for_doi, publisher_for_host
 from .registry import ChannelRegistry, ChannelSpec
 from .risk import RISK_TITLE_MARKERS, RiskGuard
@@ -126,13 +126,39 @@ def _page_next(probe: dict[str, Any]) -> str:
             "nothing was kept and only the navigation is charged (1 unit). Check the identifier "
             "itself — a mistyped or not-yet-indexed DOI lands here; signing in will not change it."
         )
-    if status == "no_html" and reason in {"paywall", "abstract_only"}:
+    if status == "no_html" and reason in {"paywall", "abstract_only", "pdf_only"}:
         return (
-            "the page showed no article body, usually because this browser is not signed in "
-            "to the publisher: ask the user to sign in (institutional access / campus network) "
-            "in that browser window, then call page_read again. Do not retry by yourself."
+            "no full text on this page, which is not the same as no access: the site may want a "
+            "subscription, may publish only a PDF, or may not serve the article as HTML. Use "
+            "`pdf_url` when it is present, or read it from another source."
         )
     return "no full text on the page: offer the PDF route instead"
+
+
+def _page_full_text(payload: dict[str, Any]) -> dict[str, Any]:
+    """Say whether the full text was actually read, in a field worth branching on.
+
+    `status` / `reason` keep their meanings — `no_html` still covers every "no article body"
+    case — but a caller that only reads them cannot tell a paywall from a PDF-only landing page
+    from a site that never serves HTML (2026-11-26 report: all three were reported as "no
+    institutional access"). `full_text` answers the one question that was actually asked.
+    """
+
+    if str(payload.get("status") or "") == "ok":
+        return {**payload, "full_text": True}
+    reason = str(payload.get("reason") or payload.get("status") or "").strip()
+    return {**payload, "full_text": False, "full_text_reason": reason or "unknown"}
+
+
+def _charged_units(outcomes: Sequence[ActionOutcome]) -> int:
+    """What the policy actually billed: one unit per network action that ran.
+
+    The answer used to say `1` for every wall, while a read that navigates through the
+    publisher's home page first runs two `goto`s and is billed two (measured 2026-11-26: the
+    answer said 1, the quota dropped by 2, and `audit.jsonl` held two `goto` lines).
+    """
+
+    return sum(1 for outcome in outcomes if outcome.action.verb in NETWORK_VERBS) or 1
 
 
 def _page_evidence_site(url: str, publisher: Publisher, identifier: str) -> bool:
@@ -825,6 +851,17 @@ class ScholarService:
         }
 
     def read_page(self, *, url: str = "", doi: str = "") -> dict[str, Any]:
+        """`_read_page`, plus the one field a caller should branch on: `full_text`.
+
+        The 2026-11-26 report found the same `status: "no_html"` standing for a paywall, a
+        PDF-only landing page and a site that never serves HTML — and the advice built on it told
+        the reader they had no institutional access. `full_text` says what actually happened; the
+        older `status` / `reason` keep their meanings so existing callers do not break.
+        """
+
+        return _page_full_text(self._read_page(url=url, doi=doi))
+
+    def _read_page(self, *, url: str = "", doi: str = "") -> dict[str, Any]:
         """Open the article a reader asked for, then say what is on it.
 
         One navigation: the article URL is opened directly — a deep link, the
@@ -833,9 +870,9 @@ class ScholarService:
         as `blocked` / `challenge` and the human solves it in the browser (ADR 0004).
 
         Answers with `status: "ok"` and the saved path when the page holds the article,
-        `status: "no_html"` with a `reason` when it holds only a preview, a paywall or a
-        PDF, and `status: "unsupported_site"` when the DOI leads to a publisher this
-        build does not visit (ADR 0019).
+        `status: "no_html"` with a `reason` when it holds only a preview or a PDF, and
+        `status: "unsupported_site"` when the DOI leads to a publisher this build does not
+        visit (ADR 0019).
         """
 
         target = (url or "").strip()
@@ -978,10 +1015,10 @@ class ScholarService:
                     "mhtml_path": None,
                     "bytes": 0,
                     "title": wall_title,
-                    # One action ran (`goto`): `sleep` and `wait_for` are not charged, and
+                    # Billed per navigation that ran: `sleep` and `wait_for` are free, and
                     # billing the flat PAGE_READ_QUOTA would charge for a capture that never
-                    # happened.
-                    "quota_charged": 1,
+                    # happened. Two navigations (the warmup patch) really do cost two.
+                    "quota_charged": _charged_units(outcomes),
                     "next": _page_next({"status": "blocked", "reason": "challenge"}),
                 }
             # Publisher article bodies render after the load event: capturing straight after

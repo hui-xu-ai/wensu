@@ -93,11 +93,14 @@ wensu page2md --in "<页面>.html" --out "%LOCALAPPDATA%\scholar-search\pages\<s
   1. **不要重试**、不要刷新、不要点页面上的任何东西（ADR 0004：遇风控即停）；
   2. 告诉用户"这页要你先在浏览器里完成验证/登录"，请他做完再说一声；
   3. 用户确认后再调一次 `snapshot`。
-- `page_read` 返回 `status: "no_html"` 且 `reason` 是 `paywall` 或 `abstract_only`，说明浏览器
-  **没有这篇的机构访问权限**（没登录、不在校园网/机构 IP、或该刊没订阅）：存下来的是摘要页。
-  此时同样**不要自己重试**，按返回的 `next` 做事：请用户在**那个浏览器窗口**里登录出版社
-  （机构账号 / 校园网 / CARSI），确认后再调一次 `page_read`。
-  判据在返回里：`headings`（编号文章标题数）为 0、同时 `sections` 却不少 —— 摘要页也会带
+- 判断"读到了没有"只看 **`full_text`**（`true`／`false`）：`false` 时**不要**推断成"没有机构权限"。
+  `full_text_reason` 才说明情况：`paywall`（有付费墙）、`pdf_only`（站点只给 PDF、没有网页正文）、
+  `abstract_only`（只有摘要）、`doi_not_found`、`unsupported_site`、`blocked`（撞验证）。
+  这几种都属"**未读到全文**"，措辞就按这个说，别替用户下"你没权限"的结论。
+  下一步按返回的 `next` 走：有 `pdf_url` 就给 PDF 路线（`paper-reader`），否则换渠道或换一篇。
+  只有 `paywall` ＋ 用户自己说没登录时，才可以提议他去**那个浏览器窗口**登录出版社
+  （机构账号 / 校园网 / CARSI），确认后再调一次 `page_read`；**不要自己重试**。
+  判据也在返回里：`headings`（编号文章标题数）为 0、`prose_words` 低于阈值 —— 摘要页也会带
   `<section id=…>` 外壳，所以"有 section"不代表"有正文"。
 - 这个动词**永远不会**替你过验证，也不读取会话 Cookie；页面能看到什么，完全取决于用户自己
   在浏览器里的登录状态。

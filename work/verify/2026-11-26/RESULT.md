@@ -112,3 +112,33 @@ $env:TEMP=$env:TMP=$env:TMPDIR="D:\Python\DeepSeek\DateWork\.tmp"; $env:PYTHONPA
 - **`_still_rendering` 仍显式排除 `blocked`**（`service.py:84-98`）：现在有 `halted` 兜在前面，暂态墙在标题关就被放过，不会进入二次抓取那条路；若真实链路发现仍会误判，再改这条假设。
 - **扩展未做版本改名**：只改了 `actions.js` 的内容脚本（非 service worker），按 HANDOFF 的坑，worker 改名只在正式发版时连同版本号一起做。
 
+---
+
+# T2 结果：「未读到全文」统一口径（2026-11-26）
+
+**验证档位：单元测试 + 静态门**（`release-check` 10 门）；真实链路复验合并到本轮收尾。
+
+## 改了什么
+
+| 改动 | 位置 | 为什么 |
+|---|---|---|
+| `read_page` 变成薄包装 + `_read_page` 干活，统一补**顶层字段** `full_text`（`ok` ⇒ `true`）与 `full_text_reason`（`paywall`/`pdf_only`/`abstract_only`/`doi_not_found`/`unsupported_site`/`blocked`/`not_written`） | `service.py:154-168`、`:827-838` | 用户要的"统一为未读到全文"落在一个可编程字段上；`status`/`reason` 原值不动，旧调用方零改动 |
+| `pdf_only` 真的产生：页面挂了 PDF 链接、且没有正文/编号标题/文章结构时判 `pdf_only`，不再落到 `abstract_only`（后者会被读成"没权限"） | `pageprobe.py:277-282` | 报告"站点只给 PDF 却报没机构权限" |
+| `_page_next` 的 `no_html` 文案改中性：**"未读到全文，不等于没有权限"** + 三种常见原因 + `pdf_url` 路线，且**删掉**了"ask the user to sign in" | `service.py:129-134` | 同一段文案被 40+ 次调用照抄进结论 |
+| `skills/paper-page/SKILL.md`：判据从 `status=no_html` 改成先看 `full_text`，并明写"不要推断成没有机构权限" | `SKILL.md:96-104` | 子代理的"权限"结论就是照这段抄的 |
+| MCP docstring + `schemas/tools.json` 同步（`scripts/dump-tools.py` 重生成） | `server.py:822-843`、`schemas/tools.json` | 文档承诺过 `unparsable`，但全树 0 产生点；本次把它从清单里去掉，`pdf_only` 有了真实现 |
+| 撞墙时 `quota_charged` 改为**实测网络动作数**（`_charged_units`） | `service.py:138-147`、`:1013-1017` | T0 结论 3：报价 1、实扣 2（audit 两条 goto）。单次导航仍是 1，两次导航如实报 2 |
+
+## 测试（先红后绿）
+
+- 新增 `test_full_text_is_the_field_to_branch_on`：五种 `no_html`/`unsupported_site`/`blocked` 都 `full_text=false` 且 `full_text_reason` 正确，同时断言 `status` 未被改动。
+- 新增 `test_a_pdf_only_landing_page_says_pdf_only`（先失败：当时返回 `abstract_only`）。
+- 新增 `test_a_paywall_answer_points_at_a_file_it_actually_wrote`：把报告 L32 的"给了路径却没有文件"钉成不变量。
+- 重写 `test_next_asks_the_user_to_sign_in_instead_of_retrying` → `test_next_does_not_blame_the_readers_permissions`：断言文案**不含** `sign in`、含 "no access"（作为"这不是"的说明）、含 `pdf_url`、且 ≤300 字符。
+
+## 没有做的（明确记录）
+
+1. **`unparsable` 没有强行造出来**：计划里写"把 `pdf_only`/`unparsable` 做出来"，但 `unparsable` 在今天没有任何可判定的语义（没有可复现的样本），凭名称编一个只会再造一个说谎的值 —— 改为**从文档清单里删掉**，`pdf_only` 则按真实语义实现。这是对计划的一处有意偏离。
+2. **抓取路径的 `quota_charged` 仍是常量 `PAGE_READ_QUOTA=2`**：warmup 两次 goto + 抓取实扣 3、报价 2。改它会牵动 `bootstrap.py` 的报价表、`test_action_cost_matches_plans.py` 与 budget 文档，放到 T4（缓存/额度一起改）以免一处改动混两件事。
+3. **`bytes` 仍是"去 `<script>` 之前"的桥回传长度**（`test_snapshot_verb.py:123/205` 把它钉住了）。真正的问题是"给了路径却没有文件"，已用不变量测试覆盖；字节语义不在本轮改。
+

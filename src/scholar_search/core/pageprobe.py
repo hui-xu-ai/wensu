@@ -290,6 +290,11 @@ def classify_mhtml(path: Path, *, url: str = "") -> dict[str, object]:
         status, reason = "ok", ""
     elif hits:
         status, reason = "no_html", "paywall"
+    elif pdf_url:
+        # The page offers the article as a file and no body at all. That is not an abstract and
+        # not a permission problem — it is "this site only gives you the PDF" (2026-11-26 report:
+        # such a page was reported `abstract_only`, which the caller read as "no access").
+        status, reason = "no_html", "pdf_only"
     else:
         status, reason = "no_html", "abstract_only"
     return {"status": status, "reason": reason, **counts}
