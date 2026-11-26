@@ -36,6 +36,26 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.25] - 2026-11-25
+
+### Fixed — a Letter has no headings, and it is still an article
+
+`10.1021/acs.inorgchem.1c03019` is an Angewandte *Communication*: 19 long paragraphs, 3,817 words of
+continuous prose, **no** `Introduction` / `Results and Discussion`. The classifier asked for those
+headings and answered `abstract_only`, so the reader was told the tool could not capture an article
+that was sitting inside the capture. Reported by the reader, who was right and pointed out that
+Letter formats never print those headings.
+
+Prose volume decides now: paragraphs of ≥ 25 words, and at least 5 of them totalling ≥ 1,200 words,
+mean the page holds the paper. Section headings remain a fast path, and a blocking marker
+(`purchase pdf`, `sign in to view`) still wins over any amount of prose. The reply carries
+`prose_words` and `prose_paragraphs` so the numbers are visible rather than inferred.
+
+Re-judging the real captures: ACS 3,626 words / 19 paragraphs → `ok`; Wiley 4,683 words / 36
+paragraphs → `ok`; a one-paragraph abstract page stays `abstract_only`.
+
+`background-0.14.25.js`, as the cache-busting rule requires (worker unchanged).
+
 ## [0.14.24] - 2026-11-25
 
 ### Fixed — the extension was still stopping on URL markers

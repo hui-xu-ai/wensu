@@ -121,6 +121,15 @@ FULL_TEXT_SECTIONS = 6
 # The Nature-style shape: an `<article>` element and several unnumbered headings.
 BODY_HEADINGS = 6
 
+# A real body — letter or not — is many long paragraphs. An abstract page has one or two. These are
+# the numbers the classifier actually trusts, because section headings do not exist in Letter /
+# Communication formats (measured 2026-11-25: `10.1021/acs.inorgchem.1c03019` holds 19 long
+# paragraphs and 3,817 words, and has no headings at all).
+PROSE_PARAGRAPH_WORDS = 25
+PROSE_WORDS = 1_200
+PROSE_PARAGRAPHS = 5
+_PARAGRAPH = re.compile(r"(?is)<p[^>]*>(.*?)</p>")
+
 # Section names a real article body has. Two of them in the prose is the cheapest honest evidence
 # that the page is the paper and not a landing page with headings.
 ARTICLE_SECTION_NAMES: tuple[str, ...] = (
@@ -194,9 +203,22 @@ def classify_mhtml(path: Path, *, url: str = "") -> dict[str, object]:
     doc_title = _DOC_TITLE.search(raw)
     document_title = _text_of(doc_title.group(1))[:300] if doc_title else ""
 
-    # Blocking markers mean the body is behind a wall; soft ones ("institutional access") are
-    # printed on pages an entitled reader is already reading. Computed before `counts` because the
-    # reply carries the number.
+    # Prose volume, not headings: a Letter / Communication has no section headings at all, and
+    # counting them reported "no body" for a page holding 3,817 words of continuous text
+    # (measured 2026-11-25 on `10.1021/acs.inorgchem.1c03019` — the reader was right and the rule
+    # was wrong). A paywall or an abstract page has a couple of short paragraphs; a real article,
+    # letter or not, has many long ones.
+    paragraphs = _PARAGRAPH.findall(lowered)
+    long_paragraphs = [
+        _text_of(match)
+        for match in paragraphs
+        if len(_text_of(match).split()) >= PROSE_PARAGRAPH_WORDS
+    ]
+    prose_words = sum(len(item.split()) for item in long_paragraphs)
+    has_prose = prose_words >= PROSE_WORDS and len(long_paragraphs) >= PROSE_PARAGRAPHS
+
+    # Blocking markers mean the body is behind a wall. These decide even when the page looks like an
+    # article: a `<section>` wrapper around an abstract is not a body.
     blocking = sum(1 for marker in BLOCKING_PAYWALL_MARKERS if marker in _text_of(lowered))
 
     counts = {
@@ -206,6 +228,8 @@ def classify_mhtml(path: Path, *, url: str = "") -> dict[str, object]:
         "body_headings": body_headings,
         "paywall_hits": hits,
         "blocking_hits": blocking,
+        "prose_words": prose_words,
+        "prose_paragraphs": len(long_paragraphs),
         "pdf_url": pdf_url,
         "title": title,
     }
@@ -244,7 +268,7 @@ def classify_mhtml(path: Path, *, url: str = "") -> dict[str, object]:
     )
     if blocking:
         status, reason = "no_html", "paywall"
-    elif headings or article_shaped:
+    elif has_prose or headings or article_shaped:
         status, reason = "ok", ""
     elif hits:
         status, reason = "no_html", "paywall"
