@@ -822,10 +822,10 @@ def build_server(service: ScholarService) -> FastMCP:
         """Open a publisher article page and say whether it holds the full text.
 
         Give `doi` (preferred — it also decides the publisher) or an article `url`. The
-        browser opens that address directly, then saves the page as MHTML; the navigation plus the
-        capture is charged per action that runs — **2** units normally, and a challenge wall is
-        charged only for the navigation(s) that ran (**1**, or 2 when the build opens the
-        publisher's home page first), because nothing is captured then.
+        browser opens that address directly, then saves the page as MHTML. Quota is charged per
+        navigation: one `goto` is **1** unit and the capture is free, so a direct read costs 1 —
+        a build that opens the publisher's home page first costs 2, and a challenge wall costs
+        only the navigations that ran. `quota_charged` / `quota_reason` say what it was.
 
         Read `full_text` first: it is `true` only when the article body was actually read. When it
         is `false`, `full_text_reason` says why — `paywall`, `pdf_only`, `abstract_only`,

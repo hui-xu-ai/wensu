@@ -30,8 +30,9 @@ ACTION_COST: dict[str, object] = {
     "local_sort": 0,
     # Saving the tab the user already has open sends the site nothing (ADR 0018).
     "snapshot": 0,
-    # page_read: the publisher domains the page reader may navigate to (ADR 0019).
-    "page_read": 2,
+    # page_read: one navigation (`goto` costs a unit, the capture itself is free). A build that
+    # opens the publisher's home page first costs two; the answer's `quota_charged` is measured.
+    "page_read": 1,
     "detail_cached": 0,
     "detail_live": {"cnki": 1},
 }

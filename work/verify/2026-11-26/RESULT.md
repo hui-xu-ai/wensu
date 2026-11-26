@@ -248,6 +248,40 @@ $env:TEMP=$env:TMP=$env:TMPDIR="D:\Python\DeepSeek\DateWork\.tmp"; $env:PYTHONPA
 
 修法（下一轮）＝把复用判据从"URL 含 DOI"放宽到"同域名 + 抓到的页面自证是文章（`full_text` 或 `prose_words` 达标）"，同时保留 T3 的同源校验。这属于策略变更（放宽复用＝放宽"只读眼前这一页"的边界），建议单独一轮 + 真实样本推演，不塞进本轮。
 
+---
+
+# P3-11 / open-tab / P2-9 结果（2026-11-26，第二轮）
+
+**验证档位：单元测试 + 静态门**（真实链路在发版前统一复验）。
+
+## P3-11 额度语义：只有导航计费，报价原来是错的
+
+取证：`policy.py:354` 的 `state.used += 1` 只对 `NETWORK_VERBS`（`goto/click/select/type`）生效，`_snapshot_locked` 是 `adapter.execute` 直连（`service.py:1238`）⇒ **抓取本身不计费**。所以"page_read = 2"这个报价在两个方向上都错：单次导航实扣 1、私有补丁两次导航实扣 2。
+
+| 改动 | 位置 |
+|---|---|
+| 所有返回点改**实测**计费 `_charged_units(outcomes)`（含抓取路径、抓取后判墙、DOI 不存在） | `service.py` 5 处 |
+| 新增 `quota_reason ∈ {cache_hit, open_tab, challenge, navigate, unsupported_site}` | 同上 |
+| `ACTION_COST["page_read"]` 2 → **1**（发布版是一次导航；两次导航的变体由 `quota_charged` 如实回报） | `bootstrap.py:33-35` |
+| 工具 docstring 同步（"charged per navigation，抓取免费"） | `server.py:822-827` |
+
+测试：`test_page_read.py` / `test_page_challenge.py` 里钉住旧价 2 的两处改成 1 + 断言 `quota_reason`；新增断言在 open-tab 用例里（0 / `open_tab`）。
+
+## open-tab 0 额度复用：改为按页面自证身份
+
+上一条复验发现 ACS 落地 URL 不含 DOI，导致 `identifier in url` 永不成立、人在看文章也重新导航（2 额度 + 再撞墙）。
+
+改法：新增 `pageprobe.citation_doi(path)`，读页面自己的 `<meta name="citation_doi">`（真实 ACS 抓取里存在，实测 1 处）；复用判据变成"URL 含 DOI **或** 页面自证 DOI 相等"。这是**正向身份**，不是"看起来像文章"。
+
+测试：`test_a_page_that_names_its_doi_is_reused_without_asking_the_site`（0 额度、`source=open-tab`）、`test_a_page_naming_another_doi_is_not_reused`（别人的 DOI ⇒ 不复用且删掉猜出来的快照）。
+
+## P2-9 `10.3866`（物理化学学报）覆盖缺口
+
+`publishers.py` 新增 `Publisher("pku-whxb", ("whxb.pku.edu.cn",), ("10.3866",))`；host 取该刊 PDF 页脚反复印的 `www.whxb.pku.edu.cn`（[期刊站](https://www.whxb.pku.edu.cn/)）。
+
+**已知残留**：若 doi.org 实际跳转到该社平台 `ccspublishing.org.cn`，仍会报 `unsupported_site`。那个域名承载多个期刊，加进白名单是策略决定（ADR 0019 的"策划列表"），需要先真机看一次落地地址；本轮不擅自扩大白名单。
+
+
 
 
 

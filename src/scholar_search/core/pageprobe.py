@@ -130,6 +130,31 @@ def doi_not_found_in(title: str) -> str | None:
     return None
 
 
+_META_TAG = re.compile(r"<meta\b[^>]*>", re.IGNORECASE)
+_META_CONTENT = re.compile(r"""content\s*=\s*["']([^"']*)""", re.IGNORECASE)
+
+
+def citation_doi(path: Path) -> str:
+    """The DOI the page says it is, from its own `<meta name="citation_doi">`, or "".
+
+    Publishers print the identifier in the page, but not always in the URL: ACS landing pages
+    read `/jacsat/article/146/41/28131/…` with no DOI in sight (measured 2026-11-26). Reading the
+    page's own claim is what lets a capture be identified without trusting the tab's address.
+    """
+
+    try:
+        raw = _html_of(path)
+    except OSError:
+        return ""
+    for tag in _META_TAG.findall(raw):
+        if "citation_doi" not in tag.casefold():
+            continue
+        found = _META_CONTENT.search(tag)
+        if found:
+            return found.group(1).strip()
+    return ""
+
+
 SECTION_MARKERS: tuple[str, ...] = ('class="section-title"', "<section id=")
 # Without a numbered heading, only a page that wraps this many sections is still trusted as
 # the article itself; fewer means "abstract shell" (or "still rendering", see service.py).

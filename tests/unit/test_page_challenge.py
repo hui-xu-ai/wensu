@@ -258,5 +258,7 @@ def test_the_service_takes_one_snapshot_and_reports_the_wall(tmp_path: Path) -> 
     assert result["status"] == "blocked", result
     assert result["reason"] == "challenge", result
     assert result["signal"], result
-    assert result["quota_charged"] == 2, result
+    # One navigation ran, the capture is free: the charge is measured, not a flat price.
+    assert result["quota_charged"] == 1, result
+    assert result["quota_reason"] == "challenge", result
     assert "sign in" not in result["next"].lower(), result["next"]

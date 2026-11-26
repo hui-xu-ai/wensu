@@ -44,16 +44,13 @@ from .errors import (
 from .export import to_csv, to_endnote, to_markdown, to_ris
 from .locking import interprocess_lock
 from .page_nav import article_navigation
-from .pageprobe import challenge_in_title, classify_mhtml
+from .pageprobe import challenge_in_title, citation_doi, classify_mhtml
 from .planner import Planner
 from .policy import NETWORK_VERBS, PolicyEngine
 from .publishers import PUBLISHERS, Publisher, publisher_for_doi, publisher_for_host
 from .registry import ChannelRegistry, ChannelSpec
 from .risk import RISK_TITLE_MARKERS, RiskGuard
 
-# A page read is billed as two network units (one navigation plus the capture that
-# follows it, which itself spends nothing) — the price the price table documents.
-PAGE_READ_QUOTA = 2
 # How long one slice of a result-list wait may be when the channel can also be asked what the
 # page says. It is the price of noticing "the site already answered" late: on the happy path
 # nothing changes (the first slice succeeds), and a slow-but-real page pays one free read per
@@ -909,6 +906,8 @@ class ScholarService:
                 "reason": f"no curated publisher matches {identifier or target!r}",
                 "doi": identifier,
                 "url": target,
+                "quota_charged": 0,
+                "quota_reason": "unsupported_site",
                 "publishers": [item.name for item in PUBLISHERS],
             }
         if not target:
@@ -932,6 +931,7 @@ class ScholarService:
                 "headings": cached.get("headings"),
                 "title": str(cached.get("title") or ""),
                 "quota_charged": 0,
+                "quota_reason": "cache_hit",
                 "next": _page_next({"status": "ok"}),
             }
 
@@ -965,9 +965,20 @@ class ScholarService:
                         "mhtml_path": None,
                         "bytes": 0,
                         "quota_charged": 0,
+                        "quota_reason": "open_tab",
                         "next": _page_next({"status": "blocked", "reason": "challenge"}),
                     }
-                if identifier and identifier in str(open_tab.get("url") or ""):
+                reuse = bool(identifier) and identifier in str(open_tab.get("url") or "")
+                if not reuse and identifier and open_tab.get("path"):
+                    # ACS (and friends) keep the DOI out of the landing URL, so a substring test
+                    # can never match there and a page the reader already has on screen was
+                    # re-navigated — two units, and often another challenge (measured 2026-11-26).
+                    # The page's own `citation_doi` is a positive identity, not a guess.
+                    reuse = (
+                        citation_doi(Path(str(open_tab["path"]))).casefold()
+                        == identifier.casefold()
+                    )
+                if reuse:
                     return {
                         "status": "ok",
                         "source": "open-tab",
@@ -979,6 +990,7 @@ class ScholarService:
                         "title": open_tab.get("title"),
                         # It was already open: nothing was navigated, nothing was charged.
                         "quota_charged": 0,
+                        "quota_reason": "open_tab",
                         "next": _page_next({"status": "ok"}),
                     }
                 # Not the article: that capture was a guess, so it must not become a file.
@@ -1010,6 +1022,7 @@ class ScholarService:
                     "bytes": 0,
                     # The navigation itself ran and was charged; the capture never did.
                     "quota_charged": 1,
+                    "quota_reason": "challenge",
                     "next": _page_next({"status": "blocked", "reason": "challenge"}),
                 }
             final_url = outcomes[-1].url or target
@@ -1044,10 +1057,11 @@ class ScholarService:
                     "mhtml_path": None,
                     "bytes": 0,
                     "title": wall_title,
-                    # Billed per navigation that ran: `sleep` and `wait_for` are free, and
-                    # billing the flat PAGE_READ_QUOTA would charge for a capture that never
-                    # happened. Two navigations (the warmup patch) really do cost two.
+                    # Billed per navigation that ran: `sleep` and `wait_for` are free, so a flat
+                    # price would charge for a capture that never happened. Two navigations (the
+                    # warmup patch) really do cost two.
                     "quota_charged": _charged_units(outcomes),
+                    "quota_reason": "challenge",
                     "next": _page_next({"status": "blocked", "reason": "challenge"}),
                 }
             # Publisher article bodies render after the load event: capturing straight after
@@ -1092,7 +1106,8 @@ class ScholarService:
                     "publisher": publisher.name,
                     "final_url": final_url,
                     "mhtml_path": str(stored) if stored else None,
-                    "quota_charged": PAGE_READ_QUOTA,
+                    "quota_charged": _charged_units(outcomes),
+                    "quota_reason": "challenge",
                     "next": _page_next({"status": "blocked", "reason": "challenge"}),
                 }
 
@@ -1107,21 +1122,24 @@ class ScholarService:
                 "mhtml_path": str(readable),
                 "bytes": int(saved.get("bytes") or 0),
                 "title": str(saved.get("title") or probe.get("title") or ""),
-                "quota_charged": PAGE_READ_QUOTA,
+                # Billed per navigation, measured: `snapshot` is not in `NETWORK_VERBS` and is
+                # free, so the old flat 2 over-quoted every direct read (measured 2026-11-26 on
+                # the live ledger and in `policy.py:354`).
+                "quota_charged": _charged_units(outcomes),
+                "quota_reason": "navigate",
                 "next": _page_next(probe),
             }
             if probe.get("status") == "ok":
                 self._page_cache_put(target, result)
             elif probe.get("reason") == "doi_not_found":
                 # There is no article here, so the capture is discarded instead of becoming a
-                # file a caller could mistake for one, and only the navigation is reported: the
-                # capture price buys an article body, and this page has none (measured
-                # 2026-11-25: 267 KB of Elsevier's error page was kept and 2 units charged).
+                # file a caller could mistake for one, and only the navigation is reported.
                 with suppress(OSError):
                     readable.unlink()
                 result["mhtml_path"] = None
                 result["bytes"] = 0
-                result["quota_charged"] = 1
+                result["quota_charged"] = _charged_units(outcomes)
+                result["quota_reason"] = "navigate"
             return result
 
     def _collect_chunks(self, adapter: Any, first: dict[str, Any]) -> bytes:

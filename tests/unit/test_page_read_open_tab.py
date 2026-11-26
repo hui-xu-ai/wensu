@@ -128,6 +128,67 @@ def test_an_unrelated_tab_is_not_taken_for_the_article(tmp_path: Path) -> None:
     assert not list(tmp_path.rglob("page.mhtml")), "the guess must be deleted"
 
 
+def test_a_page_that_names_its_doi_is_reused_without_asking_the_site(tmp_path: Path) -> None:
+    """ACS keeps the DOI out of the landing URL, so a substring test never matched there.
+
+    Measured 2026-11-26: with the article open on screen, `page_read` still navigated again (two
+    units, and often another challenge). The page names its own DOI in
+    `<meta name="citation_doi">`, which is a positive identity rather than a guess.
+    """
+
+    from test_page_read import build_service
+
+    named = ARTICLE.replace(
+        "<html>",
+        f'<html><head><meta name="citation_doi" content="{DOI}"/></head>',
+    )
+    blob = _mhtml(tmp_path / "named.mhtml", named).read_bytes()
+    service = build_service(
+        tmp_path,
+        [
+            [{"verb": "goto", "data": {"url": URL, "title": "请稍候…"}}],
+            # One transaction: probe of the tab in front (which IS the article), nothing more.
+            [_capture(blob, url="https://onlinelibrary.wiley.com/doi/abs/XYZ9", title="A paper")],
+        ],
+    )
+    assert service.read_page(doi=DOI)["status"] == "blocked"
+
+    again = service.read_page(doi=DOI)
+
+    assert again["status"] == "ok", again
+    assert again["source"] == "open-tab", again
+    assert again["quota_charged"] == 0, again
+    assert again["quota_reason"] == "open_tab", again
+
+
+def test_a_page_naming_another_doi_is_not_reused(tmp_path: Path) -> None:
+    """Identify by the page's own claim, not by "it looks like an article on that site"."""
+
+    from test_page_read import build_service
+
+    other = ARTICLE.replace(
+        "<html>",
+        '<html><head><meta name="citation_doi" content="10.1016/j.cej.1999.000001"/></head>',
+    )
+    blob = _mhtml(tmp_path / "other-doi.mhtml", other).read_bytes()
+    service = build_service(
+        tmp_path,
+        [
+            [{"verb": "goto", "data": {"url": URL, "title": "请稍候…"}}],
+            [
+                _capture(blob, url="https://onlinelibrary.wiley.com/doi/abs/XYZ9", title="A paper"),
+                {"verb": "goto", "data": {"url": URL, "title": "请稍候…"}},
+            ],
+        ],
+    )
+    assert service.read_page(doi=DOI)["status"] == "blocked"
+
+    again = service.read_page(doi=DOI)
+
+    assert again.get("source") != "open-tab", again
+    assert not list(tmp_path.rglob("page.mhtml")), "the guess must be deleted"
+
+
 def test_a_wall_marker_is_recorded_and_expires(tmp_path: Path) -> None:
     from test_page_read import build_service
 

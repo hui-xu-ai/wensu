@@ -62,6 +62,11 @@ PUBLISHERS: tuple[Publisher, ...] = (
     Publisher("aps", ("journals.aps.org",), ("10.1103",)),
     Publisher("aip", ("pubs.aip.org",), ("10.1063",)),
     Publisher("karger", ("karger.com",), ("10.1159",)),
+    # 《物理化学学报》 (Acta Physico-Chimica Sinica), PKU Press. The host is the one printed in the
+    # journal's own PDFs; a DOI that resolves through the society's platform
+    # (`ccspublishing.org.cn`) is a separate decision, because that domain hosts several journals
+    # (2026-11-26 report P2-9: 10.3866 answered `unsupported_site`).
+    Publisher("pku-whxb", ("whxb.pku.edu.cn",), ("10.3866",)),
 )
 
 

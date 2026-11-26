@@ -98,6 +98,8 @@ def write_mhtml(path: Path, html: str) -> Path:
 def test_doi_prefixes_map_to_the_right_publisher() -> None:
     assert publisher_for_doi("10.1016/j.cej.2023.145123").name == "elsevier"  # type: ignore[union-attr]
     assert publisher_for_doi("https://doi.org/10.1038/s41586-024-00001-0").name == "nature"  # type: ignore[union-attr]
+    # 《物理化学学报》 was answered `unsupported_site` (2026-11-26 report P2-9).
+    assert publisher_for_doi("10.3866/PKU.WHXB201912007").name == "pku-whxb"  # type: ignore[union-attr]
     assert publisher_for_doi("10.9999/unknown") is None
 
 
@@ -364,5 +366,7 @@ def test_page_read_deep_links_then_classifies(tmp_path: Path) -> None:
     # The kernel writes the page itself; there is no download folder in the way.
     assert str(result["mhtml_path"]).endswith("page.mhtml")
     assert Path(str(result["mhtml_path"])).is_file()
-    assert result["quota_charged"] == 2
+    # One `goto` costs one unit; the capture costs nothing (policy.py: NETWORK_VERBS only).
+    assert result["quota_charged"] == 1, result
+    assert result["quota_reason"] == "navigate", result
     assert "page2md" in str(result["next"])
