@@ -281,6 +281,40 @@ $env:TEMP=$env:TMP=$env:TMPDIR="D:\Python\DeepSeek\DateWork\.tmp"; $env:PYTHONPA
 
 **已知残留**：若 doi.org 实际跳转到该社平台 `ccspublishing.org.cn`，仍会报 `unsupported_site`。那个域名承载多个期刊，加进白名单是策略决定（ADR 0019 的"策划列表"），需要先真机看一次落地地址；本轮不擅自扩大白名单。
 
+---
+
+# 0.14.27 发布与实测（2026-11-26）
+
+| 步骤 | 结果 |
+|---|---|
+| `v0.14.27` + `npm-v0.14.27` tag 推送 | main `c3a2027..923dd49`；CI 出 PyPI |
+| `pnpm publish` `packages/dsh-wensu` | `@hui-xu-ai/dsh-wensu@0.14.27` Published |
+| 桌面 bundle | `remove_bundle` → `install_bundle @0.14.27`（走官方 registry），applied |
+| 本机 CLI | `pip install -U wensu==0.14.27`；`wensu setup`（需先停 `native-host/main.py` 那个 python 进程，否则 rmtree 报 WinError 32） |
+| `wensu doctor` | cli 0.14.27 / extension 0.14.27 / mismatch false |
+| MCP 进程 | 重启 `wensu serve` 后 `status` 报 0.14.27 + extension 0.14.27 |
+
+## 现场实测（额外交互，隔离家以外）
+
+```text
+page_read(10.1021/jacs.4c07518) → blocked / signal title:请稍候 / quota_charged 1 / quota_reason challenge / full_text false
+  （真墙；public page_nav 只导航一次，所以是 1，不是 2）
+等 20 s 让挑战页自清
+page_read 同一 DOI → ok / source open-tab / quota_charged 0 / quota_reason open_tab / full_text true
+  ← 这就是 open-tab 新身份校验在真实站点的证据：ACS 落地 URL 不含 DOI，旧版只会重新导航（再撞墙、再扣额度）
+page2md → 65,261 B，engine sections+trafilatura，warnings 含新的「正文章节不足」
+```
+
+额度 298 → 297（一次撞墙导航 1 单位）。
+
+## 两个必须交代的副作用
+
+1. **私有 warmup 补丁被升级覆盖**：装机版 `core/page_nav.py` 现在是公开的 23 行版本（补丁是 121 行）。要恢复请跑
+   `D:\Python\DeepSeek\Private\wensu-warmup\install-warmup.ps1`（那是你的私有仓库，我没有代跑）。
+   影响：每次 `page_read` 从两次 goto 变回一次（额度更省，但撞墙概率回到公开版水平）。
+2. **extension 需要 reload 一次**：`actions.js` 的 CAPTCHA 选择器改动属于内容脚本，`doctor` 报的 0.14.27 读的是磁盘 manifest；
+   要让新选择器真正生效，需在 Edge 的扩展页点一次「重新加载」（或重启浏览器）。我没动你的浏览器。
+
 
 
 
