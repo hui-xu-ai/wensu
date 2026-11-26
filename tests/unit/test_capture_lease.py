@@ -157,6 +157,46 @@ def test_a_capture_left_on_the_first_of_two_navigations_is_still_refused(
     assert result["reason"] == "unverified_capture", result
 
 
+def test_the_capture_asks_for_the_tab_the_navigation_used(tmp_path: Path) -> None:
+    """ADR 0030, third slice: the kernel names the tab instead of accepting the extension's pick.
+
+    Additive on purpose — the extension falls back to its own choice when the named tab is gone,
+    so this cannot fail a read; what it removes is the "captured some other tab" possibility.
+    """
+
+    blob = write_mhtml(tmp_path / "page.mhtml", ARTICLE_HTML).read_bytes()
+    seen: list[dict[str, object]] = []
+
+    from scholar_search.adapters.fixture import FixtureAdapter
+
+    original = FixtureAdapter.execute
+
+    def recording(self, action, *, timeout_ms):  # type: ignore[no-untyped-def]
+        seen.append({"verb": action.verb, "params": dict(action.params)})
+        return original(self, action, timeout_ms=timeout_ms)
+
+    FixtureAdapter.execute = recording  # type: ignore[method-assign]
+    try:
+        service = build_service(
+            tmp_path,
+            [
+                [
+                    _goto(),
+                    {"verb": "sleep", "data": {"ms": 1}},
+                    _snapshot(blob, navigation_id="nav-1"),
+                ]
+            ],
+        )
+        result = service.read_page(doi=DOI)
+    finally:
+        FixtureAdapter.execute = original  # type: ignore[method-assign]
+
+    assert result["status"] == "ok", result
+    captures = [step for step in seen if step["verb"] == "snapshot"]
+    assert captures, seen
+    assert any(step["params"].get("tab_id") == 7 for step in captures), captures
+
+
 def test_a_navigation_that_timed_out_is_reported_as_unconfirmed(tmp_path: Path) -> None:
     """The tab may land after the caller was told "timeout"; that is not "nothing happened"."""
 

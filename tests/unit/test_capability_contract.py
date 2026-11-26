@@ -72,6 +72,17 @@ def test_the_worker_reports_the_tab_and_the_navigation() -> None:
     assert "tabId: tab.id" in text  # the snapshot record carries its tab
 
 
+def test_the_worker_honours_a_named_tab_and_still_falls_back() -> None:
+    """ADR 0030, third slice: the kernel may name the tab; a missing tab must not fail the read."""
+
+    worker = next(ROOT.glob("extension/background-*.js"))
+    text = worker.read_text(encoding="utf-8")
+
+    assert "resolveWorkTab(domains, requestedId)" in text
+    assert "params.tab_id" in text
+    assert "workTab(domains, params.tab_id)" in text
+
+
 def test_the_gate_wait_asks_for_a_focused_window() -> None:
     """A window that is maximized but behind everything is still invisible (P5 retest F34-01).
 

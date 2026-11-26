@@ -40,7 +40,17 @@ ALLOWED_KEYS: dict[str, frozenset[str]] = {
     # (ADR 0025). Opaque to the extension — the kernel owns the lists in `core/risk.py` and
     # still decides what a wall is; these only end the wait early.
     "goto": frozenset(
-        {"url", "reload", "open", "close", "wait", "dwell_ms", "keep", *_GOTO_HALT_KEYS}
+        {
+            "url",
+            "reload",
+            "open",
+            "close",
+            "wait",
+            "dwell_ms",
+            "keep",
+            "tab_id",
+            *_GOTO_HALT_KEYS,
+        }
     ),
     "wait_for": frozenset({"selector", "timeout_ms", "state"}),
     "type": frozenset({"selector", "text", "clear"}),
@@ -58,7 +68,7 @@ ALLOWED_KEYS: dict[str, frozenset[str]] = {
     "sleep": frozenset({"ms"}),
     # No parameters for a capture; `token`/`offset` read the bytes back in chunks, because
     # the browser's download manager blocks every `.mhtml` it writes (ADR 0018).
-    "snapshot": frozenset({"token", "offset", "tab"}),
+    "snapshot": frozenset({"token", "offset", "tab", "tab_id"}),
     # Waiting for a person: the markers to watch for and the two budgets. Nothing here makes a
     # request — the extension polls `tabs.get().title` (ADR 0027).
     "await_gate_clear": frozenset({"halt_titles", "halt_url_markers", "timeout_ms", "poll_ms"}),
@@ -80,6 +90,14 @@ GOTO_KEEP = True
 READ_TEXT_MODES = frozenset({"inner", "text"})
 # Which tab a capture reads: the dedicated work tab, or whatever the user is looking at.
 SNAPSHOT_TABS = frozenset({"work", "active"})
+
+
+def _tab_id(value: Any) -> bool:
+    """A browser tab id as the extension reports it: a non-negative integer, never a bool."""
+
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
 # What a click can wait for before answering: `enabled` = the control went busy and came
 # back; `url` = the tab's address moved. Web of Science never leaves `enabled` on submit but
 # moves the route in 1–3 s, so `url` is both faster and truer there (2026-11-24, ADR 0023).
@@ -124,6 +142,8 @@ def validate_params(verb: str, params: Any) -> str | None:
             return "policy.params"
         if "keep" in params and not isinstance(params["keep"], bool):
             return "policy.params"
+        if "tab_id" in params and not _tab_id(params["tab_id"]):
+            return "policy.params"
         # A kept tab is a tab the caller opened on its own; keeping the work tab in place would
         # leave the shared work tab pinned to a warm-up page (ADR 0028).
         if params.get("keep") is True and params.get("open") != "new":
@@ -144,6 +164,8 @@ def validate_params(verb: str, params: Any) -> str | None:
 
     if verb == "snapshot":
         if "tab" in params and params["tab"] not in SNAPSHOT_TABS:
+            return "policy.params"
+        if "tab_id" in params and not _tab_id(params["tab_id"]):
             return "policy.params"
         if "offset" in params and not isinstance(params["offset"], int):
             return "policy.params"

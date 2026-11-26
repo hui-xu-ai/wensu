@@ -367,8 +367,8 @@ async function closeToolWindows(keepId, domains) {
   }
 }
 
-async function workTab(domains) {
-  const tab = await resolveWorkTab(domains);
+async function workTab(domains, requestedId) {
+  const tab = await resolveWorkTab(domains, requestedId);
   // Pin it: a pinned tab is compact, visually separate from the user's own pages, and the
   // browser asks before closing it. Only tabs in our own list ever reach here — the user's
   // tabs are refused by `resolveWorkTab` — so pinning cannot touch anyone else's page.
@@ -534,13 +534,32 @@ async function isolateWorkTab(tab) {
   return (await chrome.tabs.get(tab.id).catch(() => null)) || tab;
 }
 
-async function resolveWorkTab(domains) {
+async function resolveWorkTab(domains, requestedId) {
+  // The kernel may name the tab it means (ADR 0030, third slice). It only ever names one it saw
+  // in an earlier reply, so this is not a way in for anyone else — and if that tab is gone or no
+  // longer ours, we fall back to our own choice and say so, rather than refuse the action.
+  if (Number.isInteger(requestedId)) {
+    const named = await chrome.tabs.get(requestedId).catch(() => null);
+    let namedInScope = false;
+    try {
+      namedInScope = Boolean(named && allowedHost(new URL(named.url || "").hostname, domains));
+    } catch {
+      namedInScope = false;
+    }
+    if (named && named.id && namedInScope) return named;
+  }
   const tab = (await rememberedTab()) || (await adoptOwnedTab()) || (await createWorkTab());
   return (await isolateWorkTab(tab)) || tab;
 }
 
 async function replyTab(params, domains) {
-  if (params && params.tab === "work") return workTab(domains);
+  if (params && params.tab === "work") return workTab(domains, params.tab_id);
+  if (params && Number.isInteger(params.tab_id)) {
+    // The kernel named the tab the capture belongs to (ADR 0030, third slice): use it when it
+    // still exists, otherwise report the miss instead of silently capturing another page.
+    const named = await chrome.tabs.get(params.tab_id).catch(() => null);
+    if (named && named.id) return named;
+  }
   return activeTab();
 }
 
@@ -843,7 +862,7 @@ async function onHostMessage(message, channel) {
       // Where the tab was before this action navigated it ("" for the `open: "new"` branch).
       let before = "";
       if (params.close === "disposable") blanked = await closeDisposableTabs();
-      const tab = await workTab(domains);
+      const tab = await workTab(domains, params.tab_id);
       if (!tab || !tab.id) throw new Error("no_active_tab");
       if (params.reload === true) {
         // A real reload, not a navigation to the same URL: a person pressing F5

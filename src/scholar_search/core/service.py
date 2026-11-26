@@ -1618,7 +1618,10 @@ class ScholarService:
                 ),
                 spec,
             )
-            saved = self._snapshot_locked(tab="work")
+            navigation_tab = last.get("tab_id")
+            saved = self._snapshot_locked(
+                tab="work", tab_id=navigation_tab if isinstance(navigation_tab, int) else None
+            )
             probe = _classify_saved(saved, url=final_url)
             if _still_rendering(probe):
                 # No article body, but also no sign-in prompt: the page is still painting,
@@ -2045,7 +2048,7 @@ class ScholarService:
                 return {**saved, "path": str(published), "capture_sha256": digest}
             return saved
 
-    def _snapshot_locked(self, *, tab: str = "active") -> dict[str, Any]:
+    def _snapshot_locked(self, *, tab: str = "active", tab_id: int | None = None) -> dict[str, Any]:
         """`snapshot` without taking the browser lock — for a caller already holding it.
 
         The bytes travel as base64 chunks over the bridge and the *kernel* writes the file.
@@ -2057,7 +2060,14 @@ class ScholarService:
 
         self._ensure_bridge()
         adapter = self._transaction_adapter()
-        action = Action("snapshot", {"tab": tab}) if tab != "active" else Action("snapshot")
+        params: dict[str, Any] = {}
+        if tab != "active":
+            params["tab"] = tab
+        # ADR 0030, third slice: name the tab the navigation used, so the capture cannot come
+        # from a different one. The extension falls back to its own choice if that tab is gone.
+        if isinstance(tab_id, int):
+            params["tab_id"] = tab_id
+        action = Action("snapshot", params) if params else Action("snapshot")
         first = adapter.execute(action, timeout_ms=SNAPSHOT_TIMEOUT_MS)
         if not first.ok:
             if str(first.error or "").startswith("policy."):

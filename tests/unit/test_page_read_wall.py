@@ -380,7 +380,7 @@ def test_the_probe_of_the_tab_in_front_holds_the_browser_lock(
     seen: list[str] = []
     original = service._snapshot_locked
 
-    def probing(*, tab: str = "active") -> dict[str, object]:
+    def probing(*, tab: str = "active", tab_id: int | None = None) -> dict[str, object]:
         # The lock is machine-scoped now (ADR 0029), so ask the service where it is instead of
         # rebuilding the path from the state directory.
         lock = service._browser_lock_path()
