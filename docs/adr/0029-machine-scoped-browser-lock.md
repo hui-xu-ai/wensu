@@ -23,6 +23,22 @@
 
 这样"两个 home 驱动同一浏览器"至少**不会交错导航**，而且不改任何计数语义。
 
+## 决策（第二片，已实施）
+
+`browser_state_paths()` 把三个文件一起交出来：
+
+```
+<浏览器状态目录>/state/quota.json
+<浏览器状态目录>/state/cooldown.json
+<浏览器状态目录>/browser.lock
+```
+
+`bootstrap.build_service()` 用它们构造 `PolicyEngine` / `RiskGuard`，并先做一次**迁移**：
+`adopt_legacy_state(旧 home 的 quota.json → 共享位置)`，冷却同理。
+
+迁移规则：**读旧文件、写新文件、永不删除**。理由：用户可能回滚到旧版本，旧文件还得在；共享位置已存在时
+不再读旧文件（避免两个来源来回覆盖），所以迁移是幂等的一次性动作。文档、缓存、审计日志仍按 home 计。
+
 ## 暂不实施（需要自己的迁移）
 
 **配额与冷却仍按 home 计**。把它们移进 `browser_state_dir()` 会改变既有行为（用户可能正用自定义 home

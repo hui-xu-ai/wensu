@@ -10,7 +10,13 @@ from .adapters.bridge import BridgeAdapter
 from .adapters.bridge.host import PROTOCOL_VERSION
 from .core.audit import AuditLog
 from .core.cache import Cache
-from .core.config import app_home, browser_state_dir, host_runtime_dir
+from .core.config import (
+    adopt_legacy_state,
+    app_home,
+    browser_state_dir,
+    browser_state_paths,
+    host_runtime_dir,
+)
 from .core.contracts import BrowserAdapter
 from .core.errors import ScholarSearchError
 from .core.locking import interprocess_lock
@@ -220,8 +226,16 @@ def _last_job() -> dict[str, object] | None:
 
 def build_service() -> ScholarService:
     registry = ChannelRegistry()
-    policy = PolicyEngine()
-    risk = RiskGuard()
+    # Quota, cooldown and the browser lock describe what this machine did to the site, so they
+    # live with the browser rather than with the home that happened to issue the call: a second
+    # home pointed at the same browser used to restart the day's allowance and ignore a cooldown
+    # (ADR 0029). Documents, caches and the audit log stay per-home.
+    quota_path, cooldown_path, _lock_path = browser_state_paths()
+    legacy = app_home() / "state"
+    adopt_legacy_state(legacy / "quota.json", quota_path)
+    adopt_legacy_state(legacy / "cooldown.json", cooldown_path)
+    policy = PolicyEngine(state_path=quota_path)
+    risk = RiskGuard(state_path=cooldown_path)
     audit = AuditLog()
     cache = Cache()
     endpoint = host_runtime_dir() / "bridge.json"

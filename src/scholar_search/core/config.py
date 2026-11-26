@@ -96,6 +96,35 @@ def browser_state_dir() -> Path:
     return Path.home() / ".local" / "share" / APP_NAME / "browser-state"
 
 
+def browser_state_paths() -> tuple[Path, Path, Path]:
+    """The three files that belong to the browser: quota, cooldown, lock.
+
+    Returned as a tuple rather than looked up one by one so callers cannot accidentally use the
+    per-home `state/` directory for one of them and the machine-wide one for another (ADR 0029).
+    """
+
+    shared = browser_state_dir() / "state"
+    return shared / "quota.json", shared / "cooldown.json", browser_state_dir() / "browser.lock"
+
+
+def adopt_legacy_state(legacy: Path, target: Path) -> bool:
+    """Copy an old per-home state file into the shared location, once.
+
+    Migration rule: **read the old file, write the new one, never delete anything**. A user who
+    rolls back to an older build still finds its own state, and a machine that has both simply
+    keeps the numbers it already had instead of restarting the day at zero.
+    """
+
+    if target.exists() or not legacy.is_file():
+        return False
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(legacy.read_bytes())
+    except OSError:
+        return False
+    return True
+
+
 def profiles_dir() -> Path:
     return app_home() / "profiles"
 

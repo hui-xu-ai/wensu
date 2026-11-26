@@ -36,6 +36,19 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.40] - 2026-11-26
+
+### Changed — 配额与冷却也归浏览器（ADR 0029 第二片）
+
+quota.json、cooldown.json 与 rowser.lock 现在一起放在浏览器状态目录
+（rowser_state_paths()）。两个 SCHOLAR_SEARCH_HOME 驱动同一个浏览器时，不再各自拥有一份
+"每日 300"和一份"24 小时冷却"——那两样东西本来描述的是这台机器对站点做了什么。
+
+**迁移规则：读旧文件、写新文件、永不删除。** 首次运行把旧 home 的 state/quota.json、
+state/cooldown.json 复制到共享位置；共享位置已存在时不再读旧文件（避免两来源来回覆盖），
+所以迁移是幂等的一次性动作。回滚到旧版本时，旧文件仍在。文档、缓存与审计日志仍按 home 计。
+
+`background-0.14.40.js`（worker 内容未变，按缓存规则改名）。
 ## [0.14.39] - 2026-11-26
 
 ### Changed — 浏览器锁改为机器级（ADR 0029 第一片）
