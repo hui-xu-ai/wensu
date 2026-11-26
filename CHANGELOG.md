@@ -36,6 +36,67 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.32] - 2026-11-26
+
+0.14.31 验收（`docs/reviews/wensu-0.14.31-acceptance-2026-11-26.md`）的 3 条 P1、4 条 P2，以及
+R31-04：检查与存储分离、一次读取只发布一份捕获。
+
+### Fixed — the extension re-navigated behind the kernel's back
+
+`navigate()`'s retry wrapped the whole closure, so "update accepted, wait failed" sent
+`tabs.update` a second time 300 ms later: two navigations, one `goto` in the audit log, no
+charge and no visibility (R31-01, replayed in a Node VM against fake browser APIs with the real
+worker code). Only a *rejected update* is retried now — the one case where the browser refused
+to start the navigation — and an issued-then-failed navigation reports `navigation_issued` /
+`navigation_attempts` instead of silently going again. Every successful `goto` reports
+`navigation_attempts: 1`.
+
+### Fixed — the body fallback fixed `page.md` and nothing else
+
+The paragraph fallback replaced the body but not `sections_found`, so `index.json`, `page.brief.md`,
+the selection and `page.core.md` were still built from the failed section walk: an ACS article
+with 16 KB of recovered body kept an index holding "Supporting Information" and `core_tokens: 0`
+(R31-02). Sections are rebuilt from the same body, and when nothing matches the core markers the
+first section stands in for `core` — reporting zero hid the article from a core reading.
+
+### Fixed — another article on the same publisher passed as this one
+
+Publisher attribution is not article identity (R31-03). The check now reports its strength:
+`declared` (the page prints the requested DOI), `url` (the address carries it), `publisher_only`
+(no DOI anywhere, which ScienceDirect's PII addresses do by design) or `mismatch` — and only
+`mismatch` refuses. The answer carries `identity` so a caller that needs more than
+"not contradicted" can ask for it.
+
+### Fixed — smaller ones from the same acceptance
+
+* **R31-05** the verdict rules changed, so `_PAGE_JUDGE_REV` is 2; entries judged under the old
+  rules are not served.
+* **R31-06** a stopped plan reported the plan's cost instead of the cost of what ran: a first
+  navigation refused by the site reported 2 while the ledger used 1. `RiskBlocked` now carries
+  the count the planner measured.
+* **R31-07** `\bname` matched the tail of `data-name`; the meta attribute regex now requires
+  whitespace or `<` before the attribute.
+* **R31-08** a page whose text produced no output at all was silent when it had fewer than 500
+  words. Empty output from non-empty source always warns.
+
+### Changed — inspection no longer writes the article's file (R31-04)
+
+Every `snapshot` used to write `pages/<slug>/page.mhtml`, so one read that looked twice, or
+glanced at the reader's own tab, left bytes behind that no verdict described. Inspection now
+writes to `pages/.probe/` and is deleted when it is not chosen; the one capture an answer refers
+to is published once, atomically, under **its DOI** (`pages/10.1021_jacs.6c13448/page.mhtml`).
+Alongside it:
+
+* the answer and the cache entry carry `capture_sha256`, and a cache hit is only served when the
+  file still hashes to it — a replaced capture is a miss, not a shortcut;
+* `page2md` records the digest of its input, and reports `input_changed` when the file was
+  replaced while it was being converted.
+
+One article, one file; a later capture replaces it, and every consumer can tell which bytes its
+verdict describes.
+
+`background-0.14.32.js`, as the cache-busting rule requires.
+
 ## [0.14.31] - 2026-11-26
 
 0.14.30 的导航/并发评估（`docs/reviews/wensu-0.14.30-navigation-concurrency-2026-11-26.md`）发现的
