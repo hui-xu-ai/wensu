@@ -30,6 +30,10 @@ VERBS: frozenset[str] = frozenset(
         "scroll",
         "sleep",
         "snapshot",
+        # The host keeps its own copy of the vocabulary on purpose, so a new verb has to be added
+        # here as well — this one was approved in ADR 0027 and forgotten here, and the kérnel's
+        # gate let it through to a host that refused it (P5 retest 2026-11-26, F34-01).
+        "await_gate_clear",
     }
 )
 
