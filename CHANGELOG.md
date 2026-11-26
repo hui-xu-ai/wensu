@@ -36,6 +36,22 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.35] - 2026-11-26
+
+### Fixed — the native host refused the verb ADR 0027 had approved
+
+The host keeps its own copy of the action vocabulary on purpose (a compromised extension cannot
+widen the scope), and wait_gate_clear was added to the kernel's list only. The action passed the
+kernel's capability gate and was refused by the host **before** the frame reached the extension, so
+the wait never ran: the P5 retest saw locked / gate_wait_unavailable / waited: false /
+wait_reason: policy.verb on a real Wiley gate (F34-01).
+
+A cross-layer contract test now requires the kernel's VERBS, the host's VERBS, the publisher
+manifest and the shipped worker's CAPABILITIES to all cover what a page read plans — and calls the
+host's own alidate_request with the parameters a read actually sends. Testing only the worker's
+capability list is what let the same class of mistake through twice.
+
+`background-0.14.35.js`, as the cache-busting rule requires (worker unchanged since 0.14.34).
 ## [0.14.34] - 2026-11-26
 
 P5 真实链路验收（`docs/reviews/wensu-0.14.33-p5-2026-11-26.md`）的 3 条 P1 与 1 条 P2。
