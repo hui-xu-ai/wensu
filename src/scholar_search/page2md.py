@@ -33,6 +33,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 from collections.abc import Sequence
 from email import policy
 from pathlib import Path
@@ -513,7 +514,10 @@ def _own_blocks(section: Any) -> list[str]:
 
 
 _OWN_COUNTERS: dict[str, int] = {}
-_LAST_SECTIONS: list[tuple[str, int, list[str]]] = []
+# One conversion at a time uses the module-level counters and the pandoc cache. The lock does not
+# make those values good design — it makes them unobservable across documents, which is what the
+# concurrent-conversion bug needed (audit 2026-11-26, F09). Sections no longer live here at all.
+_CONVERT_LOCK = threading.RLock()
 
 
 def _section_entries(doc: Any) -> list[tuple[str, int, list[str]]]:
@@ -785,38 +789,48 @@ def _dedupe_blocks(markdown: str) -> str:
     return "\n\n".join(kept)
 
 
-def _section_markdown(html: str) -> tuple[str, int, dict[str, int]]:
+def _section_markdown(
+    html: str,
+) -> tuple[str, int, dict[str, int], list[tuple[str, int, list[str]]]]:
+    """The body as Markdown, plus everything the caller needs, returned — not stashed.
+
+    Sections used to travel through the module-level `_LAST_SECTIONS`, which `convert` read
+    *after* this call returned. Two conversions in parallel therefore produced one document's
+    `page.md` next to the other document's `index.json` (audit 2026-11-26, F09). They are a
+    return value now, and the counters that remain module state (`_OWN_COUNTERS`,
+    `_MATH_PANDOC`) are used only while the conversion lock is held.
+    """
+
     from lxml import html as LH
 
-    _OWN_COUNTERS.clear()
-    doc = LH.fromstring(html)
-    for junk in doc.xpath(JUNK_XPATH):
-        parent = junk.getparent()
-        if parent is not None:
-            parent.remove(junk)
+    with _CONVERT_LOCK:
+        _OWN_COUNTERS.clear()
+        doc = LH.fromstring(html)
+        for junk in doc.xpath(JUNK_XPATH):
+            parent = junk.getparent()
+            if parent is not None:
+                parent.remove(junk)
 
-    _OWN_COUNTERS["math_pandoc"] = _prime_pandoc(doc)
-    # MathJax keeps a machine-readable copy of each formula in `mjx-assistive-mml` for screen
-    # readers — and on the Wiley sample (2026-11-24) those copies are **empty**
-    # (`data-semantic-type="empty"`, no children) while the real formula is drawn inside
-    # `mjx-container` as an SVG. Counting them said "6 formulas failed" when nothing was
-    # there to convert, and no marker could ever appear in the Markdown. Count what is real,
-    # and count the drawings separately so the warning can say which case it is.
-    for assistive in doc.xpath("//mjx-assistive-mml"):
-        parent = assistive.getparent()
-        if parent is not None:
-            parent.remove(assistive)
-    _OWN_COUNTERS["mathjax_graphics"] = len(doc.xpath("//mjx-container"))
+        _OWN_COUNTERS["math_pandoc"] = _prime_pandoc(doc)
+        # MathJax keeps a machine-readable copy of each formula in `mjx-assistive-mml` for screen
+        # readers — and on the Wiley sample (2026-11-24) those copies are **empty**
+        # (`data-semantic-type="empty"`, no children) while the real formula is drawn inside
+        # `mjx-container` as an SVG. Counting them said "6 formulas failed" when nothing was
+        # there to convert, and no marker could ever appear in the Markdown. Count what is real,
+        # and count the drawings separately so the warning can say which case it is.
+        for assistive in doc.xpath("//mjx-assistive-mml"):
+            parent = assistive.getparent()
+            if parent is not None:
+                parent.remove(assistive)
+        _OWN_COUNTERS["mathjax_graphics"] = len(doc.xpath("//mjx-container"))
 
-    sections = _collect_sections(doc)
-    _LAST_SECTIONS.clear()
-    _LAST_SECTIONS.extend(sections)
-    blocks: list[str] = []
-    characters = 0
-    for title, level, paragraphs in sections:
-        blocks.append(f"{'#' * level} {title}\n\n" + "\n\n".join(paragraphs))
-        characters += sum(len(text) for text in paragraphs)
-    return "\n\n".join(blocks), characters, dict(_OWN_COUNTERS)
+        sections = _collect_sections(doc)
+        blocks: list[str] = []
+        characters = 0
+        for title, level, paragraphs in sections:
+            blocks.append(f"{'#' * level} {title}\n\n" + "\n\n".join(paragraphs))
+            characters += sum(len(text) for text in paragraphs)
+        return "\n\n".join(blocks), characters, dict(_OWN_COUNTERS), sections
 
 
 # ------------------------------------------------------------------------ 图片
@@ -924,11 +938,13 @@ def _extract_body(html: str) -> tuple[str | None, dict[str, object]]:
         info["bytes_trafilatura"] = len(main_body.encode("utf-8")) if main_body else 0
 
     sections, counters = "", dict[str, int]()
+    found_sections: list[tuple[str, int, list[str]]] = []
     try:
-        sections, _section_chars, counters = _section_markdown(html)
+        sections, _section_chars, counters, found_sections = _section_markdown(html)
     except Exception as error:
         info["sections_error"] = f"{type(error).__name__}: {error}"
     info["bytes_sections"] = len(sections.encode("utf-8"))
+    info["sections_found"] = found_sections
     info.update(counters)
 
     body = _cut_tail(_dedupe_blocks(_merge_markdown(sections, main_body)))
@@ -1055,8 +1071,9 @@ def _localise_images(
         if not _inside(assets, destination):
             missing += 1
             return match.group(0)
-        if not destination.exists():
-            shutil.copy2(candidate, destination)
+        # Copied every time: a second conversion into the same output directory used to keep the
+        # first run's bytes, so a changed figure stayed stale (audit 2026-11-26, F10).
+        shutil.copy2(candidate, destination)
         copied += 1
         return f"![{alt}](assets/{destination.name})"
 
@@ -1580,13 +1597,14 @@ def convert(
         "noise_hits": sorted({word for word in NOISE if word in markdown.lower()}),
     }
     meta["warnings"] = _warnings(meta)
-    sections = list(_LAST_SECTIONS)
+    # The sections of *this* document, handed back by the extraction that produced them.
+    sections = list(cast(list[Any], info.get("sections_found") or []))
     chunks = _write_chunks(out, sections)
     _write_brief(out, sections, str(info.get("title") or source.stem))
     if query or window:
         _write_selection(out, sections, query=query, window=window)
     if mode == "core":
-        (out / "page.core.md").write_text(_core_markdown(list(_LAST_SECTIONS)), encoding="utf-8")
+        (out / "page.core.md").write_text(_core_markdown(sections), encoding="utf-8")
     meta["sections_total"] = len(cast(list[Any], chunks["sections"]))
     meta["tokens_total"] = chunks["total_tokens"]
     meta["tokens_core"] = chunks["core_tokens"]

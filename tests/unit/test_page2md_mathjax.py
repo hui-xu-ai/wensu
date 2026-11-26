@@ -24,7 +24,7 @@ def test_empty_assistive_mathml_is_not_counted_as_a_formula() -> None:
         "</span> more text.</p></section></article></body></html>"
     )
 
-    markdown, _, counters = page2md._section_markdown(html)
+    markdown, _, counters, _sections = page2md._section_markdown(html)
 
     assert counters["math_total"] == 0, counters
     assert counters["math_failed"] == 0, counters

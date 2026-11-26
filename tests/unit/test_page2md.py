@@ -79,7 +79,7 @@ def test_section_titles_sharing_a_container_are_not_reported_as_sections() -> No
     <p>Spectroscopy of the copper alkynide cluster shows three emission bands at 620 nm.</p>
     </div></body></html>"""
 
-    markdown, _chars, _counters = page2md._section_markdown(html)
+    markdown, _chars, _counters, _sections = page2md._section_markdown(html)
 
     # One entry, not two copies of the whole article: the surviving one holds both paragraphs.
     assert markdown.count("## ") == 1, markdown[:400]
@@ -180,7 +180,7 @@ def test_mathml_to_latex_handles_fraction_and_superscript() -> None:
 
 
 def test_sections_keep_headings_and_inline_math() -> None:
-    markdown, _chars, counters = page2md._section_markdown(SECTION_HTML)
+    markdown, _chars, counters, _sections = page2md._section_markdown(SECTION_HTML)
 
     assert "## 1. Introduction" in markdown
     assert "## 2. Results" in markdown
@@ -189,14 +189,14 @@ def test_sections_keep_headings_and_inline_math() -> None:
 
 
 def test_block_equation_becomes_display_math() -> None:
-    markdown, _chars, _counters = page2md._section_markdown(SECTION_HTML)
+    markdown, _chars, _counters, _sections = page2md._section_markdown(SECTION_HTML)
 
     assert r"$$\frac{1}{2}$$" in markdown
     assert "(4)" in markdown
 
 
 def test_table_becomes_pipe_table_with_math_cells() -> None:
-    markdown, _chars, counters = page2md._section_markdown(SECTION_HTML)
+    markdown, _chars, counters, _sections = page2md._section_markdown(SECTION_HTML)
 
     assert counters["tables_rendered"] == 1
     assert "| k | value |" in markdown
@@ -205,7 +205,9 @@ def test_table_becomes_pipe_table_with_math_cells() -> None:
 
 def test_figure_is_placed_inline_and_copied(sample_dir: Path, tmp_path: Path) -> None:
     out = tmp_path / "out"
-    markdown, _chars, _counters = page2md._section_markdown(sample_dir.read_text(encoding="utf-8"))
+    markdown, _chars, _counters, _sections = page2md._section_markdown(
+        sample_dir.read_text(encoding="utf-8")
+    )
     localised, copied, missing = page2md._localise_images(markdown, sample_dir, out)
 
     assert "![Fig. 1. A caption.](files/fig1.jpg)" in markdown  # 就地出现在小节里
@@ -215,7 +217,7 @@ def test_figure_is_placed_inline_and_copied(sample_dir: Path, tmp_path: Path) ->
 
 
 def test_warning_when_page_has_no_math() -> None:
-    _markdown, _chars, counters = page2md._section_markdown(PLAIN_HTML)
+    _markdown, _chars, counters, _sections = page2md._section_markdown(PLAIN_HTML)
     meta = {"math_total": counters.get("math_total", 0), "math_pandoc": 0}
 
     warnings = page2md._warnings(meta)
@@ -422,13 +424,58 @@ def test_number_inside_a_table_takes_the_table_caption() -> None:
     assert "Table 2" in by_value.get("17.94 mm", "")
 
 
+def test_a_second_conversion_does_not_keep_a_stale_image(tmp_path: Path) -> None:
+    """Re-converting into the same output used to keep the first run's bytes (audit F10)."""
+
+    source_dir = tmp_path / "doc"
+    (source_dir / "files").mkdir(parents=True)
+    figure = source_dir / "files" / "fig1.jpg"
+    figure.write_bytes(b"first bytes")
+    out = tmp_path / "out"
+    markdown = "![Fig. 1. A caption.](files/fig1.jpg)"
+
+    page2md._localise_images(markdown, source_dir / "page.html", out)
+    figure.write_bytes(b"\xff\xd8\xff\xe0different bytes")
+    page2md._localise_images(markdown, source_dir / "page.html", out)
+
+    assert (out / "assets" / "fig1.jpg").read_bytes() == b"\xff\xd8\xff\xe0different bytes"
+
+
+def test_two_inline_resources_with_the_same_name_do_not_overwrite_each_other(
+    tmp_path: Path,
+) -> None:
+    """Both used to resolve to `assets/img.png`, so the second was silently dropped."""
+
+    one, two = b"first-payload", b"second-payload"
+    parts = {
+        "https://a.example/img.png": (one, page2md._asset_name(one, "https://a.example/img.png")),
+        "https://b.example/img.png": (two, page2md._asset_name(two, "https://b.example/img.png")),
+    }
+    markdown = "![a](https://a.example/img.png)\n\n![b](https://b.example/img.png)"
+    out = tmp_path / "out"
+
+    localised, copied, missing = page2md._localise_images(markdown, tmp_path, out, parts)
+
+    assert (copied, missing) == (2, 0), (localised, copied, missing)
+    written = sorted((out / "assets").iterdir())
+    assert len(written) == 2, [path.name for path in written]
+    assert {path.read_bytes() for path in written} == {one, two}
+
+
 def test_index_drops_bookkeeping_fields(
     sample_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """C：地图是给人/模型读的，"chars/level/core/paragraphs" 是给程序看的重复信息。"""
 
+    # The sections travel with the extraction now; this test used to pass on the sections a
+    # previous test had left in the module global (audit 2026-11-26, F09).
     monkeypatch.setattr(
-        page2md, "_extract_body", lambda html: ("## 1. Introduction\n\nbody", {"title": "T"})
+        page2md,
+        "_extract_body",
+        lambda html: (
+            "## 1. Introduction\n\nbody",
+            {"title": "T", "sections_found": [("1. Introduction", 2, ["body"])]},
+        ),
     )
     out = tmp_path / "out"
 
