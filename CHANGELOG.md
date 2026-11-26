@@ -36,6 +36,26 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.37] - 2026-11-26
+
+### Added — 「上一个动作还在跑吗」现在能看见了
+
+page_read 一次调用跑完整个计划，所以拿到 	imeout 的调用方没有任何办法判断上一个计划是否已经终结
+（P5 验收原话）。status 现在报两个字段，都不发浏览器动作：
+
+* rowser_busy — 用现有的 state/browser.lock 非阻塞试取：取不到就说明有读取正在进行；
+* last_job — state/last-job.json，记录 job_id/	erminal/stage/eason/doi/publisher/
+  quota_charged/capture_sha256 与 inished_at，rief 与完整回包都带。
+
+### Fixed — 落点与预热的两处口径
+
+* 出版社用**首页**回答深链时，不再报成 bstract_only（那读起来像"这篇没有正文"）：捕获地址是站点根
+  路径且页面上没有 DOI ⇒ 
+o_page / landing_home，不发布、不写缓存。P5 验收里 ACS 那篇 192 词就是这么来的。
+* warm_up 的 opened[] 带回 **landing_host / landing_url**：预热是按**子域**生效的（Wiley 的
+  4spepublications… 没有覆盖 scijournals…）。批量 skill 已改为按 landing_host 分组。
+
+`background-0.14.37.js`，按缓存规则改名（worker 内容未变）。
 ## [0.14.36] - 2026-11-26
 
 ### Fixed — the gate wait maximized the window but did not bring it forward
