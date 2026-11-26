@@ -750,12 +750,15 @@ async function onHostMessage(message, channel) {
       const tabId = boundTabId !== null ? boundTabId : (await activeTab())?.id;
       if (!tabId) throw new Error("no_active_tab");
       // A person has to look at it, so bring it into view once: a minimized window is a gate
-      // nobody can click.
+      // nobody can click. `focused: true` matters: `state: "maximized"` alone leaves the window
+      // behind whatever the person is looking at, which is exactly the state they cannot see
+      // (P5 retest 2026-11-26 pointed out the branch only set the state).
       const current = await chrome.tabs.get(tabId).catch(() => null);
       if (current && Number.isInteger(current.windowId)) {
-        await within(chrome.windows.update(current.windowId, { state: "maximized" }), 1_500).catch(
-          () => null,
-        );
+        await within(
+          chrome.windows.update(current.windowId, { state: "maximized", focused: true }),
+          1_500,
+        ).catch(() => null);
         await within(chrome.tabs.update(tabId, { active: true }), 1_500).catch(() => null);
       }
       const deadline = Date.now() + budget;
