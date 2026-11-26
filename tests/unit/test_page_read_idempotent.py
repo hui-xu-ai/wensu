@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import email.mime.multipart
 import email.mime.text
+import hashlib
 from pathlib import Path
 
 from scholar_search.core.service import _page_next
@@ -189,6 +190,46 @@ def test_a_cache_entry_from_the_future_is_not_served(tmp_path: Path) -> None:
     again = service.read_page(doi=DOI)
 
     assert not again.get("cached"), again
+
+
+def test_the_capture_is_published_once_under_its_doi(tmp_path: Path) -> None:
+    """One article, one file: `pages/<doi>/page.mhtml`, and probing leaves nothing there."""
+
+    from test_page_read import build_service
+
+    blob = _write_mhtml(tmp_path / "page.mhtml", ARTICLE_HTML)
+    service = build_service(tmp_path, [_one_capture(blob)])
+
+    result = service.read_page(doi="10.1016/j.cej.2023.145123")
+
+    published = Path(str(result["mhtml_path"]))
+    assert published.name == "page.mhtml", published
+    assert published.parent.name == "10.1016_j.cej.2023.145123", published
+    assert published.parent.parent.name == "pages", published
+    assert str(result["capture_sha256"]) == hashlib.sha256(published.read_bytes()).hexdigest()
+    # The published bytes exist once: nothing in the probe area is a copy of them.
+    probe_dir = published.parent.parent / ".probe"
+    leftovers = list(probe_dir.glob("*.mhtml")) if probe_dir.is_dir() else []
+    digests = {hashlib.sha256(path.read_bytes()).hexdigest() for path in leftovers}
+    assert result["capture_sha256"] not in digests, [path.name for path in leftovers]
+
+
+def test_a_cache_entry_whose_bytes_changed_is_not_served(tmp_path: Path) -> None:
+    """The entry quotes the digest it judged; a replaced file is a miss, not a shortcut."""
+
+    from test_page_read import build_service
+
+    blob = _write_mhtml(tmp_path / "page.mhtml", ARTICLE_HTML)
+    service = build_service(tmp_path, [_one_capture(blob), _one_capture(blob)])
+    first = service.read_page(doi=DOI)
+    Path(str(first["mhtml_path"])).write_bytes(b"<html>a different capture</html>")
+
+    again = service.read_page(doi=DOI)
+
+    assert not again.get("cached"), again
+    # A miss navigates again and republishes the good bytes over the tampered file.
+    republished = Path(str(again["mhtml_path"]))
+    assert str(again["capture_sha256"]) == hashlib.sha256(republished.read_bytes()).hexdigest()
 
 
 def test_blocked_tells_the_caller_to_read_again_once_the_wall_is_solved() -> None:

@@ -10,6 +10,7 @@ import base64
 import hashlib
 import json
 import math
+import os
 import re
 import time
 from collections.abc import Callable, Sequence
@@ -203,6 +204,7 @@ def _page_cached_payload(
         "reason": str(cached.get("reason") or ""),
         "prose_words": cached.get("prose_words"),
         "judge": cached.get("judge"),
+        "capture_sha256": cached.get("capture_sha256"),
         "mhtml_path": str(cached.get("mhtml_path") or ""),
         "bytes": cached.get("bytes"),
         "headings": cached.get("headings"),
@@ -261,6 +263,8 @@ def _page_evidence_site(url: str, publisher: Publisher, identifier: str) -> bool
 # How much of the title survives in the directory name. A person reads these folder names in a
 # file manager, so the readable part matters — but it is exactly the *prefix* that used to collide.
 _PAGE_SLUG_CHARS = 60
+# How long an unpublished (staged) capture may sit in `pages/.probe/` before it is swept.
+_PROBE_TTL_S = 3600.0
 # Which rule set produced a cached verdict. Bump it whenever the classifier or the wall rules
 # change meaning: entries stamped with an older value are not served, so a fix takes effect
 # without asking the reader to clear anything. Pre-existing entries carry no stamp at all.
@@ -268,6 +272,31 @@ _PAGE_JUDGE_REV = 2
 # How far a cache timestamp may sit in the future before it is treated as corrupt rather than as
 # a small clock difference between two machines (audit F13).
 _CLOCK_SKEW_S = 300.0
+
+
+def _page_meta(saved: dict[str, Any]) -> dict[str, str]:
+    """The two facts a capture's folder name is built from."""
+
+    return {
+        "url": str(saved.get("url") or ""),
+        "title": str(saved.get("title") or ""),
+    }
+
+
+def _page_slug_for(identifier: str, meta: dict[str, str]) -> str:
+    """Folder name for an article: its DOI when there is one, else the old title+hash rule.
+
+    `10.1021/jacs.6c13448` → `10.1021_jacs.6c13448`. A DOI is stable, readable and unique, which
+    is everything a folder name needs; the URL-hash rule stays for pages that have no DOI (a
+    landing page read by URL) and for captures written by older builds.
+    """
+
+    doi = (identifier or "").strip().casefold()
+    if doi.startswith("10.") and "/" in doi:
+        slug = re.sub(r"[^a-z0-9._-]+", "_", doi.replace("/", "_")).strip("_")
+        if slug:
+            return slug[:120]
+    return _page_dir_slug(meta)
 
 
 def _page_dir_slug(meta: dict[str, str]) -> str:
@@ -870,6 +899,18 @@ class ScholarService:
             return None
         if not Path(str(entry.get("mhtml_path") or "")).is_file():
             return None
+        # The entry quotes the bytes it judged. A later capture of the same article replaces that
+        # one file (one article, one file), so a digest that no longer matches means this entry
+        # describes a file that is gone: navigating again is cheaper than serving a verdict about
+        # bytes nobody has (audit 2026-11-26, R31-04).
+        digest = entry.get("capture_sha256")
+        if isinstance(digest, str) and digest:
+            try:
+                actual = hashlib.sha256(Path(str(entry["mhtml_path"])).read_bytes()).hexdigest()
+            except OSError:
+                return None
+            if actual != digest:
+                return None
         stamp = float(entry.get("at") or 0.0)
         # A timestamp in the future (or not a finite number) is a corrupt entry, not a fresh one:
         # subtracting it yields a negative age, so the entry would live forever (audit F13).
@@ -924,6 +965,10 @@ class ScholarService:
                 "prose_words": payload.get("prose_words"),
                 "final_url": payload.get("final_url"),
                 "captured_url": payload.get("captured_url"),
+                # The exact bytes this verdict describes. A later capture of the same article
+                # replaces that one file, and the digest is how `_page_cache_get` notices
+                # (audit 2026-11-26, R31-04).
+                "capture_sha256": payload.get("capture_sha256"),
                 "at": time.time(),
             }
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -1122,6 +1167,11 @@ class ScholarService:
                     # or an abstract (audit 2026-11-26, F06). The classifier the navigation path
                     # uses decides here too, so `full_text` means the same thing on both paths.
                     probe_tab = _classify_saved(open_tab, url=str(open_tab.get("url") or ""))
+                    published, capture_sha256 = self._publish_page(
+                        Path(str(open_tab.get("path") or "")),
+                        _page_meta(open_tab),
+                        identifier or str(open_tab.get("url") or ""),
+                    )
                     return {
                         **probe_tab,
                         "source": "open-tab",
@@ -1129,7 +1179,8 @@ class ScholarService:
                         "publisher": publisher.name,
                         "final_url": open_tab.get("url"),
                         "captured_url": str(open_tab.get("url") or ""),
-                        "mhtml_path": open_tab.get("path"),
+                        "mhtml_path": str(published),
+                        "capture_sha256": capture_sha256,
                         "bytes": open_tab.get("bytes"),
                         "title": open_tab.get("title"),
                         # It was already open: nothing was navigated, nothing was charged.
@@ -1229,6 +1280,10 @@ class ScholarService:
                 retry = self._snapshot_locked(tab="work")
                 retry_probe = _classify_saved(retry, url=final_url)
                 if retry_probe.get("status") == "ok":
+                    # The second look wins, so the first one is inspection debris: delete it
+                    # rather than leave a copy of an older render next to the article.
+                    with suppress(OSError):
+                        Path(str(saved.get("path") or "")).unlink()
                     saved, probe = retry, retry_probe
             readable = Path(str(saved.get("path") or ""))
             if saved.get("status") == "blocked" or probe.get("status") == "blocked":
@@ -1328,6 +1383,13 @@ class ScholarService:
                     ),
                 }
 
+            # Publish the one capture this answer describes: `pages/<doi>/page.mhtml`, written
+            # once and atomically. Everything up to here worked on staged bytes, so a read that
+            # looked twice or glanced at the reader's tab leaves no half-described file behind
+            # (audit 2026-11-26, R31-04).
+            published, capture_sha256 = self._publish_page(readable, _page_meta(saved), identifier)
+            readable = published
+
             result = {
                 **probe,
                 "doi": identifier,
@@ -1345,6 +1407,9 @@ class ScholarService:
                 # treat `publisher_only` as "unconfirmed" instead of guessing (audit R31-03).
                 "identity": identity,
                 "mhtml_path": str(readable),
+                # Which bytes this answer is about. A later capture of the same article replaces
+                # the file, so an answer that quotes a digest can be checked instead of trusted.
+                "capture_sha256": capture_sha256,
                 "bytes": int(saved.get("bytes") or 0),
                 "title": str(saved.get("title") or probe.get("title") or ""),
                 # Billed per navigation, measured: `snapshot` is not in `NETWORK_VERBS` and is
@@ -1417,15 +1482,50 @@ class ScholarService:
                 )
         return bytes(buffer[:total])
 
-    def _write_page(self, payload: bytes, meta: dict[str, str]) -> Path:
-        """Store the capture under `<home>/pages/<slug>/page.mhtml`, scripts removed."""
+    def _stage_page(self, payload: bytes, meta: dict[str, str]) -> Path:
+        """Write a captured page into `pages/.probe/`: inspection, not storage.
 
-        slug = _page_dir_slug(meta)
+        Every `snapshot` used to write the article's own `page.mhtml`, so one read that looked
+        twice — or a look at the reader's own tab — left bytes behind that no verdict described
+        (audit 2026-11-26, R31-04). Staged bytes have no identity yet; the one capture the answer
+        refers to is published, once, by `_publish_page`.
+        """
+
         home = Path(self._policy.state_dir).parent if self._policy else Path.cwd()
-        target = home / "pages" / slug / "page.mhtml"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(_strip_scripts(payload))
+        staged_dir = home / "pages" / ".probe"
+        staged_dir.mkdir(parents=True, exist_ok=True)
+        # Inspection left-behinds are not storage: a capture nobody published (the first look
+        # that a second look replaced, the reader's own tab) is deleted as it happens, and this
+        # sweep covers the ones a crashed run left behind.
+        for stale in staged_dir.glob("*.mhtml"):
+            try:
+                if time.time() - stale.stat().st_mtime > _PROBE_TTL_S:
+                    stale.unlink()
+            except OSError:
+                continue
+        body = _strip_scripts(payload)
+        name = f"{time.time_ns()}-{hashlib.sha256(body).hexdigest()[:8]}.mhtml"
+        target = staged_dir / name
+        target.write_bytes(body)
         return target
+
+    def _publish_page(
+        self, staged: Path, meta: dict[str, str], identifier: str
+    ) -> tuple[Path, str]:
+        """Publish *one* capture under `pages/<doi-or-slug>/page.mhtml`, atomically.
+
+        The DOI is the article's identity, so it names the folder (`10.1021_jacs.6c13448`) and a
+        later capture of the same article replaces that one file — one article, one file. The
+        rename is atomic so a reader never sees half a capture, and the returned digest is what
+        an answer and the cache quote when they say which bytes they describe.
+        """
+
+        home = Path(self._policy.state_dir).parent if self._policy else Path.cwd()
+        target = home / "pages" / _page_slug_for(identifier, meta) / "page.mhtml"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        digest = hashlib.sha256(staged.read_bytes()).hexdigest()
+        os.replace(staged, target)
+        return target, digest
 
     def page2md(self, *, mhtml_path: str, out_dir: str = "") -> dict[str, Any]:
         """Turn a saved article page into Markdown: local, free, and no shell involved.
@@ -1465,7 +1565,15 @@ class ScholarService:
         """
 
         with self._browser_transaction():
-            return self._snapshot_locked()
+            saved = self._snapshot_locked()
+            if saved.get("path"):
+                # An explicit `snapshot` is a capture the caller asked for, so it is published
+                # under the article folder its own metadata implies (no DOI is known here).
+                published, digest = self._publish_page(
+                    Path(str(saved["path"])), _page_meta(saved), ""
+                )
+                return {**saved, "path": str(published), "capture_sha256": digest}
+            return saved
 
     def _snapshot_locked(self, *, tab: str = "active") -> dict[str, Any]:
         """`snapshot` without taking the browser lock — for a caller already holding it.
@@ -1530,10 +1638,10 @@ class ScholarService:
                     "automatically."
                 ),
             }
-        stored = self._write_page(payload, meta)
+        staged = self._stage_page(payload, meta)
 
         result: dict[str, Any] = {
-            "path": str(stored),
+            "path": str(staged),
             "bytes": len(payload),
             **meta,
         }

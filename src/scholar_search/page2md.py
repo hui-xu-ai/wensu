@@ -1682,6 +1682,10 @@ def convert(
     window: str = "",
 ) -> dict[str, object]:
     html, form = _read_html(source)
+    # Which bytes this conversion is about, and whether they were still the same bytes when it
+    # finished. One article has one capture file, and a later read replaces it, so a conversion
+    # that outlived its input must say so instead of looking complete (audit 2026-11-26, R31-04).
+    capture_sha256 = hashlib.sha256(source.read_bytes()).hexdigest()
     body, info = _extract_body(html)
     out.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, out / ("page.mhtml" if form == "mhtml" else "page.html"))
@@ -1708,7 +1712,9 @@ def convert(
         "source": str(source),
         "form": form,
         "tool": TOOL_VERSION,
-        "sha256": hashlib.sha256(source.read_bytes()).hexdigest()[:16],
+        "sha256": capture_sha256[:16],
+        # The full digest of the input, so a caller can prove which capture produced this output.
+        "capture_sha256": capture_sha256,
         "bytes_in": source.stat().st_size,
         "bytes_md": len(markdown.encode("utf-8")),
         "headings": len(re.findall(r"(?m)^#{1,6} ", markdown)),
@@ -1718,6 +1724,15 @@ def convert(
         "math_blocks": len(re.findall(r"\$\$", markdown)),
         "noise_hits": sorted({word for word in NOISE if word in markdown.lower()}),
     }
+    # Recomputed after the work: a different digest means another capture replaced this file
+    # while it was being read, so the Markdown may mix two versions of the page.
+    input_changed = hashlib.sha256(source.read_bytes()).hexdigest() != capture_sha256
+    meta["input_changed"] = input_changed
+    if input_changed:
+        cast(list[str], meta["warnings"]).append(
+            "转换期间输入文件被替换（同一次读取被新的捕获覆盖），Markdown 可能混合两个版本；"
+            "请重新转换一次。"
+        )
     meta["warnings"] = _warnings(meta)
     # How much of the capture actually reached the Markdown. A conversion can succeed, save a
     # file and still carry almost none of the article — ACS's 3,600 words became 44 bytes of
