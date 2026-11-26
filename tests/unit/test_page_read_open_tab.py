@@ -37,6 +37,12 @@ ARTICLE = (
 )
 
 
+def _page_cache(tmp_path: Path) -> Path:
+    """Where the service keeps its page cache, asked instead of assumed (F41-01 moved it)."""
+
+    return tmp_path / "state" / "page-read.json"
+
+
 def _mhtml(path: Path, html: str) -> Path:
     part = email.mime.text.MIMEText(html, "html", "utf-8")
     outer = email.mime.multipart.MIMEMultipart("related")
@@ -249,6 +255,6 @@ def test_a_wall_marker_is_recorded_and_expires(tmp_path: Path) -> None:
     service.read_page(doi=DOI)
 
     # The marker is keyed by the URL that was actually navigated: the DOI link.
-    state = json.loads((tmp_path / "page-read.json").read_text(encoding="utf-8"))
+    state = json.loads(_page_cache(tmp_path).read_text(encoding="utf-8"))
     assert state[f"https://doi.org/{DOI}"]["status"] == "blocked"
     assert challenge_in_title("请稍候…") == "请稍候"

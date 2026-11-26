@@ -36,6 +36,39 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.42] - 2026-11-27
+
+0.14.41 复验（docs/reviews/wensu-0.14.41-retest-2026-11-27.md）的三项：2 条 P1、1 条 P2。三项都是
+把 policy.state_path 指到共享目录后**推导出来的路径跟着跑**造成的。
+
+墙协议这次在真实链路里**首次真正执行**：wait_gate_clear 被宿主放行、实际等待约 6.1 s、中间页自行
+清除后同一次调用继续捕获；被动观测在等待期间记录到 Edge 前台且最大化（23 个样本）。身份字段也成立：
+四条真实 goto 各自有非空且互不相同的 
+avigation_id，顶层与 vidence 等于该篇最后一条 goto。
+
+### Fixed — 文档不该跟着配额搬家（F41-01，P1）
+
+page-read.json、pages/.probe、pages/<DOI>/ 原本从 policy.state_dir 及其 parent 推导。配额移到
+浏览器目录后，它们一起搬了过去：两个 home 的文献会互相读到、互相覆盖，真实样本的捕获确实落在了
+rowser-state/pages/...。
+
+ScholarService 现在有显式的 home_dir（uild_service 传 pp_home()）：页面缓存、pages/、审计与
+缓存库仍按 home 计；rowser_state_paths() 只交出配额、冷却与锁。已落到共享目录的捕获**不自动搬回**
+（会覆盖、会丢哈希证据），docs/adr/0029 给了"先记哈希 → 复制 → 核对 → 再删"的手工步骤。
+
+### Fixed — 首次迁移的检查与写入不原子（F41-02，P1）
+
+dopt_legacy_state 先 xists() 再 write_bytes()：两个进程第一次启动时都能看到"还没有文件"，
+后完成的旧副本会覆盖已经建立的额度（回放里 77 被写成 11）。现在检查与发布在同一把跨进程锁内完成，
+重新检查后经临时文件 os.replace 原子落地；仍是**先到者胜**，不按数值大小挑来源。旧文件永不删除。
+
+### Fixed — last_job 写共享目录、status 读 home（F41-03，P2）
+
+真实 MDPI 读取成功后紧接 status，rowser_busy=false 但 last_job=null：写入方跟着共享策略目录走，
+读取方仍固定读 pp_home()/state/last-job.json。现在两者用同一处 home_dir/state/last-job.json，
+并新增一条回归：读取写入的 job，status 的读取函数必须能拿到同一个 job_id。
+
+`background-0.14.42.js`（worker 内容未变，按缓存规则改名）。
 ## [0.14.41] - 2026-11-26
 
 ### Added — 回包报告 tab 与 navigation 身份（ADR 0030 第一片，只报不判）

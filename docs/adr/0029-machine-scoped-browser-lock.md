@@ -23,6 +23,35 @@
 
 这样"两个 home 驱动同一浏览器"至少**不会交错导航**，而且不改任何计数语义。
 
+## 修订 1（2026-11-27，F41-01）· 文档仍按 home 计，且这条不能靠推导
+
+第一版把 `policy.state_path` 指向共享目录后，页面缓存（`page-read.json`）与捕获目录
+（`pages/.probe`、`pages/<DOI>/`）因为是从 `policy.state_dir` 及其 parent **推导**出来的，一起被搬进了
+browser-state —— 两个 home 的文献会互相读到、互相覆盖（P5 复验在真实默认环境里就看到了捕获落在
+`browser-state/pages/...`）。
+
+现在的做法是**显式分开两个根**：
+
+| 归属 | 内容 | 来源 |
+|---|---|---|
+| 浏览器（机器级） | `quota.json`、`cooldown.json`、`browser.lock` | `browser_state_paths()` |
+| home | `state/page-read.json`、`state/last-job.json`、`pages/`、`audit.jsonl`、缓存库 | `ScholarService(home_dir=…)`，由 `build_service` 传 `app_home()` |
+
+`ScholarService` 不再从 `policy.state_dir` 推导文档位置；未显式传 `home_dir` 时（测试与手工构造）
+按 `<home>/state/<file>` 的约定回退，目录名不是 `state` 就把它当作 home 本身。
+
+**已落在共享目录里的捕获不会被程序自动搬回**（自动搬会覆盖、也会丢哈希证据）。需要时手工搬，
+并保留哈希：
+
+```powershell
+# 1) 先记哈希
+Get-FileHash "$env:LOCALAPPDATA\scholar-search\browser-state\pages\10.xxxx_yyy\page.mhtml" -Algorithm SHA256
+# 2) 复制（不是 Move）到对应 home
+Copy-Item -Recurse "$env:LOCALAPPDATA\scholar-search\browser-state\pages\10.xxxx_yyy" `
+  "$env:LOCALAPPDATA\scholar-search\pages\10.xxxx_yyy"
+# 3) 再核对哈希一致，确认后才删旧目录
+```
+
 ## 决策（第二片，已实施）
 
 `browser_state_paths()` 把三个文件一起交出来：
@@ -41,9 +70,11 @@
 
 ## 暂不实施（需要自己的迁移）
 
-**配额与冷却仍按 home 计**。把它们移进 `browser_state_dir()` 会改变既有行为（用户可能正用自定义 home
-做隔离实验），并需要一次迁移：首次运行从 home 的旧 `quota.json`/`cooldown.json` 读取一次、写入共享位置、
-**不删除**旧文件。这一步要单独一个 ADR 与回滚方案，本轮不做。
+**以下内容已随第二片实施，本条保留说明"为什么当时分开做"**：配额与冷却的搬迁会改变既有行为（自定义
+home 不再隔离额度），并需要一次迁移；迁移的原子性又出了 F41-02 那次缺陷，说明这一步确实需要单独对待。
+
+**仍未做**：`pages/` 里已有文件的位置修复（见修订 1：手工搬，保留哈希）。
+
 
 ## 影响面
 

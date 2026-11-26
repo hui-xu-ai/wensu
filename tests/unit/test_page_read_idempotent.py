@@ -27,6 +27,12 @@ ARTICLE_HTML = """<!DOCTYPE html><html><body><article>
 </article></body></html>"""
 
 
+def _page_cache(tmp_path: Path) -> Path:
+    """Where the service keeps its page cache, asked instead of assumed (F41-01 moved it)."""
+
+    return tmp_path / "state" / "page-read.json"
+
+
 def _write_mhtml(path: Path, html: str) -> bytes:
     part = email.mime.text.MIMEText(html, "html", "utf-8")
     outer = email.mime.multipart.MIMEMultipart("related")
@@ -90,11 +96,11 @@ def test_a_capture_without_a_judge_stamp_is_not_served(tmp_path: Path) -> None:
     assert first["status"] == "ok", first
 
     # Rewrite the entry the way the previous release wrote it: no stamp, no evidence.
-    state = json.loads((tmp_path / "page-read.json").read_text(encoding="utf-8"))
+    state = json.loads(_page_cache(tmp_path).read_text(encoding="utf-8"))
     key = next(iter(state))
     for field in ("judge", "reason", "prose_words", "final_url", "captured_url"):
         state[key].pop(field, None)
-    (tmp_path / "page-read.json").write_text(json.dumps(state), encoding="utf-8")
+    _page_cache(tmp_path).write_text(json.dumps(state), encoding="utf-8")
 
     second = service.read_page(doi=DOI)
 
@@ -133,7 +139,7 @@ def test_doi_case_does_not_create_a_second_entry(tmp_path: Path) -> None:
 
     service.read_page(doi=DOI.upper())
 
-    state = json.loads((tmp_path / "page-read.json").read_text(encoding="utf-8"))
+    state = json.loads(_page_cache(tmp_path).read_text(encoding="utf-8"))
     assert list(state) == [f"https://doi.org/{DOI.lower()}"], list(state)
     assert service.read_page(doi=DOI)["cached"] is True
     from test_page_read import build_service
@@ -182,10 +188,10 @@ def test_a_cache_entry_from_the_future_is_not_served(tmp_path: Path) -> None:
     service = build_service(tmp_path, [_one_capture(blob), _one_capture(blob)])
     service.read_page(doi=DOI)
 
-    state = json.loads((tmp_path / "page-read.json").read_text(encoding="utf-8"))
+    state = json.loads(_page_cache(tmp_path).read_text(encoding="utf-8"))
     key = next(iter(state))
     state[key]["at"] = clock.time() + 86_400  # a day in the future
-    (tmp_path / "page-read.json").write_text(json.dumps(state), encoding="utf-8")
+    _page_cache(tmp_path).write_text(json.dumps(state), encoding="utf-8")
 
     again = service.read_page(doi=DOI)
 
@@ -277,6 +283,23 @@ def test_a_refused_warm_up_stops_the_batch_and_reports_its_cost(tmp_path: Path) 
     assert result["quota_charged"] == 1, result
     assert result["not_attempted"] == ["10.1002/pen.23634"], result
     assert result["opened"][0]["ok"] is False, result["opened"]
+
+
+def test_status_reads_the_job_the_service_wrote(tmp_path: Path, monkeypatch) -> None:
+    """Writer and reader must agree on one path — F41-03 was a null `last_job` in real use."""
+
+    from test_page_read import build_service
+
+    from scholar_search import bootstrap
+
+    monkeypatch.setenv("SCHOLAR_SEARCH_HOME", str(tmp_path / "home"))
+    blob = _write_mhtml(tmp_path / "page.mhtml", ARTICLE_HTML)
+    service = build_service(tmp_path / "home", [_one_capture(blob)])
+
+    answer = service.read_page(doi=DOI)
+
+    assert bootstrap._last_job() is not None, "status's reader found nothing the read wrote"
+    assert bootstrap._last_job()["job_id"] == answer["job_id"]
 
 
 def test_a_finished_read_is_remembered_for_the_next_caller(tmp_path: Path) -> None:

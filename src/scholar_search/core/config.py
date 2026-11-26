@@ -10,6 +10,9 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from .errors import ScholarSearchError
+from .locking import interprocess_lock
+
 # Runtime state keeps the pre-0.4.0 directory name on purpose: renaming it would
 # orphan quota, cooldown and audit state for everyone upgrading. Only the
 # distribution name changed in 0.4.0.
@@ -113,14 +116,25 @@ def adopt_legacy_state(legacy: Path, target: Path) -> bool:
     Migration rule: **read the old file, write the new one, never delete anything**. A user who
     rolls back to an older build still finds its own state, and a machine that has both simply
     keeps the numbers it already had instead of restarting the day at zero.
+
+    The check and the publish happen under one cross-process lock, and the bytes land through
+    `os.replace`. Checking then writing let two first starts both see "no file yet" and the later
+    copy overwrite an allowance that had already been established — 77 became 11 in the replay
+    (P5 retest 2026-11-27, F41-02). First source wins; nothing here tries to pick a "larger" one.
     """
 
     if target.exists() or not legacy.is_file():
         return False
+    lock = target.with_name(target.name + ".migrate.lock")
     try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(legacy.read_bytes())
-    except OSError:
+        with interprocess_lock(lock, timeout_s=10.0):
+            if target.exists():  # re-check under the lock: another process may have won
+                return False
+            staging = target.with_name(f"{target.name}.{os.getpid()}.tmp")
+            staging.parent.mkdir(parents=True, exist_ok=True)
+            staging.write_bytes(legacy.read_bytes())
+            os.replace(staging, target)
+    except (OSError, ScholarSearchError):
         return False
     return True
 

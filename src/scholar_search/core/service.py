@@ -476,6 +476,19 @@ class _BrowserTransaction:
         self._lock.__exit__(exc_type, exc, tb)  # type: ignore[arg-type]
 
 
+def _home_from_state_dir(state_dir: Path) -> Path:
+    """Best guess at the home that owns *state_dir*, for callers that do not pass one.
+
+    `build_service` passes `app_home()` explicitly; this fallback keeps hand-built services (and
+    the test helpers) working. The convention is `<home>/state/<file>`, and a state directory not
+    named `state` *is* the home — guessing its parent instead put every test's captures one level
+    too high, where they were shared.
+    """
+
+    path = Path(state_dir)
+    return path.parent if path.name == "state" else path
+
+
 class ScholarService:
     def __init__(
         self,
@@ -488,12 +501,22 @@ class ScholarService:
         status_provider: Callable[[], dict[str, Any]] | None = None,
         risk: RiskGuard | None = None,
         bridge_probe: Callable[[], bool] | None = None,
+        home_dir: Path | None = None,
     ) -> None:
         self._registry = registry
         self._adapter_factory = adapter_factory
         self._planner_factory = planner_factory
         self._policy = policy
         self._cache = cache
+        # Where this home keeps its documents: the page cache, `pages/` and the last-job marker.
+        # Deliberately **not** derived from `policy.state_path`: since ADR 0029 that path is the
+        # machine-scoped quota file, and deriving documents from it moved every capture into the
+        # shared browser directory — two homes then read and overwrote each other's articles
+        # (P5 retest 2026-11-27, F41-01). Falls back to the policy file's parent so existing
+        # callers and tests keep their layout; `build_service` passes `app_home()` explicitly.
+        self._home_dir = (
+            Path(home_dir) if home_dir is not None else _home_from_state_dir(policy.state_dir)
+        )
         self._status_provider = status_provider or (lambda: {})
         # Injectable so tests that use a stub adapter are not blocked by a real
         # bridge probe. Resolved lazily so a monkeypatched `BridgeAdapter.probe`
@@ -963,8 +986,9 @@ class ScholarService:
     _PAGE_WALL_TTL_S = 300.0
 
     def _page_cache_path(self) -> Path:
-        state_dir = Path(self._policy.state_dir) if self._policy else Path.cwd()
-        return state_dir / "page-read.json"
+        # Home-scoped on purpose: a capture belongs to the home that took it, not to the browser
+        # (F41-01). Two homes sharing a quota file must not share their articles.
+        return self._home_dir / "state" / "page-read.json"
 
     def _page_cache_get(self, url: str) -> dict[str, Any] | None:
         """A capture of this URL that is still on disk, still fresh and still judged the same."""
@@ -1819,8 +1843,10 @@ class ScholarService:
         return payload if isinstance(payload, dict) else None
 
     def _last_job_path(self) -> Path:
-        state_dir = Path(self._policy.state_dir) if self._policy else Path.cwd()
-        return state_dir / "last-job.json"
+        # The writer and `status`'s reader must agree on one path, and it is the home's: "how did
+        # the last read end" is about this caller's work, not about the browser's shared ledger
+        # (F41-03).
+        return self._home_dir / "state" / "last-job.json"
 
     def _note_job(self, answer: dict[str, Any]) -> None:
         """Remember how this read ended. Best effort: a state file must never fail a read."""
@@ -1862,8 +1888,7 @@ class ScholarService:
         refers to is published, once, by `_publish_page`.
         """
 
-        home = Path(self._policy.state_dir).parent if self._policy else Path.cwd()
-        staged_dir = home / "pages" / ".probe"
+        staged_dir = self._home_dir / "pages" / ".probe"
         staged_dir.mkdir(parents=True, exist_ok=True)
         # Inspection left-behinds are not storage: a capture nobody published (the first look
         # that a second look replaced, the reader's own tab) is deleted as it happens, and this
@@ -1891,8 +1916,7 @@ class ScholarService:
         an answer and the cache quote when they say which bytes they describe.
         """
 
-        home = Path(self._policy.state_dir).parent if self._policy else Path.cwd()
-        target = home / "pages" / _page_slug_for(identifier, meta) / "page.mhtml"
+        target = self._home_dir / "pages" / _page_slug_for(identifier, meta) / "page.mhtml"
         target.parent.mkdir(parents=True, exist_ok=True)
         digest = hashlib.sha256(staged.read_bytes()).hexdigest()
         os.replace(staged, target)

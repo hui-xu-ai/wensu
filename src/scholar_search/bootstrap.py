@@ -214,7 +214,7 @@ def _browser_busy(endpoint: Path, bridge_up: bool) -> bool:
 
 
 def _last_job() -> dict[str, object] | None:
-    """How the previous read ended, as the kernel recorded it."""
+    """How the previous read ended, at the one path the service writes it to (F41-03)."""
 
     path = app_home() / "state" / "last-job.json"
     try:
@@ -345,4 +345,7 @@ def build_service() -> ScholarService:
         cache=cache,
         status_provider=status,
         risk=risk,
+        # Resource split made explicit (F41-01): the quota file is machine-scoped since ADR 0029,
+        # but this home's page cache, captures and last-job marker are not.
+        home_dir=app_home(),
     )
