@@ -697,6 +697,9 @@ async function onHostMessage(message, channel) {
             url: capture.url,
             title: capture.title,
             captcha_visible: capture.captchaVisible,
+            // Which tab the bytes came from (ADR 0030): the address alone cannot tell two tabs
+            // showing the same URL apart.
+            ...(Number.isInteger(capture.tabId) ? { tab_id: capture.tabId } : {}),
           },
         });
         return;
@@ -720,6 +723,8 @@ async function onHostMessage(message, channel) {
         url: tab.url,
         title: tab.title || "",
         captchaVisible: meta.captcha_visible === true,
+        // Kept with the bytes so the reply can say which tab they came from (ADR 0030).
+        tabId: tab.id,
       };
       captures.set(fresh.token, fresh);
       // A capture nobody reads must not sit in memory forever.
@@ -734,6 +739,8 @@ async function onHostMessage(message, channel) {
           title: fresh.title,
           captcha_visible: fresh.captchaVisible,
           status: Number(meta.status) || 0,
+          // ADR 0030: the tab these bytes came from.
+          tab_id: tab.id,
         },
       });
       return;
@@ -821,6 +828,9 @@ async function onHostMessage(message, channel) {
       }
       let blanked = [];
       let halted = false;
+      // Which navigation this action issued (ADR 0030). Declared at action scope so the reply
+      // can read it after either branch; empty when nothing was navigated.
+      let navigationId = "";
       // Where the tab was before this action navigated it ("" for the `open: "new"` branch).
       let before = "";
       if (params.close === "disposable") blanked = await closeDisposableTabs();
@@ -866,6 +876,10 @@ async function onHostMessage(message, channel) {
           await chrome.tabs.update(tab.id, { url: params.url });
           // Only now is the navigation really on its way: a rejected update threw above.
           issued = true;
+          navigationId =
+            typeof crypto !== "undefined" && crypto.randomUUID
+              ? crypto.randomUUID()
+              : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
           // Read the tab back only once it has moved: `tabs.get` immediately after
           // `update` can return the previous URL, which looked like a redirect out of scope.
           //
@@ -966,6 +980,10 @@ async function onHostMessage(message, channel) {
         // anyway: an internal retry that the kernel cannot see is how one `goto` became two
         // requests (audit 2026-11-26, R31-01).
         navigation_attempts: 1,
+        // Identity of the thing that produced this reply (ADR 0030). `tab_id` is the tab the
+        // browser actually navigated; `navigation_id` is this one navigation, not the tab's life.
+        tab_id: tab.id,
+        ...(navigationId ? { navigation_id: navigationId } : {}),
         // Reported only when it happened, so every existing caller reads the same shape it did
         // before this parameter existed.
         ...(halted ? { halted: true } : {}),

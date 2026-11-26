@@ -57,6 +57,21 @@ def test_every_planned_verb_is_a_known_verb() -> None:
     assert {"goto", "snapshot", "sleep", "await_gate_clear"} <= VERBS
 
 
+def test_the_worker_reports_the_tab_and_the_navigation() -> None:
+    """ADR 0030, first slice: the reply names the tab and the navigation that produced it.
+
+    Reported only — the identity checks still decide — but a caller can now say "this capture came
+    from that navigation" instead of inferring it from the address afterwards.
+    """
+
+    worker = next(ROOT.glob("extension/background-*.js"))
+    text = worker.read_text(encoding="utf-8")
+
+    assert "tab_id: tab.id" in text
+    assert "navigation_id: navigationId" in text
+    assert "tabId: tab.id" in text  # the snapshot record carries its tab
+
+
 def test_the_gate_wait_asks_for_a_focused_window() -> None:
     """A window that is maximized but behind everything is still invisible (P5 retest F34-01).
 

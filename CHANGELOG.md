@@ -36,6 +36,21 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.41] - 2026-11-26
+
+### Added — 回包报告 tab 与 navigation 身份（ADR 0030 第一片，只报不判）
+
+goto 回包现在带 	ab_id（浏览器实际导航的标签页）与 
+avigation_id（这一次导航，而不是该标签页的一生），
+snapshot 回包带 	ab_id；page_read 把两者放进顶层与 vidence。目的只有一个：让"这页是不是我刚导航的
+那一次"从**事后推断**变成**可核对的事实**。
+
+判定逻辑一个字没改——identity / capture_sha256 仍然决定结果。改判定要等这些字段在真实链路里跑一轮，
+确认每次读取都齐、都自洽之后再单独做（ADR 0030 第二片：捕获必须带 
+avigation_id、标签页租约、
+内核指定 	ab_id）。
+
+`background-0.14.41.js`。
 ## [0.14.40] - 2026-11-26
 
 ### Changed — 配额与冷却也归浏览器（ADR 0029 第二片）

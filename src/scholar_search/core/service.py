@@ -204,6 +204,8 @@ def _page_evidence(payload: dict[str, Any]) -> dict[str, Any]:
         "prose_words",
         "sections",
         "navigation_attempts",
+        "tab_id",
+        "navigation_id",
     ):
         value = payload.get(key)
         if value not in (None, "", 0):
@@ -1711,6 +1713,10 @@ class ScholarService:
                 # treat `publisher_only` as "unconfirmed" instead of guessing (audit R31-03).
                 "identity": identity,
                 "mhtml_path": str(readable),
+                # Which tab and which navigation produced this capture (ADR 0030, first slice).
+                # Reported, not yet enforced: the identity checks above still decide.
+                "tab_id": last.get("tab_id"),
+                "navigation_id": last.get("navigation_id"),
                 # Which bytes this answer is about. A later capture of the same article replaces
                 # the file, so an answer that quotes a digest can be checked instead of trusted.
                 "capture_sha256": capture_sha256,
