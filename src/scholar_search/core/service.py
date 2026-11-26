@@ -288,6 +288,13 @@ def _page_cached_payload(
 _DOI_IN_URL = re.compile(r"10\.\d{4,9}/[^\s?#'\"]+", re.IGNORECASE)
 
 
+def _is_home_page(url: str) -> bool:
+    """Is this the site's front page rather than an article (no path, or one bare segment)?"""
+
+    path = urlparse(url).path or "/"
+    return path in {"", "/"} or len([part for part in path.split("/") if part]) <= 0
+
+
 def _page_identity(captured_url: str, declared_doi: str, identifier: str) -> tuple[bool, str]:
     """(refused, evidence) — is this capture the article that was asked for?
 
@@ -1296,10 +1303,18 @@ class ScholarService:
                     continue
                 cost = _charged_units(outcomes)
                 charged += cost
+                last = outcomes[-1].data if outcomes and isinstance(outcomes[-1].data, dict) else {}
+                landing = str(last.get("url") or url)
                 opened.append(
                     {
                         "target": target,
                         "publisher": publisher.name,
+                        # Warm-up is per *subdomain*, not per publisher: measured 2026-11-26, a
+                        # Wiley warm-up on `4spepublications…` did not cover an article on
+                        # `scijournals…`. Reporting where each tab actually landed is what lets a
+                        # caller group the batch by that host instead of by the publisher name.
+                        "landing_host": urlparse(landing).hostname or "",
+                        "landing_url": landing,
                         "ok": True,
                         "quota_charged": cost,
                     }
@@ -1636,13 +1651,19 @@ class ScholarService:
             refused, identity = _page_identity(captured_url, declared, identifier)
             if declared and declared.casefold() != identifier.casefold():
                 refused = True
-            if refused:
+            # A publisher that answers a deep link with its home page is not showing a partial
+            # article: the P5 acceptance got 192 words of an ACS home page reported as
+            # `abstract_only`, which reads like "this article has no body". Judging the address is
+            # cheap and says what actually happened (2026-11-26).
+            landing_home = identity == "publisher_only" and _is_home_page(captured_url)
+            if refused or landing_home:
                 with suppress(OSError):
                     readable.unlink()
-                self._page_cache_put(target, {"status": "blocked", "title": "capture_mismatch"})
+                reason = "capture_mismatch" if refused else "landing_home"
+                self._page_cache_put(target, {"status": "blocked", "title": reason})
                 return {
                     "status": "no_page",
-                    "reason": "capture_mismatch",
+                    "reason": reason,
                     "doi": identifier,
                     "publisher": publisher.name,
                     "final_url": final_url,
@@ -1656,6 +1677,11 @@ class ScholarService:
                         "the captured page is not this article (its address or its own DOI says "
                         "so): ask again — the browser tab moved between the navigation and the "
                         "capture."
+                        if refused
+                        else (
+                            "the publisher answered with its home page instead of the article "
+                            "(no DOI anywhere on it): ask again, or pass the article's own URL."
+                        )
                     ),
                 }
 

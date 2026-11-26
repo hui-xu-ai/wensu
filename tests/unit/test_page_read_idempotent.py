@@ -256,6 +256,7 @@ def test_warm_up_opens_one_kept_tab_per_publisher(tmp_path: Path) -> None:
     assert result["quota_charged"] == 2, result
     opened = result["opened"]
     assert [item["publisher"] for item in opened if item["ok"]] == ["elsevier", "wiley"], opened
+    assert all(item.get("landing_host") for item in opened if item["ok"]), opened
     assert opened[-1]["ok"] is False and opened[-1]["reason"] == "unsupported_site", opened
 
 

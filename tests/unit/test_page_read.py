@@ -680,6 +680,44 @@ def test_a_wall_answer_says_it_stopped_at_the_wall(tmp_path: Path) -> None:
     assert blocked["full_text"] is False
 
 
+def test_a_publisher_home_page_is_not_reported_as_a_partial_article(tmp_path: Path) -> None:
+    """ACS answered a deep link with its front page; 192 words read as `abstract_only`.
+
+    A home page is not "this article has no body" — saying so sends the reader looking for a
+    paywall that is not there (P5 acceptance 2026-11-26).
+    """
+
+    home = b"<html><body><h1>ACS Publications</h1><p>Browse journals and books.</p></body></html>"
+    service = build_service(
+        tmp_path,
+        [
+            [
+                {"verb": "goto", "data": {"url": "https://pubs.acs.org/"}},
+                {"verb": "sleep", "data": {"ms": 1}},
+                {
+                    "verb": "snapshot",
+                    "data": {
+                        "token": "t1",
+                        "total": len(home),
+                        "base64": base64.b64encode(home).decode("ascii"),
+                        "url": "https://pubs.acs.org/",
+                        "title": "ACS Publications",
+                        "captcha_visible": False,
+                    },
+                },
+            ]
+        ],
+    )
+
+    result = service.read_page(doi="10.1021/acs.inorgchem.1c03019")
+
+    assert result["status"] == "no_page", result
+    assert result["reason"] == "landing_home", result
+    assert result["full_text"] is False, result
+    assert result["mhtml_path"] is None, result
+    assert not list(tmp_path.rglob("page.mhtml")), "a home page must not be published"
+
+
 def test_doi_prefixes_map_to_the_right_publisher() -> None:
     assert publisher_for_doi("10.1016/j.cej.2023.145123").name == "elsevier"  # type: ignore[union-attr]
     assert publisher_for_doi("https://doi.org/10.1038/s41586-024-00001-0").name == "nature"  # type: ignore[union-attr]
