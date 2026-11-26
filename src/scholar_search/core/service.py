@@ -181,6 +181,38 @@ class _FollowResult:
     charged: int = 0
 
 
+def _page_cached_payload(
+    cached: dict[str, Any], identifier: str, publisher: Publisher, target: str
+) -> dict[str, Any]:
+    """The answer for a page that is already on disk — one shape, used by both call sites.
+
+    Idempotent on purpose: the page is already captured, so navigating again could only replace
+    a good capture with whatever the publisher serves now. The verdict travels with the capture:
+    an answer that drops `captured_url`, `judge` or `prose_words` forces the caller to trust it,
+    and filling `final_url` with the *requested* address hides where the page actually was
+    (audit F13).
+    """
+
+    return {
+        "status": "ok",
+        "cached": True,
+        "doi": identifier,
+        "publisher": publisher.name,
+        "final_url": str(cached.get("final_url") or target),
+        "captured_url": str(cached.get("captured_url") or ""),
+        "reason": str(cached.get("reason") or ""),
+        "prose_words": cached.get("prose_words"),
+        "judge": cached.get("judge"),
+        "mhtml_path": str(cached.get("mhtml_path") or ""),
+        "bytes": cached.get("bytes"),
+        "headings": cached.get("headings"),
+        "title": str(cached.get("title") or ""),
+        "quota_charged": 0,
+        "quota_reason": "cache_hit",
+        "next": _page_next({"status": "ok"}),
+    }
+
+
 def _page_capture_belongs(
     captured_url: str, declared_doi: str, publisher: Publisher, identifier: str
 ) -> bool:
@@ -204,17 +236,13 @@ def _page_capture_belongs(
     if _page_evidence_site(captured_url, publisher, identifier):
         return True
     host = (urlparse(captured_url).hostname or "").casefold()
-    if not host:
-        return False
-    if any(host == domain or host.endswith("." + domain) for domain in publisher.domains):
-        return True
-    # Same organisation, different subdomain: compare the last two labels.
-    organisation = ".".join(host.split(".")[-2:])
-    return any(
-        ".".join(domain.casefold().split(".")[-2:]) == organisation
-        for domain in publisher.domains
-        if domain.count(".") >= 1
-    )
+    # A subdomain of the curated domain is a mirror of the same publisher: `pubsapp.acs.org`
+    # under `pubs.acs.org` is still ACS. Nothing wider than that — deriving "the same
+    # organisation" from the last two labels made `unrelated.edu.cn` a sibling of
+    # `whxb.pku.edu.cn` (retest 2026-11-26, §标签和文章身份). Public suffixes are not a boundary
+    # this code may guess at, so a publisher whose mirrors live on another domain needs an entry
+    # in `publishers.py`, not a heuristic here.
+    return any(host == domain or host.endswith("." + domain) for domain in publisher.domains)
 
 
 def _page_evidence_site(url: str, publisher: Publisher, identifier: str) -> bool:
@@ -1040,35 +1068,21 @@ class ScholarService:
 
         cached = None if refresh else self._page_cache_get(target)
         if cached is not None:
-            # Idempotent on purpose: the page is already on disk, so navigating again could
-            # only replace a good capture with whatever the publisher serves now.
-            # The verdict travels with the capture: a cached answer that drops `captured_url`,
-            # `judge` or `prose_words` forces the caller to trust it, and filling `final_url`
-            # with the *requested* address hides where the page actually was (audit F13).
-            return {
-                "status": "ok",
-                "cached": True,
-                "doi": identifier,
-                "publisher": publisher.name,
-                "final_url": str(cached.get("final_url") or target),
-                "captured_url": str(cached.get("captured_url") or ""),
-                "reason": str(cached.get("reason") or ""),
-                "prose_words": cached.get("prose_words"),
-                "judge": cached.get("judge"),
-                "mhtml_path": str(cached.get("mhtml_path") or ""),
-                "bytes": cached.get("bytes"),
-                "headings": cached.get("headings"),
-                "title": str(cached.get("title") or ""),
-                "quota_charged": 0,
-                "quota_reason": "cache_hit",
-                "next": _page_next({"status": "ok"}),
-            }
+            return _page_cached_payload(cached, identifier, publisher, target)
 
         spec = _page_spec(publisher)
         # The navigation is its own plan, because what it returns decides whether anything
         # else may happen at all: on a wall (ADR 0004) the tool must not sleep, capture or
         # look again. The title arrives with the `goto` reply, so this check is free.
         with self._browser_transaction():
+            # Asked again, now that the lock is held. The check above ran before the lock, so a
+            # second request for the same page could queue behind the first and, once inside,
+            # navigate all over again: two readers, four units, neither answer `cached`
+            # (measured 2026-11-26, offline concurrency test).
+            if not refresh:
+                arrived = self._page_cache_get(target)
+                if arrived is not None:
+                    return _page_cached_payload(arrived, identifier, publisher, target)
             # The one tab this read touches without navigating it itself is the tab in front,
             # so the look happens *under the browser lock*: doing it outside let another read
             # navigate the shared tab in between, and the answer carried that article's URL

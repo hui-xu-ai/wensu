@@ -30,7 +30,7 @@ from pathlib import Path
 
 import pytest
 
-from scholar_search.core.pageprobe import classify_mhtml
+from scholar_search.core.pageprobe import classify_mhtml, meta_content
 from scholar_search.core.service import _page_next, _still_rendering
 
 _FIX = (
@@ -107,6 +107,44 @@ def _saved(tmp_path: Path, body: str, name: str = "page.mhtml") -> Path:
     path = tmp_path / name
     path.write_text(body, encoding="utf-8")
     return path
+
+
+def test_a_reference_quoting_the_doi_is_not_the_articles_doi() -> None:
+    """MDPI prints `citation_reference` tags whose content quotes `citation_doi=…`.
+
+    Matching the wanted name anywhere in the tag made the reference win, so the page reported a
+    Nano Letters DOI as its own and the capture was refused as "another article" (measured
+    2026-11-26 on 10.3390/s26041303).
+    """
+
+    markup = (
+        "<html><head>"
+        '<meta name="citation_reference" content="citation_journal_title=Nano Letters; '
+        'citation_doi=10.1021/acs.nanolett.5b01234"/>'
+        '<meta name="citation_doi" content="10.3390/s26041303"/>'
+        "</head><body><p>text</p></body></html>"
+    )
+
+    assert meta_content(markup, "citation_doi") == "10.3390/s26041303"
+
+
+def test_a_meta_in_the_body_is_not_the_pages_metadata() -> None:
+    markup = (
+        "<html><head><title>x</title></head><body>"
+        '<meta name="citation_doi" content="10.9999/embedded-widget"/>'
+        "</body></html>"
+    )
+
+    assert meta_content(markup, "citation_doi") == ""
+
+
+def test_a_name_that_merely_starts_the_same_is_not_a_match() -> None:
+    markup = (
+        '<html><head><meta name="citation_doi_suffix" content="10.9999/wrong"/>'
+        '<meta name="citation_doi" content="10.1021/right"/></head></html>'
+    )
+
+    assert meta_content(markup, "citation_doi") == "10.1021/right"
 
 
 def test_a_challenge_page_is_not_an_abstract_shell(tmp_path: Path) -> None:

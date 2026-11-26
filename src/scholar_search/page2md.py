@@ -900,6 +900,66 @@ def _merge_markdown(sections: str, main_body: str | None, *, min_chars: int = 60
 # ------------------------------------------------------------------------ 抽取
 
 
+def _source_words(markup: str) -> int:
+    """Roughly how much prose the capture holds, before any extraction.
+
+    Deliberately crude and dependency-free: strip scripts/styles/tags and count tokens. It is a
+    yardstick for "did the body survive", not a word count to show a reader.
+    """
+
+    stripped = re.sub(r"(?is)<(script|style|noscript)\b.*?</\1>", " ", markup)
+    text = re.sub(r"(?s)<[^>]+>", " ", stripped)
+    text = text.replace("&nbsp;", " ")
+    return len([token for token in re.split(r"\s+", text) if len(token) > 1])
+
+
+def _word_count(text: str | None) -> int:
+    """Whitespace tokens worth counting, ignoring Markdown furniture."""
+
+    if not text:
+        return 0
+    stripped = re.sub(r"(?m)^#{1,6} .*$", " ", text)
+    stripped = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", stripped)
+    return len([token for token in re.split(r"\s+", stripped) if len(token) > 1])
+
+
+def _paragraph_fallback(markup: str) -> str:
+    """Headings and paragraphs straight from the document, when sections found nothing.
+
+    The section walk needs the publisher's own containers. ACS prints its body in none of the
+    shapes it recognises, so a 3,600-word article converted to 44 bytes of body plus "Supporting
+    Information" (measured 2026-11-26 on 10.1021/acs.inorgchem.1c03019) — with `status: ok`.
+    `trafilatura` is the documented supplement and it is optional, so the default install had
+    nothing to fall back on. This is that fallback: no containers required.
+    """
+
+    from lxml import html as LH
+
+    try:
+        doc = LH.fromstring(markup)
+    except (ValueError, TypeError):
+        return ""
+    for junk in doc.xpath(JUNK_XPATH):
+        parent = junk.getparent()
+        if parent is not None:
+            parent.remove(junk)
+    blocks: list[str] = []
+    for element in doc.iter("h2", "h3", "h4", "p"):
+        text = " ".join(element.text_content().split())
+        if not text:
+            continue
+        tag = str(element.tag).lower()
+        if tag in {"h2", "h3", "h4"}:
+            level = {"h2": 2, "h3": 3, "h4": 4}[tag]
+            blocks.append(f"{'#' * level} {text}")
+            continue
+        # Short fragments are captions and labels more often than prose, and the merged body is
+        # what keeps a page usable when the containers are unhelpful.
+        if len(text) >= 60:
+            blocks.append(text)
+    return "\n\n".join(blocks)
+
+
 def _extract_body(html: str) -> tuple[str | None, dict[str, object]]:
     """Sections first, trafilatura as the supplement, markitdown as the last resort.
 
@@ -952,6 +1012,19 @@ def _extract_body(html: str) -> tuple[str | None, dict[str, object]]:
         info["engine"] = "sections+trafilatura"
     else:
         info["engine"] = "sections" if sections else ("trafilatura" if main_body else "none")
+
+    # A publisher whose pages carry no section containers leaves the walk with almost nothing,
+    # and the optional supplement is not installed in a default install. Rather than report a
+    # 3,600-word article as 44 bytes of body with `status: ok`, take the paragraphs themselves
+    # (retest 2026-11-26, 新发现二).
+    source_words = _source_words(html)
+    info["source_words"] = source_words
+    if source_words >= 300 and _word_count(body) < min(200, source_words // 4):
+        fallback = _paragraph_fallback(html)
+        if _word_count(fallback) > _word_count(body):
+            body = _cut_tail(_dedupe_blocks(fallback))
+            info["engine"] = "paragraphs"
+            info["paragraph_fallback"] = True
 
     figures = ""
     try:
@@ -1598,6 +1671,24 @@ def convert(
         "noise_hits": sorted({word for word in NOISE if word in markdown.lower()}),
     }
     meta["warnings"] = _warnings(meta)
+    # How much of the capture actually reached the Markdown. A conversion can succeed, save a
+    # file and still carry almost none of the article — ACS's 3,600 words became 44 bytes of
+    # body while the answer said `ok` (retest 2026-11-26, 新发现二). State the coverage so a
+    # caller can refuse to draw conclusions from a body that is mostly missing.
+    extracted_words = _word_count(markdown)
+    counted = info.get("source_words")
+    source_words = counted if isinstance(counted, int) and counted > 0 else _source_words(html)
+    meta["coverage"] = {
+        "source_words": source_words,
+        "extracted_words": extracted_words,
+        "ratio": round(extracted_words / source_words, 3) if source_words else None,
+    }
+    ratio = meta["coverage"]["ratio"] if isinstance(meta["coverage"], dict) else None
+    if source_words >= 500 and isinstance(ratio, float) and ratio < 0.3:
+        cast(list[str], meta["warnings"]).append(
+            f"正文可能大量缺失：源页面约 {source_words} 词，转换后仅 {extracted_words} 词"
+            f"（{ratio:.0%}）。请核对原文，必要时看 PDF。"
+        )
     # The sections of *this* document, handed back by the extraction that produced them.
     sections = list(cast(list[Any], info.get("sections_found") or []))
     chunks = _write_chunks(out, sections)

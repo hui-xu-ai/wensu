@@ -492,6 +492,85 @@ def test_two_inline_resources_with_the_same_name_do_not_overwrite_each_other(
     assert {path.read_bytes() for path in written} == {one, two}
 
 
+def test_a_page_without_section_containers_keeps_its_body(tmp_path: Path) -> None:
+    """ACS prints its body in none of the containers the section walk looks for.
+
+    A 3,600-word article converted to 44 bytes of body plus "Supporting Information", with
+    `status: ok` (retest 2026-11-26, 新发现二). The paragraph fallback recovers it, and the
+    coverage numbers say how much of the source survived.
+    """
+
+    paragraphs = "".join(
+        f"<p>Section {index} discusses {topic} with a measured value of {index + 1}.5 units, "
+        f"compares it against the {other} baseline, and reports that the difference stayed "
+        f"stable across {index + 2} independent runs of the same experiment.</p>"
+        for index, (topic, other) in enumerate(
+            [
+                ("the hydrolysis pathway", "ambient condition"),
+                ("the wheel geometry", "cage structure"),
+                ("the ship assembly", "prior synthesis"),
+                ("the counter-ion effect", "chloride variant"),
+                ("the thermal stability", "room temperature"),
+                ("the ligand exchange", "chelating agent"),
+                ("the cage diameter", "smaller cluster"),
+                ("the reaction yield", "reported value"),
+                ("the solvent polarity", "aprotic medium"),
+                ("the crystallisation", "slow cooling"),
+                ("the NMR assignment", "shift reference"),
+                ("the mass spectrum", "observed peak"),
+                ("the infrared band", "stretching mode"),
+                ("the electrochemical window", "reference electrode"),
+                ("the surface area", "nitrogen isotherm"),
+                ("the pore distribution", "micropore range"),
+                ("the catalytic turnover", "control run"),
+                ("the selectivity ratio", "competing product"),
+                ("the kinetic profile", "pseudo-first order"),
+                ("the reproducibility", "second batch"),
+            ]
+        )
+    )
+    markup = (
+        "<html><head><title>An ACS paper</title></head><body>"
+        '<div class="articleBody"><h2>Results</h2>' + paragraphs + "</div>"
+        "<h2>Supporting Information</h2><p>Extra tables.</p>"
+        "</body></html>"
+    )
+    source = tmp_path / "acs.html"
+    source.write_text(markup, encoding="utf-8")
+    out = tmp_path / "out"
+
+    meta = page2md.convert(source, out)
+
+    markdown = (out / "page.md").read_text(encoding="utf-8")
+    assert meta["engine"] == "paragraphs", meta
+    # Before the fallback this page converted to nothing: the section walk found no containers
+    # and the optional supplement is not installed.
+    assert "Section 0 discusses the hydrolysis pathway" in markdown, markdown[:400]
+    assert "Section 1 discusses the wheel geometry" in markdown, markdown[:400]
+    coverage = meta["coverage"]
+    assert isinstance(coverage, dict)
+    assert coverage["source_words"] >= 300
+    assert coverage["extracted_words"] > 0
+
+
+def test_a_thin_conversion_says_the_body_may_be_missing(tmp_path: Path) -> None:
+    """When the body really is lost, the answer must not be a silent `ok`."""
+
+    filler = " ".join(f"word{index}" for index in range(700))
+    markup = (
+        "<html><head><title>Thin</title></head><body>"
+        f'<div class="payload" style="display:none">{filler}</div>'
+        "<h2>Supporting Information</h2><p>Extra tables.</p></body></html>"
+    )
+    source = tmp_path / "thin.html"
+    source.write_text(markup, encoding="utf-8")
+
+    meta = page2md.convert(source, tmp_path / "out")
+
+    warnings = [str(item) for item in meta["warnings"]]
+    assert any("正文可能大量缺失" in warning for warning in warnings), warnings
+
+
 def test_index_drops_bookkeeping_fields(
     sample_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

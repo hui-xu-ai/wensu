@@ -131,7 +131,13 @@ def doi_not_found_in(title: str) -> str | None:
 
 
 _META_TAG = re.compile(r"<meta\b[^>]*>", re.IGNORECASE)
-_META_CONTENT = re.compile(r"""content\s*=\s*["']([^"']*)""", re.IGNORECASE)
+# The tag's own `name` attribute, matched exactly. Testing whether the wanted name appears
+# *anywhere* in the tag text made `citation_reference` win (its content quotes a DOI as
+# `citation_doi=…`), so MDPI pages reported a reference's DOI as the article's own (measured
+# 2026-11-26 on 10.3390/s26041303). The name attribute is the only place the field name lives.
+_META_NAME = re.compile(r"""\bname\s*=\s*["']([^"']*)["']""", re.IGNORECASE)
+_META_CONTENT = re.compile(r"""\bcontent\s*=\s*["']([^"']*)["']""", re.IGNORECASE)
+_HEAD = re.compile(r"<head\b[^>]*>(.*?)</head>", re.IGNORECASE | re.DOTALL)
 
 
 def meta_content(markup: str, name: str) -> str:
@@ -140,10 +146,16 @@ def meta_content(markup: str, name: str) -> str:
     Publishers print facts about the page in machine-readable tags. Reading the page's own claim
     is how a capture can be identified without trusting the tab's address, and how a full-text
     view can be found without hard-coding one URL shape per publisher.
+
+    Only `<head>` is read (a `<meta>` in the body belongs to some embedded widget), and the `name`
+    must match exactly — see `_META_NAME`.
     """
 
-    for tag in _META_TAG.findall(markup):
-        if name not in tag.casefold():
+    head = _HEAD.search(markup)
+    wanted = name.casefold()
+    for tag in _META_TAG.findall(head.group(1) if head else markup):
+        found_name = _META_NAME.search(tag)
+        if not found_name or found_name.group(1).strip().casefold() != wanted:
             continue
         found = _META_CONTENT.search(tag)
         if found:
