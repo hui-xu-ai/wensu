@@ -164,8 +164,27 @@ def _browser_summary() -> dict[str, object] | None:
         "extension_version_mismatch": (
             None if extension_version is None else extension_version != __version__
         ),
+        # What is *running*, asked of the host rather than read off the disk: a worker that was
+        # never reloaded keeps serving the old code while its manifest says the new version.
+        "bridge_build": _bridge_build(),
         "start_with": "wensu browser start",
     }
+
+
+def _bridge_build() -> dict[str, object] | None:
+    """The running host/worker build, or None when no host answers.
+
+    Deliberately best-effort: `status` is also how a person finds out that nothing is running, so
+    an unreachable host must not turn the whole call into an error.
+    """
+
+    try:
+        from .adapters.bridge import BridgeAdapter
+
+        build = BridgeAdapter().info()
+    except (OSError, ValueError, RuntimeError):
+        return None
+    return build or None
 
 
 def build_service() -> ScholarService:

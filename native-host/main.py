@@ -19,6 +19,7 @@ import threading
 import time
 from pathlib import Path
 
+from scholar_search import __version__ as VERSION
 from scholar_search.adapters.bridge.host import BridgeHost
 from scholar_search.adapters.bridge.policy import TRUSTED_DOMAINS, narrow_domains
 from scholar_search.core.config import ensure_host_runtime, host_runtime_dir
@@ -118,6 +119,20 @@ def serve_client(
 
             if request.get("cmd") == "ping":
                 connection.sendall(b'{"ok":true}\n')
+                continue
+
+            if request.get("cmd") == "info":
+                # What is *running*, not what is installed: the host build and whatever the
+                # extension said in its handshake. `status` reports both, because "the manifest
+                # says 0.14.28" and "the worker runs 0.14.28" are different facts (audit D batch).
+                describe = getattr(host, "build_info", None)
+                build = describe() if describe is not None else {}
+                payload = {
+                    "ok": True,
+                    "host_version": VERSION,
+                    "build": build if isinstance(build, dict) else {},
+                }
+                connection.sendall((json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8"))
                 continue
 
             if request.get("cmd") == "shutdown":

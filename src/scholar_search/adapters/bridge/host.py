@@ -72,6 +72,8 @@ class BridgeHost:
         self._pending: dict[str, dict[str, Any] | None] = {}
         self._closed = False
         self._handshaked = False
+        # Filled by `_handshake` from the extension's own reply; empty until then.
+        self.build: dict[str, Any] = {}
 
     @property
     def closed(self) -> bool:
@@ -132,8 +134,29 @@ class BridgeHost:
         reply = self._wait(request_id, deadline)
         if reply is None or reply.get("protocol") != PROTOCOL_VERSION:
             return False
+        # What the running extension says it is. Absent fields are an older worker, not an error:
+        # `build_info()` then simply has nothing to report beyond the protocol (audit D batch).
+        self.build = {
+            "protocol": reply.get("protocol"),
+            "version": str(reply.get("version") or ""),
+            "worker": str(reply.get("worker") or ""),
+            "capabilities": [
+                str(item) for item in (reply.get("capabilities") or []) if isinstance(item, str)
+            ],
+            # Verbs that need the content script, so they only exist on the channels' domains.
+            "channel_capabilities": [
+                str(item)
+                for item in (reply.get("channel_capabilities") or [])
+                if isinstance(item, str)
+            ],
+        }
         self._handshaked = True
         return True
+
+    def build_info(self) -> dict[str, Any]:
+        """The running extension's own account of itself, for `status`."""
+
+        return dict(self.build)
 
     def request(
         self,

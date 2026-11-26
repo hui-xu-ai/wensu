@@ -54,14 +54,25 @@ class FixtureAdapter:
             )
         self._cursor += 1
 
-        url = action.params.get("url") if action.verb == "goto" else None
+        # `outcome.url` is the page the browser ended up on, which the bridge takes from the
+        # reply's own `url`/`data.url` — not the address the plan asked for. The fixture used to
+        # report the requested URL here, so URL-attribution tests never saw the real shape
+        # (audit 2026-11-26, F14). `requested_url` keeps the other half of the pair.
+        requested = action.params.get("url") if action.verb == "goto" else None
+        landed = step.data.get("url")
+        if isinstance(landed, str):
+            url = landed
+        elif isinstance(requested, str):
+            url = requested
+        else:
+            url = None
         return ActionOutcome(
             action=action,
             ok=step.ok,
-            data=dict(step.data),
+            data={**dict(step.data), "requested_url": requested} if requested else dict(step.data),
             error=step.error,
             duration_ms=step.duration_ms,
-            url=url if isinstance(url, str) else None,
+            url=url,
         )
 
     def close(self) -> None:

@@ -297,6 +297,35 @@ class BridgeAdapter:
         probe = cls()
         return any(probe._ping(path) is not None for path in probe._candidates())
 
+    def info(self) -> dict[str, Any]:
+        """What the running host and extension say they are, for `status` and the capability gate.
+
+        The handshake used to carry a protocol number and nothing else, so `status` could only
+        report the manifest *on disk*: a build that was loaded but not running, or a running
+        worker older than its manifest, both looked healthy (audit 2026-11-26, D batch). Answers
+        `{}` when the host cannot say — an older host is not an error here.
+        """
+
+        try:
+            self._connect()
+            assert self._socket is not None and self._reader is not None
+            request_id = uuid.uuid4().hex
+            request = {"id": request_id, "token": self._token, "cmd": "info"}
+            self._socket.settimeout(self._timeout)
+            self._socket.sendall((json.dumps(request, ensure_ascii=False) + "\n").encode("utf-8"))
+            line = self._reader.readline()
+            if not line:
+                return {}
+            reply = json.loads(line)
+        except (OSError, ValueError):
+            return {}
+        if not isinstance(reply, dict) or not reply.get("ok"):
+            return {}
+        build = reply.get("build")
+        if not isinstance(build, dict):
+            return {}
+        return {**build, "host_version": reply.get("host_version")}
+
     def _connect(self) -> None:
         if self._socket is not None:
             return

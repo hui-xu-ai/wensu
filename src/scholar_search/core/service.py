@@ -1509,6 +1509,47 @@ class ScholarService:
             return produced if isinstance(produced, str) else None
         return None
 
+    def _ensure_capabilities(self, adapter: Any, plan: Any) -> None:
+        """Refuse a verb the connected build does not advertise — before any navigation.
+
+        The gate is only possible when the extension says what it can serve. Until now the
+        handshake carried nothing but a protocol number, so a plan could ask for a verb the
+        content script was never injected for and learn about it one navigation too late (audit
+        2026-11-26, F08). A build that advertises nothing — or an adapter that cannot be asked,
+        like the fixture — leaves this check silent on purpose: refusing every plan because the
+        peer is old would be worse than the risk.
+        """
+
+        describe = getattr(adapter, "info", None)
+        if describe is None:
+            return
+        try:
+            info = describe()
+        except (ActionError, ScholarSearchError, OSError):
+            return
+        universal = info.get("capabilities") if isinstance(info, dict) else None
+        if not isinstance(universal, list) or not universal:
+            return
+        advertised = {str(item) for item in universal}
+        # The DOM verbs need `content/actions.js`, which the manifest injects into the two
+        # channels' domains only. A publisher page gets the universal set and nothing else — this
+        # is the check whose absence let `wait_for` be requested on ACS (audit F08).
+        channel_capabilities = info.get("channel_capabilities")
+        channel_name = str(getattr(plan, "channel", ""))
+        if not channel_name.startswith("page:") and isinstance(channel_capabilities, list):
+            advertised |= {str(item) for item in channel_capabilities}
+        missing = [
+            action.verb for action in getattr(plan, "actions", ()) if action.verb not in advertised
+        ]
+        if not missing:
+            return
+        raise ActionError(
+            f"the connected browser extension cannot run {sorted(set(missing))} on this page "
+            f"(it advertises {sorted(advertised)}): reload the extension, then try again",
+            verb=missing[0],
+            code="action.unsupported",
+        )
+
     def _ensure_bridge(self) -> None:
         """Fail before spending quota if no extension is listening.
 
@@ -1533,6 +1574,7 @@ class ScholarService:
         # *different* profile — so the search completes with another browser's page.
         # A review reproduced exactly that. The transaction pins one adapter instead.
         adapter = self._transaction_adapter()
+        self._ensure_capabilities(adapter, plan)
         planner = self._planner_factory(adapter)
         if self._risk is None:
             self._risk = getattr(planner, "risk", None)

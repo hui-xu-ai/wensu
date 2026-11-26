@@ -7,6 +7,22 @@
 
 const HOST_NAME = "com.scholar.search";
 const PROTOCOL_VERSION = 1;
+// What this build can actually serve. A verb the host asks for that is missing here would fail
+// at the browser — for `wait_for` that was a whole release, because the content script is only
+// injected into the two channels' domains (audit 2026-11-26, F08). The host refuses such a plan
+// before it navigates.
+const CAPABILITIES = ["goto", "snapshot", "sleep"];
+// Verbs that need `content/actions.js`, which the manifest injects into the channels' domains
+// (and nowhere else). Advertising them for a publisher page is what made `wait_for` a phantom.
+const CHANNEL_CAPABILITIES = [
+  "read_html",
+  "read_text",
+  "scroll",
+  "click",
+  "type",
+  "select",
+  "wait_for",
+];
 const DEFAULT_DOMAINS = [  "kns.cnki.net",
   "www.cnki.net",
   "webofscience.clarivate.cn",
@@ -624,10 +640,17 @@ async function onHostMessage(message, channel) {
   if (!message) return;
 
   if (message.type === "hello") {
+    const manifest = chrome.runtime.getManifest();
+    const background = manifest.background || {};
     channel.postMessage({
       type: "hello_ack",
       id: message.id,
       protocol: PROTOCOL_VERSION,
+      // The build that is *running*, which is not always the manifest someone just edited.
+      version: manifest.version || "",
+      worker: background.service_worker || "",
+      capabilities: CAPABILITIES,
+      channel_capabilities: CHANNEL_CAPABILITIES,
     });
     return;
   }
