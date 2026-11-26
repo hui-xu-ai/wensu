@@ -11,6 +11,7 @@ two processes cannot both spend the last remaining request.
 from __future__ import annotations
 
 import json
+import math
 import random
 import time
 from collections.abc import Callable, Iterable
@@ -101,11 +102,19 @@ class PolicyEngine:
 
         try:
             raw = json.loads(text)
-            state = QuotaState(
-                day=str(raw["day"]),
-                used=int(raw["used"]),
-                last=float(raw["last"]) if raw.get("last") is not None else None,
-            )
+            used = raw["used"]
+            day = str(raw["day"])
+            last = float(raw["last"]) if raw.get("last") is not None else None
+            # A state file is untrusted input. `int(-20)` was accepted, so `status` reported
+            # more quota than the limit and the next call ran on a negative count (audit
+            # 2026-11-26, F11). Only a whole, non-negative count and a real date are readable;
+            # everything else is "corrupt", never "fresh quota".
+            if isinstance(used, bool) or not isinstance(used, int) or used < 0:
+                raise ValueError(f"unusable used count: {used!r}")
+            if last is not None and (not math.isfinite(last) or last > time.time() + 300.0):
+                raise ValueError(f"unusable timestamp: {last!r}")
+            date.fromisoformat(day)
+            state = QuotaState(day=day, used=used, last=last)
         except (ValueError, KeyError, TypeError):
             # An existing but broken file must not be read as "zero used".
             self._state_error = "corrupt"

@@ -151,6 +151,12 @@ def serve_client(
                 effective = narrow_domains(
                     (str(item) for item in requested_domains if item), domains
                 )
+                if not effective:
+                    # A scope that survives nothing means "nothing is allowed". Passing it on as
+                    # `None` used to fall back to the *default* trusted list and let the request
+                    # through — the opposite of narrowing (audit 2026-11-26, F04). Fail closed.
+                    connection.sendall(b'{"ok":false,"error":"policy.domains"}\n')
+                    continue
             else:
                 effective = domains
 
@@ -158,7 +164,7 @@ def serve_client(
                 action,
                 params,
                 timeout_s=timeout_ms / 1000,
-                domains=effective or None,
+                domains=effective,
                 request_id=str(request.get("id") or "") or None,
             )
             connection.sendall((json.dumps(reply, ensure_ascii=False) + "\n").encode("utf-8"))

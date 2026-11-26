@@ -17,14 +17,33 @@ from ..core.service import ScholarService
 from ..server import build_server
 
 TOKEN_NAME = "http-token"
+# Shorter than this is not a credential, it is a placeholder that happens to be in a file.
+MIN_TOKEN_CHARS = 16
 
 
 def load_token() -> str:
+    """The per-install bearer token, generated on first use and validated afterwards.
+
+    An existing file was returned as-is, so an empty one became the accepted credential: every
+    request that simply omitted the header compared equal to "" (audit 2026-11-26, F12). The
+    transport refuses to start on an unusable token instead of serving with a guessable one.
+    """
+
     path = app_home() / TOKEN_NAME
     if path.exists():
-        return path.read_text(encoding="utf-8").strip()
+        token = path.read_text(encoding="utf-8").strip()
+        if len(token) < MIN_TOKEN_CHARS or any(char.isspace() for char in token):
+            raise ValueError(
+                f"{path} holds an unusable token ({len(token)} characters, at least "
+                f"{MIN_TOKEN_CHARS} needed): delete the file to let a new one be generated"
+            )
+        return token
     token = secrets.token_urlsafe(32)
-    path.write_text(token, encoding="utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Written beside the target and renamed, so a crash cannot leave a half-written credential.
+    temporary = path.with_name(f"{TOKEN_NAME}.{secrets.token_hex(4)}.tmp")
+    temporary.write_text(token, encoding="utf-8")
+    temporary.replace(path)
     return token
 
 
