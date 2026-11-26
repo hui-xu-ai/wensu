@@ -10,8 +10,10 @@ from .adapters.bridge import BridgeAdapter
 from .adapters.bridge.host import PROTOCOL_VERSION
 from .core.audit import AuditLog
 from .core.cache import Cache
-from .core.config import host_runtime_dir
+from .core.config import app_home, host_runtime_dir
 from .core.contracts import BrowserAdapter
+from .core.errors import ScholarSearchError
+from .core.locking import interprocess_lock
 from .core.planner import Planner
 from .core.policy import PolicyEngine
 from .core.registry import ChannelRegistry
@@ -187,6 +189,35 @@ def _bridge_build() -> dict[str, object] | None:
     return build or None
 
 
+def _browser_busy(endpoint: Path, bridge_up: bool) -> bool:
+    """Is a read inside the browser right now?
+
+    A read runs its whole plan inside one call, so a caller that just got a timeout has no other
+    way to know whether the previous plan finished (P5 acceptance 2026-11-26). The lock already
+    knows: if it cannot be taken without waiting, something is holding the browser.
+    """
+
+    if not bridge_up:
+        return False
+    lock = Path(endpoint).parent / "state" / "browser.lock"
+    try:
+        with interprocess_lock(lock, timeout_s=0.0):
+            return False
+    except (ScholarSearchError, OSError):
+        return True
+
+
+def _last_job() -> dict[str, object] | None:
+    """How the previous read ended, as the kernel recorded it."""
+
+    path = app_home() / "state" / "last-job.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def build_service() -> ScholarService:
     registry = ChannelRegistry()
     policy = PolicyEngine()
@@ -218,6 +249,10 @@ def build_service() -> ScholarService:
         # that needs it most polls `brief` (2026-11-24: a machine ran 0.13.2 while the
         # market plugin and the extension were 0.14.2, and `brief` said nothing).
         browser = _browser_summary()
+        # One read each: the lock probe answers "is a plan running", the file answers "how did the
+        # last one end". Both are cheap and neither issues a browser action.
+        busy = _browser_busy(endpoint, bridge_up)
+        last_job = _last_job()
 
         if brief:
             return {
@@ -232,6 +267,10 @@ def build_service() -> ScholarService:
                 "cooldown_until": until.isoformat() if until else None,
                 "extension_version": (browser or {}).get("extension_version"),
                 "extension_version_mismatch": (browser or {}).get("extension_version_mismatch"),
+                # Is a read inside the browser right now? A caller that got a timeout has no
+                # other way to know whether the previous plan finished (P5 acceptance 2026-11-26).
+                "browser_busy": busy,
+                "last_job": last_job,
             }
 
         return {
@@ -262,6 +301,11 @@ def build_service() -> ScholarService:
             "action_cost": ACTION_COST,
             "bridge_endpoint": str(endpoint),
             "bridge_ready": bridge_up,
+            # A read runs a whole plan inside one call, so "is the previous one still running" is
+            # not otherwise observable. The lock answers it; `last_job` says how the previous one
+            # ended (P5 acceptance 2026-11-26).
+            "browser_busy": busy,
+            "last_job": last_job,
             # `bridge_ready: false` on its own told a caller nothing about *why*,
             # so an agent had to go read host.log and guess — and one guessed by
             # killing the user's browser. State the diagnosis and the only allowed

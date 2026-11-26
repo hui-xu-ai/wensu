@@ -451,7 +451,7 @@ class _BrowserTransaction:
 
     def __init__(self, service: ScholarService) -> None:
         self._service = service
-        self._lock = interprocess_lock(service._policy.state_dir / "browser.lock", timeout_s=180.0)
+        self._lock = interprocess_lock(service._browser_lock_path(), timeout_s=180.0)
 
     def __enter__(self) -> None:
         self._lock.__enter__()
@@ -1209,6 +1209,7 @@ class ScholarService:
         answer["stage"] = _page_stage(answer)
         answer["evidence"] = _page_evidence(answer)
         answer["terminal"] = _page_terminal(answer)
+        self._note_job(answer)
         return _page_full_text(answer)
 
     def warm_up(self, targets: Sequence[str]) -> dict[str, Any]:
@@ -1783,6 +1784,66 @@ class ScholarService:
                     stage="snapshot",
                 )
         return bytes(buffer[:total])
+
+    def browser_busy(self) -> bool:
+        """Is another read holding the browser right now?
+
+        `page_read` is one call that runs a whole plan, and a caller has no way to see whether the
+        previous call is still inside it — which is exactly the reader the timeout story needs
+        (P5 acceptance 2026-11-26: "the AI cannot tell whether the last action finished"). The
+        lock already knows: if it cannot be taken without waiting, a plan is in flight.
+        """
+
+        path = self._browser_lock_path()
+        try:
+            with interprocess_lock(path, timeout_s=0.0):
+                return False
+        except (ScholarSearchError, OSError):
+            return True
+
+    def last_job(self) -> dict[str, Any] | None:
+        """The last finished read, for a caller that wants to know how the previous one ended."""
+
+        path = self._last_job_path()
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    def _last_job_path(self) -> Path:
+        state_dir = Path(self._policy.state_dir) if self._policy else Path.cwd()
+        return state_dir / "last-job.json"
+
+    def _note_job(self, answer: dict[str, Any]) -> None:
+        """Remember how this read ended. Best effort: a state file must never fail a read."""
+
+        record = {
+            key: answer.get(key)
+            for key in (
+                "job_id",
+                "terminal",
+                "stage",
+                "status",
+                "reason",
+                "doi",
+                "publisher",
+                "quota_charged",
+                "capture_sha256",
+            )
+            if answer.get(key) not in (None, "")
+        }
+        record["finished_at"] = time.time()
+        try:
+            path = self._last_job_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(record, ensure_ascii=False, indent=1), encoding="utf-8")
+        except (OSError, ValueError):
+            return
+
+    def _browser_lock_path(self) -> Path:
+        state_dir = Path(self._policy.state_dir) if self._policy else Path.cwd()
+        return state_dir / "browser.lock"
 
     def _stage_page(self, payload: bytes, meta: dict[str, str]) -> Path:
         """Write a captured page into `pages/.probe/`: inspection, not storage.

@@ -279,6 +279,25 @@ def test_a_refused_warm_up_stops_the_batch_and_reports_its_cost(tmp_path: Path) 
     assert result["opened"][0]["ok"] is False, result["opened"]
 
 
+def test_a_finished_read_is_remembered_for_the_next_caller(tmp_path: Path) -> None:
+    """`last_job` is how a caller learns how the previous read ended, and whether one is running."""
+
+    from test_page_read import build_service
+
+    blob = _write_mhtml(tmp_path / "page.mhtml", ARTICLE_HTML)
+    service = build_service(tmp_path, [_one_capture(blob)])
+
+    answer = service.read_page(doi=DOI)
+
+    remembered = service.last_job()
+    assert remembered is not None, answer
+    assert remembered["job_id"] == answer["job_id"], remembered
+    assert remembered["terminal"] == "ok", remembered
+    assert remembered["stage"] == "publish", remembered
+    # Nothing is running here: the lock is free.
+    assert service.browser_busy() is False
+
+
 def test_blocked_tells_the_caller_to_read_again_once_the_wall_is_solved() -> None:
     """ADR 0022 rev 1: a solved wall leaves the article in the tab, so a second call is free.
 
