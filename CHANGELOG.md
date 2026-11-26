@@ -36,6 +36,17 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.36] - 2026-11-26
+
+### Fixed — the gate wait maximized the window but did not bring it forward
+
+wait_gate_clear asked for state: "maximized" only. A maximized window that sits behind
+whatever the person is looking at is still invisible, which defeats the one thing the action
+exists for (P5 retest 2026-11-26, F34-01: the branch had never run, and the report pointed out the
+code never asked for focus). It now asks for ocused: true before activating the tab, and a test
+keeps the branch asking.
+
+`background-0.14.36.js`, as the cache-busting rule requires.
 ## [0.14.35] - 2026-11-26
 
 ### Fixed — the native host refused the verb ADR 0027 had approved

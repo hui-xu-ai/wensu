@@ -57,6 +57,21 @@ def test_every_planned_verb_is_a_known_verb() -> None:
     assert {"goto", "snapshot", "sleep", "await_gate_clear"} <= VERBS
 
 
+def test_the_gate_wait_asks_for_a_focused_window() -> None:
+    """A window that is maximized but behind everything is still invisible (P5 retest F34-01).
+
+    Not a behavioural test — the branch needs a browser — but the one detail that was missing is
+    a detail a reader can check, so the file has to keep asking for it.
+    """
+
+    worker = next(ROOT.glob("extension/background-*.js"))
+    text = worker.read_text(encoding="utf-8")
+    branch = text[text.index('action === "await_gate_clear"') :][:2000]
+
+    assert 'state: "maximized"' in branch
+    assert "focused: true" in branch
+
+
 def test_the_native_host_accepts_every_verb_the_kernel_plans() -> None:
     """The host keeps its own copy of the vocabulary, and it was missing the gate wait.
 
