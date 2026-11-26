@@ -36,6 +36,18 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.24] - 2026-11-25
+
+### Fixed — the extension was still stopping on URL markers
+
+0.14.22 retired the kernel's URL-based gate check, but `goto` kept passing `halt_url_markers` to
+the extension, so the *worker's* gate watch still reported `halted` for a URL containing `captcha`
+— and the planner turned that into `blocked`. Reported by the reader: "no captcha appeared", and the
+tab title was the article. The markers are no longer sent (titles only), so a wall is again decided by
+what is on screen.
+
+`background-0.14.24.js`, as the cache-busting rule requires (worker unchanged).
+
 ## [0.14.23] - 2026-11-25
 
 ### Fixed — a page shell is not an article body

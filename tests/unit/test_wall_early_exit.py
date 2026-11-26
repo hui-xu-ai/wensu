@@ -31,7 +31,7 @@ from typing import Any
 import pytest
 
 from scholar_search.core.params import validate_params
-from scholar_search.core.risk import RISK_TITLE_MARKERS, VERIFY_URL_MARKERS
+from scholar_search.core.risk import RISK_TITLE_MARKERS
 from scholar_search.core.service import ScholarService
 
 DOI_URL = "https://onlinelibrary.wiley.com/doi/10.1002/adma.75384"
@@ -47,8 +47,10 @@ def test_the_goto_action_carries_the_kernels_own_gate_markers() -> None:
     params = ScholarService._page_goto_params(DOI_URL)
 
     assert params["url"] == DOI_URL
-    # The same values the risk rules use, passed through rather than copied.
-    assert tuple(params["halt_url_markers"]) == tuple(VERIFY_URL_MARKERS)
+    # Titles only. URL markers are deliberately not sent: a URL that contains `captcha` is not a
+    # challenge (ACS hops through one and lands on the article), and the extension used to stop the
+    # wait on it while the reader saw no wall at all (measured 2026-11-25).
+    assert params["halt_url_markers"] == []
     assert tuple(params["halt_titles"]) == tuple(RISK_TITLE_MARKERS)
 
 

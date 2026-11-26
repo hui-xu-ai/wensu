@@ -49,7 +49,7 @@ from .planner import Planner
 from .policy import PolicyEngine
 from .publishers import PUBLISHERS, Publisher, publisher_for_doi, publisher_for_host
 from .registry import ChannelRegistry, ChannelSpec
-from .risk import RISK_TITLE_MARKERS, VERIFY_URL_MARKERS, RiskGuard
+from .risk import RISK_TITLE_MARKERS, RiskGuard
 
 # A page read is billed as two network units (one navigation plus the capture that
 # follows it, which itself spends nothing) — the price the price table documents.
@@ -799,7 +799,11 @@ class ScholarService:
 
         return {
             "url": target,
-            "halt_url_markers": list(VERIFY_URL_MARKERS),
+            # Empty on purpose: a URL that merely contains `captcha` is not a challenge (ACS hops
+            # through such a URL and lands on the article, and the tab title we saw was the article
+            # itself — 2026-11-25). Only a gate *title* stops the wait; the kernel no longer trips
+            # on URL markers either.
+            "halt_url_markers": [],
             "halt_titles": list(RISK_TITLE_MARKERS),
         }
 
