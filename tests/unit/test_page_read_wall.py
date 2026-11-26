@@ -179,3 +179,176 @@ def test_an_ordinary_page_still_goes_through_the_capture(tmp_path: Path) -> None
     result = service.read_page(doi=DOI)
 
     assert result["status"] != "blocked", result
+
+
+# --- 证据必须属于本次导航（T0 2026-11-26：四条误判路径） --------------------------------
+#
+# `page_read` used to judge a wall from *any* title it happened to see: the last non-empty title
+# across every outcome of the navigation (two `goto`s once the warmup patch navigates through the
+# publisher's home page), or the title of whichever tab was in front. Both produced `blocked` for
+# pages that were readable — L26 in the 2026-11-26 report answered a RSC DOI with a `science.org`
+# URL. The rules below only make evidence *belong* to this read; they do not relax ADR 0004.
+
+ACS_DOI = "10.1021/jacs.4c07518"
+ACS_ARTICLE = "https://pubs.acs.org/doi/10.1021/jacs.4c07518"
+ACS_HOME = "https://pubs.acs.org/"
+FOREIGN = "https://www.science.org/doi/10.1126/scirobotics.adh4060"
+BODY_HTML = (
+    '<html><body><article><h1>A paper</h1><section id="s1">'
+    "<h2>1. Introduction</h2><p>Body text.</p></section></article></body></html>"
+)
+
+
+def _goto_at(url: str, title: str, **extra: object) -> dict[str, object]:
+    return {"verb": "goto", "data": {"url": url, "title": title, "ok": True, **extra}}
+
+
+def _reply_at(html: str, url: str, title: str, *, captcha: bool = False) -> dict[str, object]:
+    part = email.mime.text.MIMEText(html, "html", "utf-8")
+    outer = email.mime.multipart.MIMEMultipart("related")
+    outer.attach(part)
+    blob = outer.as_bytes()
+    return {
+        "verb": "snapshot",
+        "data": {
+            "token": "t1",
+            "total": len(blob),
+            "base64": base64.b64encode(blob).decode("ascii"),
+            "url": url,
+            "title": title,
+            "captcha_visible": captcha,
+        },
+    }
+
+
+def _warmup_navigation(monkeypatch: object) -> None:
+    """The private warmup patch: home page first, then the article (two `goto`s).
+
+    Pinned as a test because the patch replaces `page_nav.py` on the installed build, so whatever
+    the kernel decides must stay correct when one read performs two navigations.
+    """
+
+    import scholar_search.core.service as service_module
+    from scholar_search.core.contracts import Action
+
+    def navigation(service: object, target: str, publisher: object) -> tuple[Action, ...]:
+        del service, publisher
+        return (Action("goto", {"url": ACS_HOME}), Action("goto", {"url": target}))
+
+    monkeypatch.setattr(service_module, "article_navigation", navigation)  # type: ignore[attr-defined]
+
+
+def _mark_walled(service: object, doi: str) -> None:
+    """Record "this URL met a wall just now" the way a previous `blocked` answer would."""
+
+    import json
+    import time as clock
+
+    path = service._page_cache_path()  # what the previous call wrote
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({f"https://doi.org/{doi}": {"status": "blocked", "at": clock.time()}}),
+        encoding="utf-8",
+    )
+
+
+def test_two_navigations_do_not_lend_each_other_titles(tmp_path: Path, monkeypatch: object) -> None:
+    """The article's own title is empty after `goto` when the page is still painting.
+
+    The home page's 「请稍候…」 is a different page's title, so it is not evidence — with the old
+    "last non-empty title wins" loop this read returned `blocked` (T0 1a).
+    """
+
+    from test_page_read import build_service
+
+    _warmup_navigation(monkeypatch)
+    service = build_service(
+        tmp_path,
+        [
+            [
+                _goto_at(ACS_HOME, "请稍候…", halted=True),
+                _goto_at(ACS_ARTICLE, "", halted=True),
+                {"verb": "sleep", "data": {"ms": 1}},
+                _reply_at(BODY_HTML, ACS_ARTICLE, "A paper"),
+            ]
+        ],
+    )
+
+    result = service.read_page(doi=ACS_DOI)
+
+    assert result["status"] != "blocked", result
+    assert result["status"] == "ok", result
+    assert int(result["bytes"] or 0) > 0, result
+
+
+def test_a_wall_on_another_site_is_not_evidence(tmp_path: Path) -> None:
+    """After a wall marker the read looks at the tab in front — which may be another site.
+
+    Measured 2026-11-26 (report L26): asking for an RSC DOI answered with the `science.org` URL of
+    whatever tab happened to be in front. A different site's challenge page says nothing about
+    this DOI, so the read must go back to navigating instead of reporting a wall.
+    """
+
+    from test_page_read import build_service
+
+    service = build_service(
+        tmp_path,
+        [
+            [_reply_at("<html>请稍候</html>", FOREIGN, "请稍候…", captcha=True)],
+            [
+                _goto_at(ACS_ARTICLE, "A paper", halted=True),
+                {"verb": "sleep", "data": {"ms": 1}},
+                _reply_at(BODY_HTML, ACS_ARTICLE, "A paper"),
+            ],
+        ],
+    )
+    _mark_walled(service, ACS_DOI)
+
+    result = service.read_page(doi=ACS_DOI)
+
+    assert result["status"] != "blocked", result
+    assert "science.org" not in str(result.get("final_url")), result
+
+
+def test_a_gate_title_that_did_not_persist_is_not_a_wall(tmp_path: Path) -> None:
+    """The extension already times the gate title (`halted`, 1.5 s) — the kernel must read it.
+
+    Measured live 2026-11-26: the ACS interstitial clears itself in ~40 s, so a title sampled at
+    `goto` return is not the page's verdict. When `halted` is false, capture and classify instead.
+    """
+
+    from test_page_read import build_service
+
+    service = build_service(
+        tmp_path,
+        [
+            [
+                _goto_at(ACS_ARTICLE, "请稍候…", halted=False),
+                {"verb": "sleep", "data": {"ms": 1}},
+                _reply_at(BODY_HTML, ACS_ARTICLE, "A paper"),
+            ]
+        ],
+    )
+
+    result = service.read_page(doi=ACS_DOI)
+
+    assert result["status"] != "blocked", result
+    assert int(result["bytes"] or 0) > 0, result
+
+
+def test_a_plain_title_that_merely_mentions_the_marker_is_not_a_wall() -> None:
+    """Substring matching called this article a wall (T0 1c); `risk.py` had the strict rule."""
+
+    assert (
+        challenge_in_title(
+            "Loading: Just a moment please — Journal of the American Chemical Society"
+        )
+        is None
+    )
+    assert (
+        challenge_in_title("Checking your browser before reading the whole article in full") is None
+    )
+    # The samples the rule exists for still match.
+    assert challenge_in_title("请稍候…") == "请稍候"
+    assert challenge_in_title("Just a moment...") == "just a moment"
+    assert challenge_in_title("Attention Required! | Cloudflare") == "attention required"

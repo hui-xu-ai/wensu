@@ -74,16 +74,32 @@ CHALLENGE_TITLES: tuple[str, ...] = (
     "正在进行安全验证",
     "attention required",
 )
+# How much may follow the marker and still be a site name rather than an article title. Same value
+# `risk._title_is_gate` uses, so the two rules cannot drift apart again.
+_TITLE_TAIL_CHARS = 32
 
 
 def challenge_in_title(title: str) -> str | None:
-    """The marker that made this title a wall, or None. Never captures anything."""
+    """The marker that made this title a wall, or None. Never captures anything.
 
-    lowered = (title or "").strip().lower()
-    if not lowered:
+    An exact match always counts. A prefix match counts only when the remainder looks like a site
+    name — short, and free of CJK — which is the rule `risk._title_is_gate` already applies. A
+    plain substring match was too wide: an article titled "Loading: Just a moment please — Journal
+    of the American Chemical Society" was reported as a wall (measured 2026-11-26, T0 1c).
+    """
+
+    text = " ".join((title or "").split()).casefold()
+    if not text:
         return None
     for marker in CHALLENGE_TITLES:
-        if marker in lowered:
+        if text == marker:
+            return marker
+        if not text.startswith(marker):
+            continue
+        tail = text[len(marker) :]
+        if any("\u4e00" <= char <= "\u9fff" for char in tail):
+            continue
+        if len(tail) <= _TITLE_TAIL_CHARS:
             return marker
     return None
 

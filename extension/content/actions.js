@@ -10,10 +10,17 @@
 
 const MAX_HTML_BYTES = 1_000_000;
 
+// Challenge elements, named exactly. A generic `[class*='captcha' i]` matches the reCAPTCHA
+// badge that sits on ordinary pages (`grecaptcha-badge`), which reported `captcha_visible` for
+// articles that were readable and blocked the read (measured 2026-11-26, T0 1d). The CNKI slider
+// keeps its own id; the invisible-anchor iframe is deliberately *not* listed, only the challenge
+// dialog that appears when a person is actually being asked.
 const CAPTCHA_SELECTORS = [
   "#tcaptcha_transform_dy",
-  "[id*='captcha' i]",
-  "[class*='captcha' i]",
+  "#captcha-form",
+  "#challenge-form",
+  "iframe[src*='challenges.cloudflare.com' i]",
+  "iframe[src*='recaptcha/api2/bframe' i]",
 ];
 const LOGIN_SELECTORS = [
   "#Ecp_top_login_realName",

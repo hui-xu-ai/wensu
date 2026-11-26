@@ -135,6 +135,23 @@ def _page_next(probe: dict[str, Any]) -> str:
     return "no full text on the page: offer the PDF route instead"
 
 
+def _page_evidence_site(url: str, publisher: Publisher, identifier: str) -> bool:
+    """Is `url` the page this read asked for — the same publisher, or one carrying the DOI?
+
+    A wall is evidence about *a page*. A challenge title seen on some other tab, or on an earlier
+    navigation of the same read, says nothing about this DOI: measured 2026-11-26 (report L26),
+    asking for an RSC DOI answered with the `science.org` URL of whatever tab was in front.
+    """
+
+    text = (url or "").strip()
+    if not text:
+        return False
+    if identifier and identifier.casefold() in text.casefold():
+        return True
+    found = publisher_for_host(urlparse(text).hostname or "")
+    return found is not None and found.name == publisher.name
+
+
 # How much of the title survives in the directory name. A person reads these folder names in a
 # file manager, so the readable part matters — but it is exactly the *prefix* that used to collide.
 _PAGE_SLUG_CHARS = 60
@@ -862,7 +879,11 @@ class ScholarService:
             # solved the challenge by hand, the article is right there and `snapshot` costs
             # nothing and issues no request (ADR 0018/0022).
             open_tab = self._snapshot_locked(tab="active")
-            if open_tab.get("status") == "blocked":
+            # Only the page this read is about can carry its verdict: the tab in front may be
+            # another article, another site, or last night's challenge page.
+            if open_tab.get("status") == "blocked" and _page_evidence_site(
+                str(open_tab.get("url") or ""), publisher, identifier
+            ):
                 return {
                     "status": "blocked",
                     "reason": "challenge",
@@ -926,12 +947,22 @@ class ScholarService:
                     "next": _page_next({"status": "blocked", "reason": "challenge"}),
                 }
             final_url = outcomes[-1].url or target
-            wall_title = ""
-            for outcome in outcomes:
-                candidate = outcome.data.get("title")
-                if isinstance(candidate, str) and candidate:
-                    wall_title = candidate
-            marker = challenge_in_title(wall_title)
+            # Only the last navigation's title can be this page's title. With two `goto`s (the
+            # warmup patch) the first one belongs to another page, and an empty title means the
+            # page was still painting when the extension read it — that is "no evidence yet",
+            # not "look at an earlier page" (measured 2026-11-26, T0 1a).
+            last = outcomes[-1].data if isinstance(outcomes[-1].data, dict) else {}
+            wall_title = last.get("title") if isinstance(last.get("title"), str) else ""
+            marker = challenge_in_title(str(wall_title))
+            if marker and last.get("halted") is False:
+                # The extension times the gate title for 1.5 s and reports `halted`. A title that
+                # did not persist is an interstitial on its way out — the ACS one clears itself in
+                # ~40 s (live 2026-11-26) — so the capture decides instead of the title.
+                marker = None
+            if marker and not _page_evidence_site(
+                str(last.get("url") or final_url), publisher, identifier
+            ):
+                marker = None
             if marker:
                 # Capturing the wall (the old order) cost a quota point, saved bytes that are
                 # not the article, and replaced a body already captured — measured on Wiley
