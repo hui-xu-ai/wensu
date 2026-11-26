@@ -259,6 +259,69 @@ def test_a_capture_that_names_another_doi_is_not_this_articles_answer(tmp_path: 
     assert not list(tmp_path.rglob("page.mhtml")), "another article's bytes must not be kept"
 
 
+def test_a_fulltext_follow_up_that_hits_a_wall_is_reported_as_a_wall(tmp_path: Path) -> None:
+    """A refused follow-up used to be folded into "no benefit" (audit F07).
+
+    Then the answer said `no_html` while the shared ledger had paid for another navigation and
+    the site had cooled down. The risk state is now its own answer, and the charge is counted.
+    """
+
+    landing = (
+        "<html><head>"
+        '<meta name="citation_fulltext_html_url" content="https://pubs.acs.org/doi/full/10.1021/jacs.6c13448"/>'
+        "</head><body><h1>A paper</h1>"
+        '<section id="a1"><h2>Abstract</h2><p>Short teaser, no body.</p></section></body></html>'
+    )
+    blob = write_mhtml(tmp_path / "landing.mhtml", landing).read_bytes()
+    doi_url = "https://doi.org/10.1021/jacs.6c13448"
+    article_url = "https://pubs.acs.org/doi/10.1021/jacs.6c13448"
+
+    def reply(url: str) -> dict[str, object]:
+        return {
+            "verb": "snapshot",
+            "data": {
+                "token": "t1",
+                "total": len(blob),
+                "base64": base64.b64encode(blob).decode("ascii"),
+                "url": url,
+                "title": "A paper",
+                "captcha_visible": False,
+            },
+        }
+
+    service = build_service(
+        tmp_path,
+        [
+            [
+                {"verb": "goto", "data": {"url": doi_url}},
+                {"verb": "sleep", "data": {"ms": 1}},
+                reply(article_url),
+                {"verb": "sleep", "data": {"ms": 1_500}},
+                reply(article_url),
+                # the follow-up navigation is refused by the site
+                {
+                    "verb": "goto",
+                    "data": {
+                        "url": "https://pubs.acs.org/doi/full/10.1021/jacs.6c13448",
+                        "title": "A paper",
+                        "captcha_visible": True,
+                    },
+                },
+            ]
+        ],
+    )
+
+    result = service.read_page(doi="10.1021/jacs.6c13448", view="full")
+
+    assert result["status"] == "blocked", result
+    assert result["signal"], result
+    assert result["view_applied"] is False, result
+    assert result["fulltext_url"] == "https://pubs.acs.org/doi/full/10.1021/jacs.6c13448"
+    # One outer navigation plus the refused one: the charge follows what ran.
+    assert result["quota_charged"] == 2, result
+    assert result["quota_reason"] == "challenge", result
+
+
 def test_doi_prefixes_map_to_the_right_publisher() -> None:
     assert publisher_for_doi("10.1016/j.cej.2023.145123").name == "elsevier"  # type: ignore[union-attr]
     assert publisher_for_doi("https://doi.org/10.1038/s41586-024-00001-0").name == "nature"  # type: ignore[union-attr]

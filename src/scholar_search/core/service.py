@@ -13,7 +13,7 @@ import re
 import time
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, suppress
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, ClassVar, Literal
@@ -156,6 +156,22 @@ def _charged_units(outcomes: Sequence[ActionOutcome]) -> int:
     """
 
     return sum(1 for outcome in outcomes if outcome.action.verb in NETWORK_VERBS) or 1
+
+
+@dataclass(frozen=True)
+class _FollowResult:
+    """What one full-text follow-up did: its actions, its risk state, its capture.
+
+    Every field is reported, because the caller has to be able to tell "the second look found
+    nothing" from "the site refused and the ledger was charged" (audit 2026-11-26, F07).
+    """
+
+    outcomes: Sequence[ActionOutcome]
+    saved: dict[str, Any] | None = None
+    probe: dict[str, Any] | None = None
+    final_url: str = ""
+    blocked: dict[str, Any] | None = None
+    charged: int = 0
 
 
 def _page_evidence_site(url: str, publisher: Publisher, identifier: str) -> bool:
@@ -865,15 +881,16 @@ class ScholarService:
             "halt_titles": list(RISK_TITLE_MARKERS),
         }
 
-    def _follow_fulltext(
-        self, url: str, publisher: Publisher, spec: ChannelSpec
-    ) -> tuple[dict[str, Any], dict[str, Any], str, Sequence[ActionOutcome]] | None:
-        """One navigation to the page's own full-text view. None when it did not help.
+    def _follow_fulltext(self, url: str, publisher: Publisher, spec: ChannelSpec) -> _FollowResult:
+        """One navigation to the page's own full-text view.
 
-        Called only for an explicit `view="full"`, and only when the captured page named a
-        different address for its body. A wall, a render that never finishes, or a page that is
-        still not the article all mean "no benefit": the first (honest) answer stands, and the
-        caller is told it stands in `view_applied`.
+        Called only for an explicit `view="full"`, only when the first capture held no body, and
+        only when the page named a different address for it. Everything it did is reported back —
+        the risk state, the actions that ran, and whether the second look produced the article.
+
+        A swallowed `RiskBlocked` used to lose both the stop and the charge, so the answer said
+        `no_html` while the shared ledger had paid for a navigation and the site had cooled down
+        (audit 2026-11-26, F07). A refusal is now its own outcome, not "no benefit".
         """
 
         try:
@@ -885,20 +902,24 @@ class ScholarService:
                 ),
                 spec,
             )
-        except RiskBlocked:
-            return None
+        except RiskBlocked as blocked:
+            # One navigation ran before the planner stopped; the ledger was charged for it.
+            return _FollowResult(outcomes=(), blocked=dict(blocked.to_payload()), charged=1)
         final_url = outcomes[-1].url or url
         last = outcomes[-1].data if isinstance(outcomes[-1].data, dict) else {}
         title = last.get("title") if isinstance(last.get("title"), str) else ""
         if last.get("halted") is not False and challenge_in_title(str(title)):
-            return None
+            return _FollowResult(outcomes=outcomes, final_url=final_url)
         saved = self._snapshot_locked(tab="work")
         if saved.get("status") == "blocked":
-            return None
+            return _FollowResult(outcomes=outcomes, saved=saved, final_url=final_url)
         probe = _classify_saved(saved, url=final_url)
-        if probe.get("status") != "ok":
-            return None
-        return saved, probe, final_url, outcomes
+        return _FollowResult(
+            outcomes=outcomes,
+            saved=saved,
+            probe=probe,
+            final_url=final_url,
+        )
 
     def read_page(
         self, *, url: str = "", doi: str = "", refresh: bool = False, view: str = "landing"
@@ -1156,15 +1177,37 @@ class ScholarService:
             # body asks for `view="full"` and pays for the second look.
             view_applied = False
             fulltext_declared = ""
-            if view == "full" and readable.is_file():
+            # Only worth a second navigation when the first capture held no body: a page that
+            # already has the article is not improved by following another address (audit F07).
+            if view == "full" and probe.get("status") != "ok" and readable.is_file():
                 fulltext_declared = citation_fulltext_url(readable)
                 if fulltext_declared and fulltext_declared != final_url:
                     follow = self._follow_fulltext(fulltext_declared, publisher, spec)
-                    if follow is not None:
-                        saved, probe, final_url, extra = follow
-                        outcomes = (*outcomes, *extra)
+                    # Counted whether or not it helped: the ledger was charged for what ran.
+                    outcomes = (*outcomes, *follow.outcomes)
+                    if follow.blocked is not None:
+                        # The site refused during the follow-up. That is a stop, not "no benefit":
+                        # the caller must see the risk state and the full charge (audit F07).
+                        return {
+                            **follow.blocked,
+                            "reason": "challenge",
+                            "doi": identifier,
+                            "publisher": publisher.name,
+                            "final_url": follow.final_url or final_url,
+                            "fulltext_url": fulltext_declared,
+                            "view_applied": False,
+                            "mhtml_path": None,
+                            "bytes": 0,
+                            "quota_charged": _charged_units(outcomes) + follow.charged,
+                            "quota_reason": "challenge",
+                            "next": _page_next({"status": "blocked", "reason": "challenge"}),
+                        }
+                    if follow.probe is not None and follow.probe.get("status") == "ok":
+                        assert follow.saved is not None
+                        saved, probe = follow.saved, follow.probe
+                        final_url = follow.final_url or final_url
                         readable = Path(str(saved.get("path") or ""))
-                        view_applied = probe.get("status") == "ok"
+                        view_applied = True
 
             # Identity of the capture, not just of the request: the tab can move between the
             # navigation and the snapshot, and a page that names a different DOI is another
