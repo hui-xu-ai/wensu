@@ -435,6 +435,87 @@ def test_a_wall_on_a_two_navigation_plan_reports_both_navigations(
     assert result["quota_charged"] == 2, result
 
 
+def test_a_capture_from_another_publisher_is_refused_even_without_doi_metadata(
+    tmp_path: Path,
+) -> None:
+    """A Wiley request answered with an ACS page came back `ok` (retest 2026-11-26, §补充 F05).
+
+    The DOI check only fired when the page declared a *contradicting* DOI, so a page that
+    declared none passed on the strength of having been captured at all.
+    """
+
+    foreign = (
+        "<html><body><h1>Another publisher's paper</h1>"
+        '<section id="s1"><h2>1. Introduction</h2>'
+        "<p>Body text of an article this read never asked for.</p></section></body></html>"
+    )
+    blob = write_mhtml(tmp_path / "foreign.mhtml", foreign).read_bytes()
+    service = build_service(
+        tmp_path,
+        [
+            [
+                {
+                    "verb": "goto",
+                    "data": {"url": "https://onlinelibrary.wiley.com/doi/10.1002/pen.23634"},
+                },
+                {"verb": "sleep", "data": {"ms": 1}},
+                {
+                    "verb": "snapshot",
+                    "data": {
+                        "token": "t1",
+                        "total": len(blob),
+                        "base64": base64.b64encode(blob).decode("ascii"),
+                        "url": "https://pubs.acs.org/doi/10.1021/jacs.6c13448",
+                        "title": "Another publisher's paper",
+                        "captcha_visible": False,
+                    },
+                },
+            ]
+        ],
+    )
+
+    result = service.read_page(doi="10.1002/pen.23634")
+
+    assert result["status"] == "no_page", result
+    assert result["reason"] == "capture_mismatch", result
+    assert result["captured_url"] == "https://pubs.acs.org/doi/10.1021/jacs.6c13448"
+    assert not list(tmp_path.rglob("page.mhtml")), "another article's bytes must not be kept"
+
+
+def test_a_capture_on_the_publishers_own_mirror_is_accepted(tmp_path: Path) -> None:
+    """A redirect to another subdomain of the same organisation is still that publisher."""
+
+    body = (
+        "<html><body><h1>A paper</h1><section id='s1'><h2>1. Introduction</h2>"
+        "<p>Body text a reader came for.</p></section></body></html>"
+    )
+    blob = write_mhtml(tmp_path / "page.mhtml", body).read_bytes()
+    service = build_service(
+        tmp_path,
+        [
+            [
+                {"verb": "goto", "data": {"url": "https://pubs.acs.org/doi/10.1021/jacs.6c13448"}},
+                {"verb": "sleep", "data": {"ms": 1}},
+                {
+                    "verb": "snapshot",
+                    "data": {
+                        "token": "t1",
+                        "total": len(blob),
+                        "base64": base64.b64encode(blob).decode("ascii"),
+                        "url": "https://pubsapp.acs.org/doi/10.1021/jacs.6c13448",
+                        "title": "A paper",
+                        "captcha_visible": False,
+                    },
+                },
+            ]
+        ],
+    )
+
+    result = service.read_page(doi="10.1021/jacs.6c13448")
+
+    assert result["status"] == "ok", result
+
+
 def test_doi_prefixes_map_to_the_right_publisher() -> None:
     assert publisher_for_doi("10.1016/j.cej.2023.145123").name == "elsevier"  # type: ignore[union-attr]
     assert publisher_for_doi("https://doi.org/10.1038/s41586-024-00001-0").name == "nature"  # type: ignore[union-attr]

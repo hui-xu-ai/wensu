@@ -211,9 +211,12 @@ def test_figure_is_placed_inline_and_copied(sample_dir: Path, tmp_path: Path) ->
     localised, copied, missing = page2md._localise_images(markdown, sample_dir, out)
 
     assert "![Fig. 1. A caption.](files/fig1.jpg)" in markdown  # 就地出现在小节里
-    assert (out / "assets" / "fig1.jpg").is_file()
+    # Content-addressed: the name says what the bytes are, not what the page called them.
+    written = list((out / "assets").iterdir())
+    assert len(written) == 1, [path.name for path in written]
+    assert written[0].read_bytes() == (sample_dir.parent / "files" / "fig1.jpg").read_bytes()
     assert (copied, missing) == (1, 0)
-    assert "assets/fig1.jpg" in localised
+    assert f"assets/{written[0].name}" in localised
 
 
 def test_warning_when_page_has_no_math() -> None:
@@ -424,6 +427,28 @@ def test_number_inside_a_table_takes_the_table_caption() -> None:
     assert "Table 2" in by_value.get("17.94 mm", "")
 
 
+def test_two_local_images_with_the_same_name_do_not_collide(tmp_path: Path) -> None:
+    """Two `figure.png` in different subdirectories used to become one file (retest F10)."""
+
+    first = tmp_path / "doc" / "a"
+    second = tmp_path / "doc" / "b"
+    first.mkdir(parents=True)
+    second.mkdir(parents=True)
+    (first / "figure.png").write_bytes(b"figure-from-a")
+    (second / "figure.png").write_bytes(b"figure-from-b")
+    out = tmp_path / "out"
+    markdown = "![a](a/figure.png)\n\n![b](b/figure.png)"
+
+    _localised, copied, missing = page2md._localise_images(
+        markdown, tmp_path / "doc" / "p.html", out
+    )
+
+    assert (copied, missing) == (2, 0)
+    written = list((out / "assets").iterdir())
+    assert len(written) == 2, [path.name for path in written]
+    assert {path.read_bytes() for path in written} == {b"figure-from-a", b"figure-from-b"}
+
+
 def test_a_second_conversion_does_not_keep_a_stale_image(tmp_path: Path) -> None:
     """Re-converting into the same output used to keep the first run's bytes (audit F10)."""
 
@@ -438,7 +463,12 @@ def test_a_second_conversion_does_not_keep_a_stale_image(tmp_path: Path) -> None
     figure.write_bytes(b"\xff\xd8\xff\xe0different bytes")
     page2md._localise_images(markdown, source_dir / "page.html", out)
 
-    assert (out / "assets" / "fig1.jpg").read_bytes() == b"\xff\xd8\xff\xe0different bytes"
+    written = list((out / "assets").iterdir())
+    assert len(written) == 2, [path.name for path in written]  # 内容变了 ⇒ 新名字，旧的不复用
+    assert {path.read_bytes() for path in written} == {
+        b"first bytes",
+        b"\xff\xd8\xff\xe0different bytes",
+    }
 
 
 def test_two_inline_resources_with_the_same_name_do_not_overwrite_each_other(

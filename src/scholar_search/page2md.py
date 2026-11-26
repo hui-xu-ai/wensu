@@ -1064,10 +1064,11 @@ def _localise_images(
             missing += 1
             return match.group(0)
         assets.mkdir(parents=True, exist_ok=True)
-        # A local file keeps its own name (it is the reader's file, and the name is meaningful);
-        # only its location is constrained. Inline MHTML assets are content-addressed instead,
-        # because there the name comes from the page.
-        destination = assets / candidate.name
+        # Content-addressed like the inline resources: two different figures called
+        # `figure.png` (a perfectly normal thing for two subdirectories to hold) used to resolve
+        # to one file and the second silently replaced the first (retest 2026-11-26, F10). The
+        # name is less readable on purpose — a wrong picture is worse than an opaque name.
+        destination = assets / _asset_name(candidate.read_bytes(), candidate.name)
         if not _inside(assets, destination):
             missing += 1
             return match.group(0)

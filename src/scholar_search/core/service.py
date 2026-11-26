@@ -181,6 +181,42 @@ class _FollowResult:
     charged: int = 0
 
 
+def _page_capture_belongs(
+    captured_url: str, declared_doi: str, publisher: Publisher, identifier: str
+) -> bool:
+    """Is the captured page plausibly *this* article, judged by where it came from?
+
+    Four acceptances, cheapest first:
+
+    1. the page names the DOI that was asked for;
+    2. its host is the curated publisher's;
+    3. its host is a *mirror* of that publisher — same registered domain, different subdomain,
+       which is what a publisher redirecting to `pubsapp.acs.org` looks like;
+    4. the DOI appears in its address.
+
+    Anything else is refused. The first version of this check accepted every page that failed to
+    declare a DOI, so a Wiley request answered with an ACS page came back `ok` with
+    `full_text: true` (retest 2026-11-26, §补充 F05).
+    """
+
+    if declared_doi and declared_doi.casefold() == identifier.casefold():
+        return True
+    if _page_evidence_site(captured_url, publisher, identifier):
+        return True
+    host = (urlparse(captured_url).hostname or "").casefold()
+    if not host:
+        return False
+    if any(host == domain or host.endswith("." + domain) for domain in publisher.domains):
+        return True
+    # Same organisation, different subdomain: compare the last two labels.
+    organisation = ".".join(host.split(".")[-2:])
+    return any(
+        ".".join(domain.casefold().split(".")[-2:]) == organisation
+        for domain in publisher.domains
+        if domain.count(".") >= 1
+    )
+
+
 def _page_evidence_site(url: str, publisher: Publisher, identifier: str) -> bool:
     """Is `url` the page this read asked for — the same publisher, or one carrying the DOI?
 
@@ -1248,11 +1284,20 @@ class ScholarService:
                         view_applied = True
 
             # Identity of the capture, not just of the request: the tab can move between the
-            # navigation and the snapshot, and a page that names a different DOI is another
-            # article (audit 2026-11-26, F05). Absent metadata proves nothing, so it does not
-            # block; contradictory metadata means the answer cannot be this article.
+            # navigation and the snapshot. Two pieces of evidence, and the order matters — the
+            # address the capture came from is checked first, `citation_doi` is the extra
+            # confirmation (retest 2026-11-26, §补充 F05: a Wiley request answered with an ACS
+            # page and no DOI metadata still came back `ok`).
             declared = citation_doi(readable) if readable.is_file() else ""
-            if identifier and declared and declared.casefold() != identifier.casefold():
+            captured_url = str(saved.get("url") or "")
+            refused = (
+                bool(identifier)
+                and declared != ""
+                and (declared.casefold() != identifier.casefold())
+            )
+            if identifier and not refused and captured_url:
+                refused = not _page_capture_belongs(captured_url, declared, publisher, identifier)
+            if refused:
                 with suppress(OSError):
                     readable.unlink()
                 self._page_cache_put(target, {"status": "blocked", "title": "capture_mismatch"})
@@ -1263,14 +1308,15 @@ class ScholarService:
                     "publisher": publisher.name,
                     "final_url": final_url,
                     "declared_doi": declared,
-                    "captured_url": str(saved.get("url") or ""),
+                    "captured_url": captured_url,
                     "mhtml_path": None,
                     "bytes": 0,
                     "quota_charged": _charged_units(outcomes),
                     "quota_reason": "navigate",
                     "next": (
-                        "the captured page names a different DOI, so it is not this article: "
-                        "ask again — the browser tab moved between the navigation and the capture."
+                        "the captured page is not this article (its address or its own DOI says "
+                        "so): ask again — the browser tab moved between the navigation and the "
+                        "capture."
                     ),
                 }
 
