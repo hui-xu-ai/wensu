@@ -36,6 +36,71 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.27] - 2026-11-26
+
+### Fixed — a wall is only claimed when the evidence belongs to this read
+
+`page_read` judged a challenge from any title it could see: the last non-empty title across every
+outcome of the navigation, or the title of whichever tab happened to be in front. Four ways it
+answered `blocked` for a page the reader could read (2026-11-26 report, reproduced offline):
+
+* two navigations lend each other titles — the article's own title is empty while the page paints,
+  so the publisher home page's 「请稍候…」 was used instead;
+* a wall marker made the next attempt look at the tab in front, which may be *another site*: an
+  RSC DOI was answered with the `science.org` URL of whatever page was focused;
+* `challenge_in_title` matched substrings, so "Loading: Just a moment please — Journal of …" was a
+  wall; it now applies the same exact-or-short-prefix rule `risk.py` already used;
+* the content script's generic `[class*='captcha' i]` selector matched the reCAPTCHA badge that
+  sits on ordinary pages; named elements only now, and the CNKI slider keeps its own id.
+
+Only the last navigation's title counts, its `url` must belong to this publisher or carry the DOI,
+and the extension's own `halted` flag (did the gate title persist for 1.5 s?) is now read — the ACS
+interstitial clears itself in about forty seconds, measured live. The tab-in-front probe also runs
+under the browser lock now, so another read cannot navigate the shared tab between the probe and
+the verdict. Answers carry `captured_url`.
+
+### Changed — "no full text" is one field, and it is not "no access"
+
+Every "no article body" case shared `status: "no_html"`, and the advice built on it told the reader
+they had no institutional access — including for a site that only offers a PDF, and for a page that
+simply serves no HTML. `full_text` (with `full_text_reason`) now answers the question that was
+asked; `status` / `reason` keep their meanings. `pdf_only` is produced for the first time (it had
+been documented and never emitted), and the advice says "not read", lists the routes, and stops
+blaming permissions. `skills/paper-page` says the same thing.
+
+### Fixed — a cached verdict can no longer outlive the rule that produced it
+
+Cache entries carry a judge fingerprint (`judge`), `reason`, `prose_words` and both URLs; entries
+written by an older release are not served (nothing is deleted). `page_read(refresh=true)` navigates
+again on request. The cache key normalises the DOI's case — the same DOI used to sit in the file
+twice, differing only in case, so a wall marker protected only one spelling.
+
+### Fixed — quota is measured, and a page that names its DOI is reused
+
+Only `goto`/`click`/`select`/`type` cost a unit; the capture is free. So a direct read costs **1**,
+not the flat 2 the price table claimed, and a build that opens the publisher's home page first
+costs 2 — the answer now reports what it was charged (`quota_charged`) and why (`quota_reason`).
+Reusing the tab in front no longer requires the DOI to appear in its URL: ACS landing pages carry
+the DOI only in `<meta name="citation_doi">`, so a page the reader already had open was re-navigated
+(two units, often another challenge). The page's own claim is the identity; a page naming a
+different DOI is not reused.
+
+### Fixed — page2md no longer reports furniture as sections
+
+ACS hangs every section title off one container, so all fourteen entries returned the same blocks:
+the first held the whole body and the other thirteen held their unique leftover navigation ("Close
+Figure 3.", "Google Scholar"), which is what "整篇正文落在 01-introduction" looked like from
+outside. Duplicate containers now yield one entry, nested `class="section-title"` subtrees are not
+swallowed by their parent, and a long document in one or two sections says so in `warnings` instead
+of offering a table of contents that lies.
+
+### Added — 10.3866
+
+《物理化学学报》 (PKU Press) is on the curated list now, so its DOIs no longer answer
+`unsupported_site`.
+
+`background-0.14.27.js`, as the cache-busting rule requires (worker changed: the captcha selectors).
+
 ## [0.14.26] - 2026-11-25
 
 ### Changed — only two things may report a wall
