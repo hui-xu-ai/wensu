@@ -82,6 +82,81 @@ def test_a_worker_that_reports_no_navigation_id_is_not_failed(tmp_path: Path) ->
     assert result["capture_navigation"] == "absent", result
 
 
+def test_two_navigations_are_compared_with_the_one_the_capture_followed(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Publisher front page, then the article: the capture follows the **second** id.
+
+    Comparing against the first id rejected a real MDPI read with
+    `capture_navigation: mismatch` (2026-11-27) — the capture was right, the baseline was wrong.
+    The two-goto shape is what the private navigation patch installs, so it is modelled here.
+    """
+
+    import scholar_search.core.service as service_module
+
+    monkeypatch.setattr(
+        service_module,
+        "article_navigation",
+        lambda _service, target, _publisher: (
+            service_module.Action("goto", {"url": target, "wait": "load"}),
+            service_module.Action("goto", {"url": target, "wait": "load"}),
+        ),
+    )
+    blob = write_mhtml(tmp_path / "page.mhtml", ARTICLE_HTML).read_bytes()
+    service = build_service(
+        tmp_path,
+        [
+            [
+                _goto("nav-front"),
+                _goto("nav-article"),
+                {"verb": "sleep", "data": {"ms": 1}},
+                _snapshot(blob, navigation_id="nav-article"),
+            ]
+        ],
+    )
+
+    result = service.read_page(doi=DOI)
+
+    assert result["status"] == "ok", result
+    assert result["capture_navigation"] == "match", result
+    assert result["navigation_id"] == "nav-article", result
+
+
+def test_a_capture_left_on_the_first_of_two_navigations_is_still_refused(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The tab moved on after the capture: the bytes are not the page this read ended on."""
+
+    import scholar_search.core.service as service_module
+
+    monkeypatch.setattr(
+        service_module,
+        "article_navigation",
+        lambda _service, target, _publisher: (
+            service_module.Action("goto", {"url": target, "wait": "load"}),
+            service_module.Action("goto", {"url": target, "wait": "load"}),
+        ),
+    )
+    blob = write_mhtml(tmp_path / "page.mhtml", ARTICLE_HTML).read_bytes()
+    service = build_service(
+        tmp_path,
+        [
+            [
+                _goto("nav-front"),
+                _goto("nav-article"),
+                {"verb": "sleep", "data": {"ms": 1}},
+                _snapshot(blob, navigation_id="nav-front"),
+            ]
+        ],
+    )
+
+    result = service.read_page(doi=DOI)
+
+    assert result["status"] == "no_page", result
+    assert result["capture_navigation"] == "mismatch", result
+    assert result["reason"] == "unverified_capture", result
+
+
 def test_a_navigation_that_timed_out_is_reported_as_unconfirmed(tmp_path: Path) -> None:
     """The tab may land after the caller was told "timeout"; that is not "nothing happened"."""
 

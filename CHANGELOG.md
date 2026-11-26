@@ -36,6 +36,30 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.44] - 2026-11-27
+
+ADR 0030 第二片的判定基准选错了，真实读取被误拒（`docs/reviews/wensu-0.14.43-capture-navigation-2026-11-27.md`）。
+
+### Fixed — 基准应为「捕获跟随的那次导航」，不是第一次
+
+私有导航补丁会发两条 `goto`（出版社首页 → 文章页），各得一个 `navigation_id`；扩展的 `snapshot`
+记的是该标签页**最近一次**导航，也就是第二条。0.14.43 却拿**第一条**去比较，于是判
+`capture_navigation: mismatch` 并拒绝发布——扩展的归属是对的，内核的基准是错的。真实回放：
+
+| 动作 | navigation_id |
+|---|---|
+| 第一条 goto | `829c8f4b-…` |
+| 第二条文章 goto | `72bed8cc-…` |
+| snapshot | `72bed8cc-…`（= 第二条） |
+
+现在取**最后一次**导航的 id 作为基准，因此：
+
+* 单条 `goto`、捕获相符 → `match`；
+* 两条 `goto`、捕获跟随第二条 → `match`（真实形态）；
+* 两条 `goto`、捕获仍停留在第一条 → `mismatch`，仍然拒绝——校验没有被降级为"只记录"。
+
+`background-0.14.44.js`（worker 内容未变，按缓存规则改名）。
+
 ## [0.14.43] - 2026-11-27
 
 ADR 0030 第二片：身份字段从"报告"变成"参与判定"，并给未确认的导航一个终态。

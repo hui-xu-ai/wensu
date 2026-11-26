@@ -1723,12 +1723,15 @@ class ScholarService:
             # `match` / `mismatch` / `absent` — absence is not a failure, because a worker from an
             # older build (or a build the user assembled) does not report it; a *mismatch* is.
             capture_nav = str(saved.get("navigation_id") or "")
-            # The **navigation's** id, not the last outcome's: the capture step reports the same
-            # id, so reading it from there would compare a value with itself.
+            # The navigation the capture **followed**, which is the last one this read issued, not
+            # the first. A plan of two `goto`s (the private navigation patch: publisher front page,
+            # then the article) issued two ids; the snapshot records the tab's most recent one, and
+            # taking the first id here rejected a perfectly good capture on a real read
+            # (2026-11-27, `10.3390/s26041303`, `capture_navigation: mismatch`).
             read_nav = next(
                 (
                     str(outcome.data.get("navigation_id"))
-                    for outcome in outcomes
+                    for outcome in reversed(outcomes)
                     if isinstance(outcome.data, dict) and outcome.data.get("navigation_id")
                 ),
                 "",
