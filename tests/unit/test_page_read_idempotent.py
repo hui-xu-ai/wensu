@@ -148,6 +148,49 @@ def test_doi_case_does_not_create_a_second_entry(tmp_path: Path) -> None:
     assert not second.get("cached"), second
 
 
+def test_a_cached_answer_carries_the_verdict_it_was_made_of(tmp_path: Path) -> None:
+    """A cache hit must not drop the evidence the live answer carried (audit F13).
+
+    `captured_url`, `judge` and `prose_words` travelled with the live answer; the cached one
+    replaced `final_url` with the *requested* address and said nothing else.
+    """
+
+    from test_page_read import build_service
+
+    blob = _write_mhtml(tmp_path / "page.mhtml", ARTICLE_HTML)
+    service = build_service(tmp_path, [_one_capture(blob)])
+
+    live = service.read_page(doi=DOI)
+    cached = service.read_page(doi=DOI)
+
+    assert cached["cached"] is True
+    for field in ("captured_url", "judge", "prose_words", "reason", "final_url"):
+        assert field in cached, (field, cached)
+        assert cached[field] == live.get(field), (field, cached, live)
+
+
+def test_a_cache_entry_from_the_future_is_not_served(tmp_path: Path) -> None:
+    """A corrupt timestamp used to give a negative age, so the entry lived forever."""
+
+    import json
+    import time as clock
+
+    from test_page_read import build_service
+
+    blob = _write_mhtml(tmp_path / "page.mhtml", ARTICLE_HTML)
+    service = build_service(tmp_path, [_one_capture(blob), _one_capture(blob)])
+    service.read_page(doi=DOI)
+
+    state = json.loads((tmp_path / "page-read.json").read_text(encoding="utf-8"))
+    key = next(iter(state))
+    state[key]["at"] = clock.time() + 86_400  # a day in the future
+    (tmp_path / "page-read.json").write_text(json.dumps(state), encoding="utf-8")
+
+    again = service.read_page(doi=DOI)
+
+    assert not again.get("cached"), again
+
+
 def test_blocked_tells_the_caller_to_read_again_once_the_wall_is_solved() -> None:
     """ADR 0022 rev 1: a solved wall leaves the article in the tab, so a second call is free.
 

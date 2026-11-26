@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import math
 import re
 import time
 from collections.abc import Callable, Sequence
@@ -198,6 +199,9 @@ _PAGE_SLUG_CHARS = 60
 # change meaning: entries stamped with an older value are not served, so a fix takes effect
 # without asking the reader to clear anything. Pre-existing entries carry no stamp at all.
 _PAGE_JUDGE_REV = 1
+# How far a cache timestamp may sit in the future before it is treated as corrupt rather than as
+# a small clock difference between two machines (audit F13).
+_CLOCK_SKEW_S = 300.0
 
 
 def _page_dir_slug(meta: dict[str, str]) -> str:
@@ -800,7 +804,12 @@ class ScholarService:
             return None
         if not Path(str(entry.get("mhtml_path") or "")).is_file():
             return None
-        if time.time() - float(entry.get("at") or 0.0) > self._PAGE_CACHE_TTL_S:
+        stamp = float(entry.get("at") or 0.0)
+        # A timestamp in the future (or not a finite number) is a corrupt entry, not a fresh one:
+        # subtracting it yields a negative age, so the entry would live forever (audit F13).
+        if not math.isfinite(stamp) or stamp > time.time() + _CLOCK_SKEW_S:
+            return None
+        if time.time() - stamp > self._PAGE_CACHE_TTL_S:
             return None
         return entry
 
@@ -984,12 +993,19 @@ class ScholarService:
         if cached is not None:
             # Idempotent on purpose: the page is already on disk, so navigating again could
             # only replace a good capture with whatever the publisher serves now.
+            # The verdict travels with the capture: a cached answer that drops `captured_url`,
+            # `judge` or `prose_words` forces the caller to trust it, and filling `final_url`
+            # with the *requested* address hides where the page actually was (audit F13).
             return {
                 "status": "ok",
                 "cached": True,
                 "doi": identifier,
                 "publisher": publisher.name,
-                "final_url": target,
+                "final_url": str(cached.get("final_url") or target),
+                "captured_url": str(cached.get("captured_url") or ""),
+                "reason": str(cached.get("reason") or ""),
+                "prose_words": cached.get("prose_words"),
+                "judge": cached.get("judge"),
                 "mhtml_path": str(cached.get("mhtml_path") or ""),
                 "bytes": cached.get("bytes"),
                 "headings": cached.get("headings"),
@@ -1244,6 +1260,9 @@ class ScholarService:
                 # What was actually captured, so a caller can check it instead of trusting it:
                 # the tab can move between the navigation and the snapshot.
                 "captured_url": str(saved.get("url") or ""),
+                # Which rule set produced this verdict — the same stamp a cache hit reports, so
+                # the two answers are comparable (audit F13).
+                "judge": _PAGE_JUDGE_REV,
                 "mhtml_path": str(readable),
                 "bytes": int(saved.get("bytes") or 0),
                 "title": str(saved.get("title") or probe.get("title") or ""),
