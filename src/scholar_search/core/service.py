@@ -25,6 +25,7 @@ from urllib.parse import urlparse
 from .. import __version__
 from ..adapters.bridge import BridgeAdapter
 from .cache import Cache
+from .config import browser_state_dir
 from .contracts import (
     Action,
     ActionOutcome,
@@ -1842,8 +1843,9 @@ class ScholarService:
             return
 
     def _browser_lock_path(self) -> Path:
-        state_dir = Path(self._policy.state_dir) if self._policy else Path.cwd()
-        return state_dir / "browser.lock"
+        """The lock that serialises the browser — machine-scoped, not per-home (ADR 0029)."""
+
+        return browser_state_dir() / "browser.lock"
 
     def _stage_page(self, payload: bytes, meta: dict[str, str]) -> Path:
         """Write a captured page into `pages/.probe/`: inspection, not storage.

@@ -36,6 +36,19 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.39] - 2026-11-26
+
+### Changed — 浏览器锁改为机器级（ADR 0029 第一片）
+
+浏览器是一个资源，SCHOLAR_SEARCH_HOME 却可以有多个（隔离验收、CI、桌面各一个），每个 home 各自持有
+<home>/state/browser.lock，于是两个进程都以为独占浏览器、实际交错导航。锁现在放在
+rowser_state_dir()（默认 %LOCALAPPDATA%\scholar-search\browser-state，可用
+SCHOLAR_SEARCH_BROWSER_STATE 覆盖），status.browser_busy 探同一把锁。
+
+**配额与冷却仍按 home 计**：把它们搬过去会改变既有行为并需要迁移（首次运行从旧文件读一次、写共享位置、
+不删旧文件），单独一个 ADR 再说。
+
+`background-0.14.39.js`（worker 内容未变，按缓存规则改名）。
 ## [0.14.38] - 2026-11-26
 
 ### Fixed — 0.14.36 与 0.14.37 发布的 worker 里没有窗口聚焦

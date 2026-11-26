@@ -381,7 +381,9 @@ def test_the_probe_of_the_tab_in_front_holds_the_browser_lock(
     original = service._snapshot_locked
 
     def probing(*, tab: str = "active") -> dict[str, object]:
-        lock = service._page_cache_path().parent / "browser.lock"
+        # The lock is machine-scoped now (ADR 0029), so ask the service where it is instead of
+        # rebuilding the path from the state directory.
+        lock = service._browser_lock_path()
         try:
             with interprocess_lock(lock, timeout_s=0.05):
                 seen.append("unlocked")

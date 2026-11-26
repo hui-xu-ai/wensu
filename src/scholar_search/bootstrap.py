@@ -10,7 +10,7 @@ from .adapters.bridge import BridgeAdapter
 from .adapters.bridge.host import PROTOCOL_VERSION
 from .core.audit import AuditLog
 from .core.cache import Cache
-from .core.config import app_home, host_runtime_dir
+from .core.config import app_home, browser_state_dir, host_runtime_dir
 from .core.contracts import BrowserAdapter
 from .core.errors import ScholarSearchError
 from .core.locking import interprocess_lock
@@ -199,7 +199,7 @@ def _browser_busy(endpoint: Path, bridge_up: bool) -> bool:
 
     if not bridge_up:
         return False
-    lock = Path(endpoint).parent / "state" / "browser.lock"
+    lock = browser_state_dir() / "browser.lock"
     try:
         with interprocess_lock(lock, timeout_s=0.0):
             return False

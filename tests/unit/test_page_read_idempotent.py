@@ -298,6 +298,25 @@ def test_a_finished_read_is_remembered_for_the_next_caller(tmp_path: Path) -> No
     assert service.browser_busy() is False
 
 
+def test_two_homes_driving_one_browser_share_the_lock(tmp_path: Path) -> None:
+    """A second home must not open a second lock on the same browser (ADR 0029).
+
+    Each `SCHOLAR_SEARCH_HOME` used to get its own `browser.lock`, so two processes pointing at
+    one browser interleaved navigations freely while each believed it was alone.
+    """
+
+    from test_page_read import build_service
+
+    from scholar_search.core.locking import interprocess_lock
+
+    first = build_service(tmp_path / "home-a", [])
+    second = build_service(tmp_path / "home-b", [])
+
+    with interprocess_lock(first._browser_lock_path(), timeout_s=1.0):
+        assert second.browser_busy() is True
+    assert second.browser_busy() is False
+
+
 def test_blocked_tells_the_caller_to_read_again_once_the_wall_is_solved() -> None:
     """ADR 0022 rev 1: a solved wall leaves the article in the tab, so a second call is free.
 

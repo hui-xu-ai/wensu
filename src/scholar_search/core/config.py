@@ -15,6 +15,10 @@ from pathlib import Path
 # distribution name changed in 0.4.0.
 APP_NAME = "scholar-search"
 ENV_HOME = "SCHOLAR_SEARCH_HOME"
+# State that belongs to the *browser* rather than to one home. First slice (ADR 0029): the browser
+# lock, so two homes driving the same browser cannot interleave navigations. Quota and cooldown
+# deliberately stay per-home until that change gets its own migration.
+ENV_BROWSER_STATE = "SCHOLAR_SEARCH_BROWSER_STATE"
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +77,23 @@ def app_home() -> Path:
         return Path(base) / APP_NAME
 
     return Path.home() / ".local" / "share" / APP_NAME
+
+
+def browser_state_dir() -> Path:
+    """Machine-scoped state, shared by every home that drives this browser.
+
+    The browser is one resource no matter how many `SCHOLAR_SEARCH_HOME` directories point at it,
+    so the lock that serialises its use cannot live inside one of them (ADR 0029). Documents,
+    caches, quota and cooldown stay per-home for now.
+    """
+
+    override = os.environ.get(ENV_BROWSER_STATE)
+    if override:
+        return Path(override).expanduser().resolve()
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+        return Path(base) / APP_NAME / "browser-state"
+    return Path.home() / ".local" / "share" / APP_NAME / "browser-state"
 
 
 def profiles_dir() -> Path:
