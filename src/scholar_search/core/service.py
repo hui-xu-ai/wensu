@@ -306,7 +306,9 @@ def _charged_units(outcomes: Sequence[ActionOutcome]) -> int:
     answer said 1, the quota dropped by 2, and `audit.jsonl` held two `goto` lines).
     """
 
-    return sum(1 for outcome in outcomes if outcome.action.verb in NETWORK_VERBS) or 1
+    return sum(1 for outcome in outcomes if outcome.action.verb in NETWORK_VERBS) or (
+        1 if outcomes else 0
+    )
 
 
 @dataclass(frozen=True)
@@ -1333,7 +1335,13 @@ class ScholarService:
         )
 
     def read_page(
-        self, *, url: str = "", doi: str = "", refresh: bool = False, view: str = "landing"
+        self,
+        *,
+        url: str = "",
+        doi: str = "",
+        refresh: bool = False,
+        view: str = "landing",
+        resume_job_id: str = "",
     ) -> dict[str, Any]:
         """`_read_page`, plus the one field a caller should branch on: `full_text`.
 
@@ -1354,8 +1362,22 @@ class ScholarService:
         read stopped, instead of inferring it from a status string: `stage` names the step
         (`navigate`/`wall`/`render`/`capture`/`identity`/`publish`) and `evidence` quotes what was
         actually observed at that step.
+
+        `resume_job_id` continues a read that stopped at a wall, **without navigating**: the
+        person has cleared the challenge in the browser, and asking again used to re-navigate —
+        which refreshed away the very page they had just let through (decision 2(b), 2026-11-27).
+        It refuses to combine with `refresh` (that would be a new navigation pretending to be a
+        resume), and it inherits the capture count of the session it continues (ADR 0031, I1).
         """
 
+        resume = (resume_job_id or "").strip()
+        if resume:
+            if refresh:
+                raise PolicyError(
+                    "resume_job_id and refresh cannot be combined: a resume must not navigate",
+                    rule="policy.params",
+                )
+            return self._resume_page(resume)
         job_id = uuid.uuid4().hex[:12]
         answer = self._read_page(url=url, doi=doi, refresh=refresh, view=view)
         answer["job_id"] = job_id
@@ -1485,7 +1507,13 @@ class ScholarService:
         }
 
     def _read_page(
-        self, *, url: str = "", doi: str = "", refresh: bool = False, view: str = "landing"
+        self,
+        *,
+        url: str = "",
+        doi: str = "",
+        refresh: bool = False,
+        view: str = "landing",
+        resume: bool = False,
     ) -> dict[str, Any]:
         """Open the article a reader asked for, then say what is on it.
 
@@ -1543,7 +1571,7 @@ class ScholarService:
             # so the look happens *under the browser lock*: doing it outside let another read
             # navigate the shared tab in between, and the answer carried that article's URL
             # (2026-11-26 report L26/L27: an RSC DOI answered with a `science.org` page).
-            if self._page_cache_walled(target):
+            if self._page_cache_walled(target) and not resume:
                 # This URL hit a wall recently. Before navigating again — which is what replaces
                 # a body the reader already captured — look at the tab the person is on: if they
                 # solved the challenge by hand, the article is right there and `snapshot` costs
@@ -1609,16 +1637,20 @@ class ScholarService:
                 with suppress(OSError):
                     Path(str(open_tab.get("path") or "")).unlink()
 
-            navigation_actions = article_navigation(self, target, publisher)
+            navigation_actions = () if resume else article_navigation(self, target, publisher)
             try:
-                outcomes = self._run(
-                    Plan(
-                        channel=f"page:{publisher.name}",
-                        purpose="detail",
-                        # One navigation to the article, built in one place (ADR 0025).
-                        actions=navigation_actions,
-                    ),
-                    spec,
+                outcomes = (
+                    ()
+                    if resume
+                    else self._run(
+                        Plan(
+                            channel=f"page:{publisher.name}",
+                            purpose="detail",
+                            # One navigation to the article, built in one place (ADR 0025).
+                            actions=navigation_actions,
+                        ),
+                        spec,
+                    )
                 )
             except RiskBlocked as blocked:
                 # The wall was named by the `goto` outcome itself (gate title / captcha /
@@ -1669,12 +1701,12 @@ class ScholarService:
                     error=str(failed.error or ""),
                     issued=issued if isinstance(issued, bool) else None,
                 )
-            final_url = outcomes[-1].url or target
+            final_url = outcomes[-1].url or target if outcomes else target
             # Only the last navigation's title can be this page's title. With two `goto`s (the
             # warmup patch) the first one belongs to another page, and an empty title means the
             # page was still painting when the extension read it — that is "no evidence yet",
             # not "look at an earlier page" (measured 2026-11-26, T0 1a).
-            last = outcomes[-1].data if isinstance(outcomes[-1].data, dict) else {}
+            last = outcomes[-1].data if outcomes and isinstance(outcomes[-1].data, dict) else {}
             wall_title = last.get("title") if isinstance(last.get("title"), str) else ""
             marker = challenge_in_title(str(wall_title))
             if marker and last.get("halted") is False:
@@ -2180,6 +2212,45 @@ class ScholarService:
         # (F41-03).
         return self._home_dir / "state" / "last-job.json"
 
+    def _resume_page(self, job_id: str) -> dict[str, Any]:
+        """Continue a read that stopped at a wall — capture the page, never navigate.
+
+        The person cleared the challenge in the browser; the page they cleared is the one to read.
+        So this is: verify the earlier job is the one being continued, re-read its target, then run
+        the capture half of `_read_page` against the tab that is already there.
+
+        It does not inherit the old answer's verdict and does not rewrite it: the earlier call said
+        `timeout` and stays `timeout` in `last_job` history. This call gets its own `job_id` and its
+        own answer, with `resumed_from` pointing at the one it continued.
+        """
+
+        record = self._read_last_job()
+        if not record or str(record.get("job_id") or "") != job_id:
+            raise PolicyError(
+                f"no read to resume for {job_id!r}: the state file names a different job "
+                f"({record.get('job_id') if record else 'nothing'}) — resume continues the *last* "
+                "read, and a read that already succeeded needs no resume",
+                rule="policy.resume_unknown",
+            )
+        target = str(record.get("final_url") or record.get("captured_url") or "")
+        identifier = str(record.get("doi") or "")
+        answer = self._read_page(url=target, doi=identifier, resume=True)
+        answer["job_id"] = uuid.uuid4().hex[:12]
+        answer["resumed_from"] = job_id
+        answer["stage"] = _page_stage(answer)
+        answer["evidence"] = _page_evidence(answer)
+        answer["terminal"] = _page_terminal(answer)
+        self._note_job(answer)
+        return _page_full_text(answer)
+
+    def _read_last_job(self) -> dict[str, Any]:
+        try:
+            raw = self._last_job_path().read_text(encoding="utf-8")
+            parsed = json.loads(raw)
+        except (OSError, ValueError):
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
     def _note_job(self, answer: dict[str, Any]) -> None:
         """Remember how this read ended. Best effort: a state file must never fail a read."""
 
@@ -2195,6 +2266,10 @@ class ScholarService:
                 "publisher",
                 "quota_charged",
                 "capture_sha256",
+                # Where the read actually landed: a resume continues *this* address, and asking
+                # the caller to pass it back would let a typo resume the wrong article.
+                "final_url",
+                "captured_url",
                 # The action the caller would have to ask about if this read timed out (F46-01).
                 "operation_id",
             )

@@ -36,6 +36,35 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.62] - 2026-11-27
+
+ADR 0031 的 **P1：捕获生命周期的事实 + 人工恢复不导航**。
+
+### Added — `page_read(resume_job_id=...)`
+
+墙后的续读不再是"再调一次 `page_read`"。
+
+| | 之前 | 现在 |
+|---|---|---|
+| 继续一次被墙的读取 | 再调 `page_read`：**重新导航**，把你刚放行的页面刷掉，再扣 1 单位 | `resume_job_id=<那次回包的 job_id>`：**只抓当前标签页，不导航**，0 单位 |
+| 旧回包 | 被新调用覆盖 | **不改写**：旧调用仍记 `timeout`，新调用有自己的 `job_id` 并用 `resumed_from` 指回它 |
+
+- 与 `refresh=true` **互斥**（`policy.params`）：恢复不允许导航；
+- 只接受**最近一次**读取的 `job_id`，否则 `policy.resume_unknown`（防止恢复错文章）；
+- 恢复时会跳过"最近被墙则先看前台标签"那条捷径，直接抓**本次读取用的工作标签**——你放行的是它。
+
+### Fixed — 零动作的路径不再谎报 1 单位额度
+
+`_charged_units` 的兜底下限是无条件的，于是"一个动作都没发"的路径也报 `quota_charged: 1`。
+恢复路径正是零导航，现在只有真的发生过动作才保留那个下限（`outcomes` 非空时仍为 1）。
+
+### Added — 捕获回执字段进入白名单
+
+`capture_id` / `attempt_index` / `capture_issued`（三值）加入 operation 回执白名单，只记元数据，
+**不写正文或 MHTML**；`capture_issued` 与 `navigation_issued` 同构——"不知道有没有发出"不会被写成"没发出"。
+
+`background-0.14.62.js`（worker 内容未变）。
+
 ## [0.14.61] - 2026-11-27
 
 ADR 0031 的 **P0：契约先行**。本版**没有**改变任何浏览器行为，也没有发出新参数——worker 尚未

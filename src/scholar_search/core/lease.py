@@ -89,6 +89,12 @@ RECEIPT_KEYS: frozenset[str] = frozenset(
         "outcome",
         "receipt_seq",
         "started_at",
+        # ADR 0031: a capture is its own operation kind. `capture_issued` is tri-state for the
+        # same reason `navigation_issued` is — "we do not know whether it left" must not be
+        # written as "it did not".
+        "capture_id",
+        "attempt_index",
+        "capture_issued",
         "settled_at",
         "error_code",
         "error_class",

@@ -855,7 +855,11 @@ def build_server(service: ScholarService) -> FastMCP:
 
     @mcp.tool()
     def page_read(
-        url: str = "", doi: str = "", refresh: bool = False, view: str = "landing"
+        url: str = "",
+        doi: str = "",
+        refresh: bool = False,
+        view: str = "landing",
+        resume_job_id: str = "",
     ) -> dict[str, Any]:
         """Open a publisher article page and say whether it holds the full text.
 
@@ -878,9 +882,10 @@ def build_server(service: ScholarService) -> FastMCP:
         * `blocked` — the site showed a human-verification wall. It is recognized from the
           tab title right after the navigation, so **the wall is never captured or saved**
           (ADR 0004): `mhtml_path` is null. Ask the user to solve it in that browser window,
-          then call `page_read` again: with the wall solved the article is read from the tab
-          that is already open, without navigating and without charge. `snapshot` also works
-          for free, but it captures whichever tab is in front;
+          then call `page_read(resume_job_id=<that answer's job_id>)`: a resume captures the
+          page the person already cleared and **never navigates**, so it costs 0 units and does
+          not refresh away what they just let through (ADR 0031). Calling `page_read` again
+          *without* `resume_job_id` is a new read: it navigates and is charged as one;
         * `no_page` — the browser was not showing a usable page: `reason: "tab_not_a_page"` when
           the tab holds something that is not a web page, or `reason: "capture_mismatch"` when
           the captured page names a different DOI than the one requested (the tab moved between
@@ -901,7 +906,9 @@ def build_server(service: ScholarService) -> FastMCP:
         """
 
         try:
-            return service.read_page(url=url, doi=doi, refresh=refresh, view=view)
+            return service.read_page(
+                url=url, doi=doi, refresh=refresh, view=view, resume_job_id=resume_job_id
+            )
         except (RiskBlocked, ScholarSearchError, OSError, ValueError) as error:
             return _payload(error)
 
