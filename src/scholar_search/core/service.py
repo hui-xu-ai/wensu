@@ -47,7 +47,7 @@ from .errors import (
     ScholarSearchError,
 )
 from .export import to_csv, to_endnote, to_markdown, to_ris
-from .lease import LeaseStore, lease_mode, missing_features
+from .lease import LeaseStore, lease_mode, missing_features, readiness_supported
 from .locking import interprocess_lock
 from .page_nav import article_navigation
 from .pageprobe import challenge_in_title, citation_doi, citation_fulltext_url, classify_mhtml
@@ -66,6 +66,10 @@ ANSWER_SLICE_MS = 1_200
 # Article bodies paint after the load event; a capture taken too early holds only the
 # highlights. Both waits are clamped by the extension to 3 s per action.
 _ARTICLE_SETTLE_MS = 1_200
+# ADR 0031: observation budgets. The first is how long tab metadata may be watched before the
+# capture happens anyway; the second keeps a single observation RPC well inside the host limit.
+_READINESS_BUDGET_MS = 30_000
+_OBSERVE_RPC_MS = 8_000
 _SECOND_LOOK_MS = 1_500
 
 
@@ -1761,14 +1765,12 @@ class ScholarService:
             # Publisher article bodies render after the load event: capturing straight after
             # `goto` returned 1.8 KB of "Highlights" from a ScienceDirect article page that
             # was fully accessible (0.12.59, real run after signing in).
-            self._run(
-                Plan(
-                    channel=f"page:{publisher.name}",
-                    purpose="detail",
-                    actions=(Action("sleep", {"ms": _ARTICLE_SETTLE_MS}),),
-                ),
-                spec,
-            )
+            #
+            # ADR 0031: on a build that advertises `readiness_observe`, this waits for tab
+            # metadata to be a candidate instead of sleeping a fixed 1200 ms — evidence instead of
+            # a timer, and the observation costs no quota and issues no request. An older worker
+            # gets the old behaviour, and the answer says which one ran.
+            readiness = self._observe_before_capture(final_url, publisher, spec, last)
             navigation_tab = last.get("tab_id")
             saved = self._snapshot_locked(
                 tab="work", tab_id=navigation_tab if isinstance(navigation_tab, int) else None
@@ -1985,6 +1987,10 @@ class ScholarService:
                 # made a caller re-derive the DOI from the references, and one probe got a negative
                 # answer out of a correct capture (real-browser acceptance 2026-11-27, F53-03).
                 "declared_doi": declared or None,
+                # How the capture was timed (ADR 0031): `strategy: observe|settle`, the state the
+                # observation ended in, and whether the budget ran out first. A caller can tell
+                # "the page was ready" from "we captured anyway" without guessing.
+                "readiness": readiness,
                 "mhtml_path": str(readable),
                 # Which tab and which navigation produced this capture (ADR 0030).
                 "tab_id": last.get("tab_id"),
@@ -2211,6 +2217,95 @@ class ScholarService:
         # the last read end" is about this caller's work, not about the browser's shared ledger
         # (F41-03).
         return self._home_dir / "state" / "last-job.json"
+
+    def _readiness_build(self) -> dict[str, Any] | None:
+        """What the connected worker says it can do. A seam: tests replace this, not the browser."""
+
+        try:
+            describe = getattr(self._transaction_adapter(), "info", None)
+            if describe is None:
+                return None
+            info = describe()
+        except (OSError, ValueError, RuntimeError, ScholarSearchError):
+            return None
+        return info if isinstance(info, dict) else None
+
+    def _observe_before_capture(
+        self,
+        target: str,
+        publisher: Publisher,
+        spec: Any,
+        last: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Decide *when* the capture is worth starting — never whether it may happen.
+
+        ADR 0031: the readiness budget times the *first* capture; when it runs out the capture
+        happens anyway and the evidence says `budget_exhausted`. Timers never decide that the page
+        is absent. A worker without `readiness_observe` keeps the old fixed settle, and the answer
+        records `strategy: "settle"` so nobody mistakes a sleep for an observation.
+        """
+
+        evidence: dict[str, Any] = {"strategy": "settle", "state": "not_observed"}
+        if not readiness_supported(self._readiness_build()):
+            self._run(
+                Plan(
+                    channel=f"page:{publisher.name}",
+                    purpose="detail",
+                    actions=(Action("sleep", {"ms": _ARTICLE_SETTLE_MS}),),
+                ),
+                spec,
+            )
+            return evidence
+
+        evidence["strategy"] = "observe"
+        spent_ms = 0.0
+        state = "observing"
+        while spent_ms < _READINESS_BUDGET_MS:
+            budget = int(min(_OBSERVE_RPC_MS, _READINESS_BUDGET_MS - spent_ms))
+            if budget <= 0:
+                break
+            params: dict[str, Any] = {"mode": "observe", "observe_ms": budget}
+            tab_id = last.get("tab_id")
+            if isinstance(tab_id, int):
+                params["tab_id"] = tab_id
+            try:
+                outcomes = self._run(
+                    Plan(
+                        channel=f"page:{publisher.name}",
+                        purpose="detail",
+                        actions=(Action("snapshot", params, timeout_ms=budget + 5_000),),
+                    ),
+                    spec,
+                )
+            except (ActionError, ScholarSearchError) as error:
+                # An observation that cannot run is not a wall and not a verdict: fall back to
+                # capturing, which is what the budget expiring does anyway.
+                evidence["observation_error"] = str(getattr(error, "code", "") or str(error))
+                state = "unavailable"
+                break
+            data = outcomes[-1].data if outcomes and isinstance(outcomes[-1].data, dict) else {}
+            state = str(data.get("state") or "observing")
+            # Milliseconds everywhere: mixing them with seconds made the loop run 30 000 rounds in
+            # the first draft of this (the fixture caught it before it reached a browser).
+            spent_ms += float(data.get("elapsed_ms") or 0) or _OBSERVE_RPC_MS
+            page_state = data.get("page_state")
+            if isinstance(page_state, dict):
+                evidence["page_state"] = {
+                    "status": page_state.get("status"),
+                    "title": page_state.get("title"),
+                }
+            if state in {"candidate", "risk", "tab_lost"}:
+                break
+        evidence["state"] = state
+        evidence["elapsed_ms"] = int(spent_ms)
+        evidence["budget_exhausted"] = state == "observing" and spent_ms >= _READINESS_BUDGET_MS
+        if state == "risk":
+            raise RiskBlocked(
+                f"the page asks for a person ({(evidence.get('page_state') or {}).get('title')})",
+                signal="challenge",
+                cooldown_until=None,
+            )
+        return evidence
 
     def _resume_page(self, job_id: str) -> dict[str, Any]:
         """Continue a read that stopped at a wall — capture the page, never navigate.

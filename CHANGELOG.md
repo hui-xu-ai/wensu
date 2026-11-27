@@ -36,6 +36,38 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.63] - 2026-11-27
+
+ADR 0031 的 **P2（内核侧）**：抓取时机由证据决定，兜底预算不再决定成败。
+
+> worker 侧的观测实现（`snapshot(mode=observe)` 真的轮询 `tabs.get`）**尚未落地**：本版内核只有在
+> worker 广告 `readiness_observe` 时才走观测路径，当前 worker 不广告，所以**线上行为与 0.14.62 相同**。
+> 这是灰度的一部分，不是"已改造完成"。
+
+### Changed — 固定 1.2 秒不再当依据
+
+`_observe_before_capture`：
+
+| worker 能力 | 策略 | 证据 |
+|---|---|---|
+| 广告 `readiness_observe` + `capture_receipts` | `snapshot(mode=observe, observe_ms=…)` 轮询元数据，`candidate` 即抓 | `readiness.strategy = "observe"`、`state`、`elapsed_ms`、`budget_exhausted` |
+| 未广告 | 旧的固定 `sleep 1200 ms` | `readiness.strategy = "settle"`、`state = "not_observed"` |
+
+三条硬规则：
+
+1. **观测预算耗尽仍发起捕获**（不变式 I3）——不是"再等等"；
+2. **观测没跑成**（`policy.*`/传输错误）也照样捕获，并把原因记进 `readiness.observation_error`；
+3. **元数据已显示验证页**（`state: "risk"`）⇒ 零捕获，直接 `blocked`（I2/I7）。
+
+观测与捕获都不计额度（`snapshot` 不在网络动词里），所以一次读取仍是 1 单位。
+
+### 一个被夹具抓住的真 bug
+
+第一版把毫秒和秒混着比（`spent` 是秒、`_READINESS_BUDGET_MS` 是毫秒），循环会跑 30 000 轮——
+夹具在到达浏览器之前就把它拦下了。现在全程毫秒，并在注释里留了这句。
+
+`background-0.14.63.js`（worker 内容未变；观测模式在下一版实现）。
+
 ## [0.14.62] - 2026-11-27
 
 ADR 0031 的 **P1：捕获生命周期的事实 + 人工恢复不导航**。
