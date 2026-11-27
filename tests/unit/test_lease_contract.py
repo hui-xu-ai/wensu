@@ -123,7 +123,103 @@ def test_issued_false_only_comes_from_a_statement_about_the_browser() -> None:
     assert {"navigation_not_issued", "navigation_unconfirmed"} <= LEASE_REASONS
 
 
-def test_the_persisted_receipt_drops_page_content() -> None:
+def test_the_store_refuses_a_second_lease_and_has_no_ttl(tmp_path) -> None:
+    """Two browsers' worth of callers, one lease: the second gets None, not a wait and not a TTL."""
+
+    from scholar_search.core.lease import LeaseStore
+
+    store = LeaseStore(tmp_path / "coordination", clock=lambda: 1_000.0)
+    first = store.acquire(lease_id="L1", job_id="job-1")
+    assert first is not None and first.fence == 1
+
+    assert store.acquire(lease_id="L2") is None
+    # A clock far in the future changes nothing: there is no expiry edge to trigger.
+    later = LeaseStore(tmp_path / "coordination", clock=lambda: 10**9)
+    assert later.read().state == "active"
+    assert later.acquire(lease_id="L3") is None
+
+
+def test_only_the_owner_can_finish(tmp_path) -> None:
+    from scholar_search.core.lease import LeaseStore
+
+    store = LeaseStore(tmp_path / "coordination")
+    lease = store.acquire(lease_id="L1")
+    assert lease is not None
+
+    stolen = store.finish(lease_id="other", fence=lease.fence, evidence="settled_with_receipt")
+
+    assert stolen.state == "active", stolen.state
+
+
+def test_finishing_with_an_unresolved_operation_keeps_the_lease(tmp_path) -> None:
+    from scholar_search.core.lease import LeaseStore, Operation
+
+    store = LeaseStore(tmp_path / "coordination")
+    lease = store.acquire(lease_id="L1")
+    assert lease is not None
+    store.record_operation(
+        "L1",
+        lease.fence,
+        Operation(operation_id="op-1", action="goto", state="executing", navigation_issued=True),
+    )
+
+    after = store.finish(lease_id="L1", fence=lease.fence, evidence="settled_with_receipt")
+
+    assert after.state == "unconfirmed", after.state
+
+
+def test_a_settled_operation_with_evidence_releases(tmp_path) -> None:
+    from scholar_search.core.lease import LeaseStore, Operation
+
+    store = LeaseStore(tmp_path / "coordination")
+    lease = store.acquire(lease_id="L1")
+    assert lease is not None
+    operation = Operation(operation_id="op-1", action="goto", navigation_issued=True)
+    store.record_operation("L1", lease.fence, operation.settled(outcome="landed", at=5.0))
+
+    after = store.finish(lease_id="L1", fence=lease.fence, evidence="settled_with_receipt")
+
+    assert after.state == "free", after.state
+
+
+def test_a_damaged_lease_file_is_quarantined_not_free(tmp_path) -> None:
+    from scholar_search.core.lease import LeaseStore
+
+    root = tmp_path / "coordination"
+    root.mkdir(parents=True)
+    (root / "lease.json").write_text("{not json", encoding="utf-8")
+
+    store = LeaseStore(root)
+
+    assert store.read().state == "quarantined"
+    assert store.acquire(lease_id="L1") is None, "a damaged record must not admit a new task"
+
+
+def test_an_archived_operation_is_readable_after_the_lease_is_gone(tmp_path) -> None:
+    from scholar_search.core.lease import LeaseStore, Operation
+
+    store = LeaseStore(tmp_path / "coordination")
+    lease = store.acquire(lease_id="L1")
+    assert lease is not None
+    store.record_operation(
+        "L1",
+        lease.fence,
+        Operation(
+            operation_id="op/1",
+            action="goto",
+            navigation_issued=None,
+            navigation_id="nav-1",
+            tab_id=7,
+        ),
+    )
+    store.finish(lease_id="L1", fence=lease.fence, evidence="refused_before_navigation")
+
+    archived = store.operation("op/1")
+
+    assert archived is not None
+    assert archived.navigation_issued is None, "unknown stays unknown across a restart"
+    assert archived.tab_id == 7
+    assert store.operation("never-existed") is None
     """Shared state carries facts, not the article: no body, no bytes, no signed URL."""
 
     operation = Operation(

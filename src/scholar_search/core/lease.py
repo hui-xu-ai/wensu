@@ -13,8 +13,16 @@ landed navigation into a silent second one.
 from __future__ import annotations
 
 import json
+import os
+import time
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal
+
+from .config import browser_state_dir
+from .locking import interprocess_lock
 
 # Resource states. `unconfirmed` is *not* a timeout: it is "the browser may still be acting".
 LeaseState = Literal["free", "active", "releasing", "unconfirmed", "recovering", "quarantined"]
@@ -216,3 +224,167 @@ def issued_reason(issued: bool | None) -> str:
     """
 
     return "navigation_not_issued" if issued is False else "navigation_unconfirmed"
+
+
+# -- persistence (P1a-a) ---------------------------------------------------------------
+#
+# The store is the authority; the kernel and the extension only mirror it (plan §二.1). Everything
+# here happens under a short cross-process lock: re-read, mutate, publish through a temporary file
+# with `os.replace`. The F41-02 defect was exactly this pattern missing, so it is not optional.
+
+
+def coordination_dir() -> Path:
+    """Where lease/operation records live: beside the browser, never inside a home."""
+
+    return browser_state_dir() / "coordination"
+
+
+class LeaseStore:
+    """Reads and writes the lease record. Writes are atomic and lock-protected."""
+
+    def __init__(self, root: Path | None = None, *, clock: Callable[[], float] = time.time) -> None:
+        self._root = Path(root) if root is not None else coordination_dir()
+        self._clock = clock
+
+    @property
+    def root(self) -> Path:
+        return self._root
+
+    def lease_path(self) -> Path:
+        return self._root / "lease.json"
+
+    def operations_dir(self) -> Path:
+        return self._root / "operations"
+
+    def read(self) -> Lease:
+        """The current lease, or a `free` one. A corrupt record is `quarantined`, not `free`."""
+
+        path = self.lease_path()
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return Lease(lease_id="", fence=0, state="free")
+        except (OSError, ValueError):
+            # Refusing to guess is the whole contract: a damaged file must not become an
+            # empty lease that lets the next navigation through.
+            return Lease(lease_id="", fence=0, state="quarantined")
+        if not isinstance(payload, dict) or payload.get("state") not in LEASE_STATES:
+            return Lease(lease_id="", fence=0, state="quarantined")
+        lease = Lease(
+            lease_id=str(payload.get("lease_id") or ""),
+            fence=int(payload.get("fence") or 0),
+            endpoint_epoch=str(payload.get("endpoint_epoch") or ""),
+            job_id=str(payload.get("job_id") or ""),
+            state=str(payload.get("state") or "quarantined"),
+            owner_finished=payload.get("owner_finished") is True,
+        )
+        for item in payload.get("operations") or []:
+            if isinstance(item, dict) and item.get("operation_id"):
+                lease.add(_operation_from(item))
+        return lease
+
+    def acquire(self, *, lease_id: str, job_id: str = "", endpoint_epoch: str = "") -> Lease | None:
+        """Take the browser, or return None when somebody else holds it (no waiting, no TTL)."""
+
+        with self._exclusive():
+            current = self.read()
+            if current.state != "free":
+                return None
+            lease = Lease(
+                lease_id=lease_id,
+                fence=current.fence + 1,
+                endpoint_epoch=endpoint_epoch,
+                job_id=job_id,
+                state="active",
+            )
+            self._write(lease)
+            return lease
+
+    def finish(self, *, lease_id: str, fence: int, evidence: str) -> Lease:
+        """Declare the call finished and release *if* the evidence allows it."""
+
+        with self._exclusive():
+            lease = self.read()
+            if lease.lease_id != lease_id or lease.fence != fence:
+                return lease  # an old owner cannot finish somebody else's lease
+            lease.owner_finished = True
+            allowed, _missing = lease.can_release(evidence)
+            lease.state = "releasing" if allowed else "unconfirmed"
+            if allowed:
+                lease.state = "free"
+            self._write(lease)
+            return lease
+
+    def record_operation(self, lease_id: str, fence: int, operation: Operation) -> bool:
+        """Persist one operation's facts. The receipt is whitelisted before it reaches disk."""
+
+        with self._exclusive():
+            lease = self.read()
+            if lease.lease_id != lease_id or lease.fence != fence:
+                return False
+            self.operations_dir().mkdir(parents=True, exist_ok=True)
+            path = self.operations_dir() / f"{_safe_name(operation.operation_id)}.json"
+            _atomic_write(path, operation.dumps())
+            lease.add(operation)
+            self._write(lease)
+            return True
+
+    def operation(self, operation_id: str) -> Operation | None:
+        """Archived facts for one operation. `None` means "not known", never "not issued"."""
+
+        path = self.operations_dir() / f"{_safe_name(operation_id)}.json"
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        return _operation_from(payload) if isinstance(payload, dict) else None
+
+    def _write(self, lease: Lease) -> None:
+        payload = {
+            "lease_id": lease.lease_id,
+            "fence": lease.fence,
+            "endpoint_epoch": lease.endpoint_epoch,
+            "job_id": lease.job_id,
+            "state": lease.state,
+            "owner_finished": lease.owner_finished,
+            "operations": [operation.receipt() for operation in lease.operations.values()],
+            "updated_at": self._clock(),
+        }
+        _atomic_write(self.lease_path(), json.dumps(payload, ensure_ascii=False, indent=1))
+
+    def _exclusive(self) -> AbstractContextManager[None]:
+        return interprocess_lock(self._root / "lease.lock", timeout_s=10.0)
+
+
+def _operation_from(payload: dict[str, Any]) -> Operation:
+    issued = payload.get("navigation_issued")
+    return Operation(
+        operation_id=str(payload.get("operation_id") or ""),
+        action=str(payload.get("action") or ""),
+        worker_epoch=str(payload.get("worker_epoch") or ""),
+        endpoint_epoch=str(payload.get("endpoint_epoch") or ""),
+        lease_id=str(payload.get("lease_id") or ""),
+        fence=int(payload.get("fence") or 0),
+        state=str(payload.get("state") or "unknown"),
+        navigation_issued=issued if isinstance(issued, bool) or issued is None else None,
+        navigation_id=str(payload.get("navigation_id") or ""),
+        tab_id=payload.get("tab_id") if isinstance(payload.get("tab_id"), int) else None,
+        quiescent=payload.get("quiescent") is True,
+        outcome=str(payload.get("outcome") or ""),
+        receipt_seq=int(payload.get("receipt_seq") or 0),
+        started_at=float(payload.get("started_at") or 0.0),
+        settled_at=float(payload.get("settled_at") or 0.0),
+        error_code=str(payload.get("error_code") or ""),
+        error_class=str(payload.get("error_class") or ""),
+    )
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    staging = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    staging.write_text(text, encoding="utf-8")
+    os.replace(staging, path)
+
+
+def _safe_name(value: str) -> str:
+    return "".join(char if char.isalnum() or char in "-_." else "_" for char in value)[:80] or "op"
