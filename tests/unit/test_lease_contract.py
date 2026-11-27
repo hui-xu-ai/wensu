@@ -195,7 +195,66 @@ def test_a_damaged_lease_file_is_quarantined_not_free(tmp_path) -> None:
     assert store.acquire(lease_id="L1") is None, "a damaged record must not admit a new task"
 
 
-def test_an_archived_operation_is_readable_after_the_lease_is_gone(tmp_path) -> None:
+def test_navigation_status_reports_unknown_rather_than_not_issued(tmp_path, monkeypatch) -> None:
+    """`known: false` must never be read as `navigation_issued: false` (protocol-lease.md §7)."""
+
+    from test_page_read import build_service
+
+    from scholar_search.core.lease import LeaseStore, Operation
+
+    monkeypatch.setenv("SCHOLAR_SEARCH_BROWSER_STATE", str(tmp_path / "browser-state"))
+    service = build_service(tmp_path, [])
+
+    missing = service.navigation_status("never-archived")
+
+    assert missing["known"] is False, missing
+    assert missing["operation"]["navigation_issued"] is None, missing
+    assert missing["quota_charged"] == 0
+
+    store = LeaseStore()
+    store.archive(
+        Operation(
+            operation_id="op-late",
+            action="goto",
+            state="settled",
+            quiescent=True,
+            navigation_issued=True,
+            navigation_id="nav-1",
+            tab_id=9,
+            outcome="landed",
+        )
+    )
+    found = service.navigation_status("op-late")
+
+    assert found["known"] is True, found
+    assert found["operation"]["navigation_issued"] is True
+    assert found["operation"]["navigation_id"] == "nav-1"
+    assert found["operation"]["tab_id"] == 9
+    assert found["quota_charged"] == 0
+
+
+def test_status_reports_the_lease_beside_the_lock(tmp_path, monkeypatch) -> None:
+    """`browser_busy` is the lock; `browser_lease` is the record. Different questions."""
+
+    from scholar_search import bootstrap
+    from scholar_search.core.lease import LeaseStore, Operation
+
+    monkeypatch.setenv("SCHOLAR_SEARCH_BROWSER_STATE", str(tmp_path / "browser-state"))
+    store = LeaseStore()
+    lease = store.acquire(lease_id="L1", job_id="job-1")
+    assert lease is not None
+    store.record_operation(
+        "L1",
+        lease.fence,
+        Operation(operation_id="op-1", action="goto", navigation_issued=True),
+    )
+
+    summary = bootstrap._lease_summary()
+
+    assert summary["state"] == "active", summary
+    assert summary["job_id"] == "job-1"
+    assert summary["unresolved"] == ["op-1"], summary
+    assert summary["admission_blocked"] is False, "observe mode must not claim to enforce"
     from scholar_search.core.lease import LeaseStore, Operation
 
     store = LeaseStore(tmp_path / "coordination")

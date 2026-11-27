@@ -19,6 +19,7 @@ from .core.config import (
 )
 from .core.contracts import BrowserAdapter
 from .core.errors import ScholarSearchError
+from .core.lease import LeaseStore
 from .core.locking import interprocess_lock
 from .core.planner import Planner
 from .core.policy import PolicyEngine
@@ -224,6 +225,42 @@ def _last_job() -> dict[str, object] | None:
     return payload if isinstance(payload, dict) else None
 
 
+def _lease_summary() -> dict[str, object]:
+    """What the shared lease record says, for `status` (observe only — nothing is enforced yet).
+
+    Deliberately separate from `browser_busy`: that one answers "is the file lock taken", this one
+    answers "does the record say an operation is still unaccounted for". Mixing them is how a
+    caller concludes the browser is free while an old navigation may still land.
+    """
+
+    try:
+        lease = LeaseStore().read()
+    except (OSError, ValueError):
+        return {"state": "unknown", "admission_blocked": True}
+    unresolved = [operation.operation_id for operation in lease.unresolved()]
+    return {
+        "state": lease.state,
+        "fence": lease.fence,
+        "job_id": lease.job_id or None,
+        "owner_finished": lease.owner_finished,
+        "operations": len(lease.operations),
+        "unresolved": unresolved,
+        # Observe mode: nothing refuses admission on this yet (enforce is P2).
+        "admission_blocked": False,
+    }
+
+
+def browser_lock_held() -> bool:
+    """Is the browser lock taken right now? The raw fact behind `browser_busy`."""
+
+    lock = browser_state_dir() / "browser.lock"
+    try:
+        with interprocess_lock(lock, timeout_s=0.0):
+            return False
+    except (ScholarSearchError, OSError):
+        return True
+
+
 def build_service() -> ScholarService:
     registry = ChannelRegistry()
     # Quota, cooldown and the browser lock describe what this machine did to the site, so they
@@ -267,6 +304,8 @@ def build_service() -> ScholarService:
         # last one end". Both are cheap and neither issues a browser action.
         busy = _browser_busy(endpoint, bridge_up)
         last_job = _last_job()
+        lease = _lease_summary()
+        lock_held = browser_lock_held()
 
         if brief:
             return {
@@ -285,6 +324,10 @@ def build_service() -> ScholarService:
                 # other way to know whether the previous plan finished (P5 acceptance 2026-11-26).
                 "browser_busy": busy,
                 "last_job": last_job,
+                # What the shared record knows. `browser_busy` is the lock; this is the lease —
+                # they can disagree, and when they do the lease is the more cautious answer.
+                "browser_lock_held": lock_held,
+                "browser_lease": lease,
             }
 
         return {
@@ -319,6 +362,8 @@ def build_service() -> ScholarService:
             # not otherwise observable. The lock answers it; `last_job` says how the previous one
             # ended (P5 acceptance 2026-11-26).
             "browser_busy": busy,
+            "browser_lock_held": lock_held,
+            "browser_lease": lease,
             "last_job": last_job,
             # `bridge_ready: false` on its own told a caller nothing about *why*,
             # so an agent had to go read host.log and guess — and one guessed by

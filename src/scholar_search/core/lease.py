@@ -416,7 +416,8 @@ def archive_late_reply(
     refusal proves it did not; anything else stays `navigation_issued = None`.
     """
 
-    data = reply.get("data") if isinstance(reply.get("data"), dict) else {}
+    raw = reply.get("data")
+    data: dict[str, Any] = raw if isinstance(raw, dict) else {}
     error = str(reply.get("error") or "")
     ok = reply.get("ok") is True
     refused = error.startswith("policy.") or error in {"no_active_tab", "policy.params"}

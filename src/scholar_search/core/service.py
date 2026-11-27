@@ -46,6 +46,7 @@ from .errors import (
     ScholarSearchError,
 )
 from .export import to_csv, to_endnote, to_markdown, to_ris
+from .lease import LeaseStore
 from .locking import interprocess_lock
 from .page_nav import article_navigation
 from .pageprobe import challenge_in_title, citation_doi, citation_fulltext_url, classify_mhtml
@@ -1909,6 +1910,60 @@ class ScholarService:
                 return False
         except (ScholarSearchError, OSError):
             return True
+
+    def navigation_status(self, operation_id: str) -> dict[str, Any]:
+        """What is known about one action whose caller may have given up on it.
+
+        Read-only and free: it reads the shared ledger, issues no browser action and holds no
+        lease. `known: false` means "no facts here", which is **not** the same as "the navigation
+        was not issued" — that distinction is the whole point of the tri-state
+        (docs/protocol-lease.md).
+        """
+
+        identifier = str(operation_id or "").strip()
+        if not identifier:
+            return {
+                "ok": False,
+                "known": False,
+                "error": "usage.operation_id",
+                "next": "pass the operation_id from a read's evidence or from status.last_job.",
+            }
+        operation = LeaseStore().operation(identifier)
+        if operation is None:
+            return {
+                "ok": True,
+                "known": False,
+                "target_operation_id": identifier,
+                "source": "ledger",
+                "operation": {"state": "unknown", "navigation_issued": None},
+                "quota_charged": 0,
+                "next": (
+                    "no facts were archived for this operation yet: it may still be in flight, or "
+                    "the record is gone. Do not read this as 'the navigation was not issued'."
+                ),
+            }
+        return {
+            "ok": True,
+            "known": True,
+            "target_operation_id": identifier,
+            "source": "ledger",
+            "operation": {
+                "action": operation.action,
+                "state": operation.state,
+                "navigation_issued": operation.navigation_issued,
+                "navigation_id": operation.navigation_id or None,
+                "tab_id": operation.tab_id,
+                "quiescent": operation.quiescent,
+                "outcome": operation.outcome or None,
+                "error_code": operation.error_code or None,
+                "receipt_seq": operation.receipt_seq,
+            },
+            "quota_charged": 0,
+            "next": (
+                "these are the facts that were archived; a live look at the tab is not part of "
+                "this build yet."
+            ),
+        }
 
     def last_job(self) -> dict[str, Any] | None:
         """The last finished read, for a caller that wants to know how the previous one ended."""

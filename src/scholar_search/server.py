@@ -920,6 +920,27 @@ def build_server(service: ScholarService) -> FastMCP:
             return _payload(error)
 
     @mcp.tool()
+    def navigation_status(operation_id: str) -> dict[str, Any]:
+        """Report what is known about one action whose caller may have given up on it.
+
+        Pass the `operation_id` you saw in a read's `evidence` (or in `status.last_job`). The answer
+        comes from the shared ledger: it issues no browser action and costs no quota.
+
+        **Read `known` before `navigation_issued`.** `known: false` means "no facts were archived
+        here", which is not "the navigation was not issued" — an action can still be in flight, or
+        its record may be gone. `navigation_issued` is tri-state: `true` (the browser was told to
+        navigate), `false` (it was refused before navigating), `null` (nobody knows, which includes
+        every timeout).
+
+        This reports archived facts only; it does not look at the tab live.
+        """
+
+        try:
+            return service.navigation_status(operation_id)
+        except (ScholarSearchError, OSError, ValueError) as error:
+            return _payload(error)
+
+    @mcp.tool()
     def snapshot() -> dict[str, Any]:
         """Save the page the user has open as MHTML — one file with its images and CSS.
 

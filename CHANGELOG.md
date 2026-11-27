@@ -36,6 +36,34 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.46] - 2026-11-27
+
+租约与操作回执的第 2、3 步（`observe` 模式：只记录与追问，不强制准入）。
+
+### Added — `navigation_status`：问清一次动作的下落
+
+新工具 `navigation_status(operation_id)`：读共享账本，回答一次动作"到底有没有发出导航"。
+不发浏览器动作、不扣额度。**先看 `known`**：
+
+* `known: false` = 账本里没有事实（可能仍在飞，或记录已不在了），**不等于**"没有发出"；
+* `navigation_issued` 是三值：`true` 已发出 / `false` 导航前被拒 / `null` 不知道（所有超时都属这一档）。
+
+这些事实来自**迟到的原始回包**：0.14.46 起 `BridgeHost` 超时后不再丢弃请求，扩展迟到的
+`action_result` 会被归档为该操作的事实（`navigation_id`/`tab_id`/`outcome`），且**绝不投递给下一个调用方**。
+查看当前标签页的实时状态不在本版范围内。
+
+### Added — `status` 分开报锁与租约
+
+`browser_busy`（锁是否被占用）之外新增 `browser_lock_held`（原始锁事实）与 `browser_lease`
+（`state`/`fence`/`job_id`/`owner_finished`/`operations`/`unresolved`/`admission_blocked`）。
+两者回答不同问题：锁表示"有没有计划在跑"，租约表示"记录里还有没有未交代的操作"。
+`admission_blocked` 在 `observe` 阶段恒为 `false`——本版**不拒绝**任何请求，强制准入是后续阶段。
+
+### Changed — 工具数 9 → 10
+
+`schemas/tools.json` 与工具清单测试同步；`navigation_status` 的回包字段与
+`docs/protocol-lease.md` §7 一致。
+
 ## [0.14.45] - 2026-11-27
 
 ADR 0030 第三片第一步：内核指定标签页（附加字段，行为不变）。

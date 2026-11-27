@@ -488,6 +488,29 @@
       }
     },
     {
+      "name": "navigation_status",
+      "description": "Report what is known about one action whose caller may have given up on it.\n\nPass the `operation_id` you saw in a read's `evidence` (or in `status.last_job`). The answer\ncomes from the shared ledger: it issues no browser action and costs no quota.\n\n**Read `known` before `navigation_issued`.** `known: false` means \"no facts were archived\nhere\", which is not \"the navigation was not issued\" — an action can still be in flight, or\nits record may be gone. `navigation_issued` is tri-state: `true` (the browser was told to\nnavigate), `false` (it was refused before navigating), `null` (nobody knows, which includes\nevery timeout).\n\nThis reports archived facts only; it does not look at the tab live.",
+      "inputSchema": {
+        "properties": {
+          "operation_id": {
+            "title": "Operation Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation_id"
+        ],
+        "title": "navigation_statusArguments",
+        "type": "object",
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "navigation_statusDictOutput",
+        "type": "object"
+      }
+    },
+    {
       "name": "snapshot",
       "description": "Save the page the user has open as MHTML — one file with its images and CSS.\n\nThis is the \"read this paper\" entry point for pages outside the two channels:\nthe user opens the article in the browser, `snapshot` writes\n`wensu-pages/<title> [<host>] <time>.mhtml` into the download folder, and\n`page2md` turns that file into Markdown.\n\nIt issues no request of its own — it reads the tab that is already open — so it\nspends **no quota** and is not limited to the channel domains. `status` still\nreports `bridge_ready`; a false value means the extension is not connected.",
       "inputSchema": {
