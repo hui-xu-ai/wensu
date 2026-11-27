@@ -36,6 +36,64 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.15.0] - 2026-11-27
+
+一个从小版本里长出来的次版本：**看页面的方式变了**。0.14.32 → 0.14.65 的每一版都在修"读一篇文章"
+这条链上的具体缺陷；这一版把它收束成一条有契约的路径，并把散在 34 个补丁里的判断写成 ADR。
+
+### 用户能感觉到的变化
+
+| 场景 | 0.14.32 之前 | 现在 |
+|---|---|---|
+| 遇到机器人验证 | 报一句"被拦"，再调一次往往把页面刷掉 | 等你点完，然后 `page_read(resume_job_id=…)` **零导航**续读，0 额度 |
+| 网页慢 | 抓取预算到期即判失败 | 抓取时机由**标签页元数据已静止**决定，预算只是兜底；兜底到期**仍然抓一次** |
+| 双重导航（私有补丁） | 捕获归属算错，报 `unverified_capture` | 以最后一次导航为准，真实样本已验证 `match` |
+| URL-only 读取 | 与空 DOI 比较，正常页面被误拒 | 以地址的文章身份为准 |
+| 网络慢的页面被预算判死 | 15 s 抓取预算 | 55 s（贴着宿主 60 s 上限），且超时不等于"页面没有全文" |
+| 捕获文件命名 | 标题+哈希 | 页面自报的 DOI（一篇一文一文件） |
+
+### 契约
+
+- **ADR 0031**：就绪观测与捕获回执。三层证据（元数据 → 产物 → 正文）、`snapshot(mode=observe)`
+  零字节观测、四类预算互不推导、**I1–I10 不变式**；
+- `docs/protocol-lease.md` §10：参数闭合、观测/捕获回执字段、混合版本的降级语义；
+- `resume_job_id` 与 `refresh` 互斥；旧回包不被改写，新回包用 `resumed_from` 指回。
+
+### 这一版之前的最后两处实错（0.14.60）
+
+- `_page_stage` 把任何 `status: timeout` 推导成 `navigate` ⇒ 抓取超时被写成"页面没到达"；
+  现在**显式 stage 优先**；
+- `retryable` 曾对"抓取超时"一律为真 ⇒ 可能叠第二次物理抓取；现在只有**确定没发出**才可重试。
+
+### Added — 一次读取的失败形状终于叫得出名字（0.15.0）
+
+抓取超时不再以 `ACTION_BRIDGE_ERROR: TIMED OUT` 的面目出现，而是：
+
+```json
+{"status": "no_page", "reason": "capture_unconfirmed", "stage": "capture",
+ "terminal": "timeout", "mhtml_path": null, "operation_id": "…", "capture_issued": true}
+```
+
+`next` 直接指向 `navigation_status(<operation_id>)`，并明确"不要再抓一次"——第一次可能还在跑。
+`capture_issued` 保持三值：`true` 已发出、`false` 确定没发出、`null` 不知道。
+
+### 诊断开关（0.14.65）
+
+`SCHOLAR_SEARCH_READINESS_BUDGET_MS`（50–300000）、`SCHOLAR_SEARCH_SNAPSHOT_TIMEOUT_MS`（200–55000）。
+只读本进程环境、不接受请求参数、只能调小不能调大、有下限。
+
+### 验证状态（诚实版）
+
+- 真机已过：ADR 0031 全链（自然遇墙 → 人工放行 → 零导航续读 617 ms/0 额度）、
+  无墙直读 `capture_navigation: match`、观测预算耗尽仍抓、`coordination_writable`、
+  worker 能力握手；
+- 离线已过：122 条用例、11 门发布闸门、真 worker 探针（观测 813/1021 ms 且 `saveAsMHTML` 0 次、
+  租约围栏 `policy.fence`）；
+- **仍未覆盖**：真实浏览器里的抓取超时/迟到回执（200 ms 预算下抓取仍然成功完成），
+  以及自然出现的 403/429 冷却路径。见 `work/tasks/2026-11-27-lease-receipt/unverified.md`。
+
+`background-0.15.0.js`。
+
 ## [0.14.65] - 2026-11-27
 
 ### Added — 两个诊断用预算开关（让"只剩等自然故障"的两条分支可以当场验）

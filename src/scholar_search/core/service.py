@@ -1778,9 +1778,37 @@ class ScholarService:
             # gets the old behaviour, and the answer says which one ran.
             readiness = self._observe_before_capture(final_url, publisher, spec, last)
             navigation_tab = last.get("tab_id")
-            saved = self._snapshot_locked(
-                tab="work", tab_id=navigation_tab if isinstance(navigation_tab, int) else None
-            )
+            try:
+                saved = self._snapshot_locked(
+                    tab="work", tab_id=navigation_tab if isinstance(navigation_tab, int) else None
+                )
+            except ActionError as error:
+                # ADR 0031: a capture that did not come back is `capture` / `capture_unconfirmed`,
+                # not an opaque bridge error and not "the page has no body". The bytes may still
+                # arrive — `navigation_status(<operation_id>)` answers that, and a caller must not
+                # start a second capture meanwhile.
+                if "timeout" in (getattr(error, "code", "") or "").casefold():
+                    return {
+                        "status": "no_page",
+                        "reason": "capture_unconfirmed",
+                        "stage": "capture",
+                        "code": getattr(error, "code", "") or "bridge.timeout",
+                        "doi": identifier,
+                        "publisher": publisher.name,
+                        "final_url": final_url,
+                        "mhtml_path": None,
+                        "readiness": readiness,
+                        "operation_id": getattr(error, "operation_id", "") or "",
+                        "capture_issued": getattr(error, "operation_issued", None),
+                        "quota_charged": _charged_units(outcomes),
+                        "quota_reason": "navigate",
+                        "next": (
+                            "the capture was sent and never came back: ask "
+                            "`navigation_status(<operation_id>)` about it instead of capturing "
+                            "again — the browser may still be producing the file."
+                        ),
+                    }
+                raise
             probe = _classify_saved(saved, url=final_url)
             if _still_rendering(probe):
                 # No article body, but also no sign-in prompt: the page is still painting,
