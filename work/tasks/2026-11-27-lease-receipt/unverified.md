@@ -1,6 +1,25 @@
-# 未验证清单（租约 / 回执）
+# 未验证清单（租约 / 回执 / 就绪）
 
 记录"已发布但没有行为验证"的东西，避免下一轮把它当成已验证。
+
+## 0. ADR 0031（就绪观测）—— 已真机验收，两条分支仍未覆盖
+
+真机验收：`docs/reviews/wensu-0.14.64-acceptance-2026-11-27.md`（纯官方 0.14.64，无私有补丁）。
+
+| 项 | 结果 | 我离线核过 |
+|---|---|---|
+| `features` 四项 | 全在 | ✅ `acceptance.json` 的 `preflight_status` |
+| 首次直读 | 自然遇墙：`blocked/timeout/wall`、`wait 10087 ms`、`quota 1` | ✅ |
+| **零导航续读** | `ok/ok/publish`、`readiness.strategy=observe`、`state=candidate`、`617 ms`、`budget_exhausted=false`、`quota_charged=0`、`resumed_from` 指回、**审计窗口 0 行 `goto`** | ✅ `calls.resume.reply` 与 `actions.jsonl` |
+| 正文与文件 | DOI 目录、2,976,528 B、SHA 与报告一致；Markdown 与既有完整正文参考**逐字一致** | ✅ 重算 SHA 通过 |
+| 补充轮 | 同一路径再验一次（619 ms、quota 0） | ✅ 目录与哈希在 |
+
+**仍未覆盖（报告已明确，我照抄认领）**：
+
+1. **无验证阻断时从首次导航直接发布**（`capture_navigation: match` 分支）——本轮首读停在墙；
+2. **观察预算耗尽分支**（`budget_exhausted: true` 仍抓一次，I3）——两轮都在 `candidate` 就抓了。
+
+这两条只有等自然样本，**不要为它们制造访问**。
 
 ## 1. worker 侧的旧代围栏（0.14.52）
 
@@ -8,13 +27,14 @@
 - 现状：只有**静态契约测试**（`tests/unit/test_capability_contract.py::test_the_worker_implements_the_lease_fence`）断言这几处存在且接进了消息分派。
 - 缺什么：一次真行为的回放——`lease_sync` 后，旧 fence 的动作必须被拒、当前 fence 与无信封的动作必须放行。
 
-### 我试过的两次（都失败，都删掉了）
+### 我试过的三次（都失败，都删掉了）
 
 1. **两条管道 + 脚本化 worker**：宿主侧握手 OK，但探针要驱动的是 worker 而不是宿主，方向错了。
 2. **VM + 假 `chrome` + 端口**：加载成功，但 `onConnect`/`onMessage` 的回调没有收到任何消息，四条全 `null`。
-3. **VM + `context.onHostMessage(message, channel)`**（照 `gate_watch_probe.js` 的既有模式）：进程不退出，
-   没有任何输出——最可能是 worker 顶层的 `connect()`/定时器让 VM 一直活着，而 `console.log` 在
-   异步链之前就被挡住了。
+3. **VM + `context.onHostMessage(message, channel)`**：进程不退出，没有任何输出。
+
+**第四次成功**（`tests/js/readiness_probe.js`）：照 `gate_watch_probe.js` 的 `makeChrome`/`load`/`send`
+三段，末尾显式 `process.exit(0)`。同样的路子可以直接用来补这条围栏的行为验证。
 
 ### 建议的补法
 
