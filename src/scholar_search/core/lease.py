@@ -201,6 +201,31 @@ class Lease:
         return (not missing, tuple(missing))
 
 
+# Protocol features this build needs, by name and minimum version. A peer that does not name them
+# in its handshake does not have them — "unknown" is not "supported" (docs/protocol-lease.md §8).
+LEASE_FEATURES: dict[str, int] = {"lease_control": 1, "operation_receipts": 1}
+
+
+def feature_supported(build: dict[str, Any] | None, name: str, minimum: int = 1) -> bool:
+    """Does the connected build advertise `name` at `minimum` or above?"""
+
+    if not isinstance(build, dict):
+        return False
+    features = build.get("features")
+    if not isinstance(features, dict):
+        return False
+    value = features.get(name)
+    return isinstance(value, int) and value >= minimum
+
+
+def missing_features(build: dict[str, Any] | None) -> list[str]:
+    """Which required features the connected build does not advertise."""
+
+    return [
+        name for name in LEASE_FEATURES if not feature_supported(build, name, LEASE_FEATURES[name])
+    ]
+
+
 def next_states(state: str) -> frozenset[str]:
     """The allowed transitions. Read this as the answer to "may it become free on its own?"."""
 

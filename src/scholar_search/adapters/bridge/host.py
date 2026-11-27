@@ -178,6 +178,17 @@ class BridgeHost:
                 for item in (reply.get("channel_capabilities") or [])
                 if isinstance(item, str)
             ],
+            # Optional protocol features the worker names, and which worker instance this is.
+            # An older worker answers neither, and that reads as "not supported" rather than as
+            # an error (docs/protocol-lease.md §8).
+            "features": {
+                str(name): int(value)
+                for name, value in (reply.get("features") or {}).items()
+                if isinstance(name, str) and isinstance(value, int)
+            }
+            if isinstance(reply.get("features"), dict)
+            else {},
+            "worker_epoch": str(reply.get("worker_epoch") or ""),
         }
         self._handshaked = True
         return True

@@ -10,7 +10,7 @@ from __future__ import annotations
 import io
 from pathlib import Path
 
-from scholar_search.adapters.bridge.host import BridgeHost, write_frame
+from scholar_search.adapters.bridge.host import BridgeHost, read_frame, write_frame
 from scholar_search.core.lease import LeaseStore, archive_late_reply
 
 
@@ -130,6 +130,86 @@ def test_a_reply_arriving_at_the_timeout_boundary_is_still_archived(tmp_path: Pa
     assert [item[0] for item in seen] == ["rid-boundary"]
     archived = store.operation("rid-boundary")
     assert archived is not None and archived.tab_id == 3
+
+
+def _handshaked(ack: dict[str, object]) -> BridgeHost:
+    """A real handshake over two pipes with a scripted worker on the other side."""
+
+    import os
+    import threading
+
+    reply_r, reply_w = os.pipe()  # worker → host
+    hello_r, hello_w = os.pipe()  # host → worker
+    host = BridgeHost(stdin=os.fdopen(reply_r, "rb"), stdout=os.fdopen(hello_w, "wb"))
+    threading.Thread(target=host.serve_extension, daemon=True).start()
+
+    def worker() -> None:
+        with os.fdopen(hello_r, "rb") as incoming:
+            hello = read_frame(incoming)
+        assert hello is not None and hello.get("type") == "hello", hello
+        with os.fdopen(reply_w, "wb") as outgoing:
+            write_frame(outgoing, {"type": "hello_ack", "id": hello["id"], "protocol": 1, **ack})
+
+    threading.Thread(target=worker, daemon=True).start()
+    # `_handshake` takes an absolute deadline, not a budget.
+    assert host._handshake(host._clock() + 2.0) is True
+    return host
+
+
+def test_the_handshake_keeps_the_advertised_features_and_worker_epoch() -> None:
+    """P1b: a peer that names its features is believed; one that stays silent is not."""
+
+    from scholar_search.core.lease import missing_features
+
+    host = _handshaked(
+        {
+            "type": "hello_ack",
+            "protocol": 1,
+            "version": "0.14.49",
+            "worker": "background-0.14.49.js",
+            "capabilities": ["goto", "snapshot", "sleep", "await_gate_clear"],
+            "features": {"lease_control": 1, "operation_receipts": 1},
+            "worker_epoch": "epoch-7",
+        }
+    )
+
+    assert host.build["features"] == {"lease_control": 1, "operation_receipts": 1}
+    assert host.build["worker_epoch"] == "epoch-7"
+    assert missing_features(host.build) == []
+
+
+def test_an_old_worker_without_features_is_not_treated_as_supporting_them() -> None:
+    from scholar_search.core.lease import missing_features
+
+    host = _handshaked(
+        {
+            "type": "hello_ack",
+            "protocol": 1,
+            "capabilities": ["goto", "sleep"],
+        }
+    )
+
+    assert host.build["features"] == {}
+    assert host.build["worker_epoch"] == ""
+    assert missing_features(host.build) == ["lease_control", "operation_receipts"]
+
+
+def test_the_worker_advertises_the_features_it_will_negotiate() -> None:
+    """The static half of the contract: the shipped worker must name them in `hello_ack`."""
+
+    from pathlib import Path
+
+    from scholar_search.core.lease import LEASE_FEATURES
+
+    extension = Path(__file__).resolve().parents[2] / "extension"
+    worker = next(extension.glob("background-*.js"))
+    text = worker.read_text(encoding="utf-8")
+
+    assert "const FEATURES = {" in text
+    for name in LEASE_FEATURES:
+        assert f"{name}: 1" in text, name
+    assert "features: FEATURES," in text
+    assert "worker_epoch:" in text
 
 
 def test_a_navigation_then_domain_refusal_is_not_written_as_not_issued(tmp_path: Path) -> None:

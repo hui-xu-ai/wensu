@@ -36,6 +36,35 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.49] - 2026-11-27
+
+P1b 的第一步：**能力协商**（`features` + `worker_epoch`）。仍然不强制、不拒绝任何请求。
+
+### Added — 双方按名字协商特性，不按版本号猜
+
+worker 在 `hello_ack` 里声明它能谈的特性与自己的实例身份：
+
+```js
+const FEATURES = { lease_control: 1, operation_receipts: 1 };
+// hello_ack: { ..., features: FEATURES, worker_epoch: <uuid> }
+```
+
+宿主把这二者放进 `build`，`BridgeAdapter.info()` 原样透出，于是 `status.bridge_build` 里能直接看到
+"正在跑的那个 worker 支持什么"。内核侧有 `lease.feature_supported` / `missing_features`：
+需求清单是 `LEASE_FEATURES = {"lease_control": 1, "operation_receipts": 1}`。
+
+**"没说"不等于"支持"**：旧 worker 不报 `features`，`missing_features()` 返回两项都在缺；将来的
+`enforce` 模式据此回 `lease_protocol_unavailable`，而不是静默退回旧行为。
+
+### 为什么先做这一步
+
+`enforce`（强制准入）要么拒绝请求、要么在旧宿主上假装保护——后者比不保护更糟。先让三层能互相
+声明"我会什么"，`enforce` 才有可判定的前提。这也是 `plan.md` 里 P1b 与 P2 的分界。
+
+`worker_epoch` 是这一版 worker 实例的身份：重建后的 worker 是另一个 epoch，它的续体不能被当成上一个的。
+
+`background-0.14.49.js`。
+
 ## [0.14.48] - 2026-11-27
 
 0.14.47 复验的两项（`docs/reviews/wensu-0.14.47-lease-receipt-2026-11-27.md`）。报告点出的第一条

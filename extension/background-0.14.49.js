@@ -12,6 +12,9 @@ const PROTOCOL_VERSION = 1;
 // injected into the two channels' domains (audit 2026-11-26, F08). The host refuses such a plan
 // before it navigates.
 const CAPABILITIES = ["goto", "snapshot", "sleep", "await_gate_clear"];
+// Optional protocol features this worker understands, by name and version. The kernel enables
+// them only when the running worker names them here (docs/protocol-lease.md §8).
+const FEATURES = { lease_control: 1, operation_receipts: 1 };
 // Verbs that need `content/actions.js`, which the manifest injects into the channels' domains
 // (and nowhere else). Advertising them for a publisher page is what made `wait_for` a phantom.
 const CHANNEL_CAPABILITIES = [
@@ -693,6 +696,16 @@ async function onHostMessage(message, channel) {
       worker: background.service_worker || "",
       capabilities: CAPABILITIES,
       channel_capabilities: CHANNEL_CAPABILITIES,
+      // What this build can negotiate (docs/protocol-lease.md §8). A kernel that needs lease
+      // control asks for these by name instead of guessing from the version number, and an older
+      // worker simply answers nothing here — which the kernel reads as "not supported".
+      features: FEATURES,
+      // Identity of *this* worker instance: a rebuilt worker is a different epoch, and its
+      // continuations must not be mistaken for the previous one's.
+      worker_epoch:
+        typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     });
     return;
   }
