@@ -55,6 +55,9 @@ class BridgeAdapter:
         self._reader: Any = None
         self._token: str | None = None
         self._port: int | None = None
+        # The id of the most recent action, kept so a failed send can still tell the caller which
+        # operation to ask about (F46-01).
+        self._last_request_id: str = ""
         self.domains: tuple[str, ...] | None = None
 
     # -- discovery -----------------------------------------------------
@@ -351,6 +354,7 @@ class BridgeAdapter:
         # `bridge.error: timed out` on a run that had in fact succeeded.
         self._socket.settimeout(max(self._timeout, timeout_ms / 1000 + BRIDGE_REPLY_MARGIN_S))
         request_id = uuid.uuid4().hex
+        self._last_request_id = request_id
         request = {
             "id": request_id,
             "token": self._token,
@@ -378,6 +382,10 @@ class BridgeAdapter:
             raise ConnectionError("bridge reply id does not match the request")
 
         data = dict(reply.get("data") or {})
+        # The id the host is archiving a late reply under (plan §三: an operation identity the
+        # caller can quote). It travels with every outcome — including the ones the caller reads
+        # after a timeout — and it is *this* action's id, never the previous one's.
+        data["operation_id"] = request_id
 
         url = reply.get("url") or data.get("url")
         return ActionOutcome(
@@ -398,7 +406,15 @@ class BridgeAdapter:
             # again instead of reading from a poisoned stream. Without this, one
             # slow navigation made every later action fail.
             self.close()
-            return ActionOutcome(action=action, ok=False, error=f"bridge.error: {exc}")
+            # The request id of the action that timed out, so the caller can ask the ledger what
+            # became of it. Without this the tool told people to "pass the operation_id" and no
+            # id reached them at all (retest 2026-11-27, F46-01).
+            return ActionOutcome(
+                action=action,
+                ok=False,
+                error=f"bridge.error: {exc}",
+                data={"operation_id": self._last_request_id},
+            )
 
     def close(self) -> None:
         for closable in (self._reader, self._socket):

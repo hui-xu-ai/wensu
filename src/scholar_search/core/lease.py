@@ -12,6 +12,7 @@ landed navigation into a silent second one.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
@@ -323,7 +324,7 @@ class LeaseStore:
             if lease.lease_id != lease_id or lease.fence != fence:
                 return False
             self.operations_dir().mkdir(parents=True, exist_ok=True)
-            path = self.operations_dir() / f"{_safe_name(operation.operation_id)}.json"
+            path = self.operations_dir() / f"{_operation_key(operation.operation_id)}.json"
             _atomic_write(path, operation.dumps())
             lease.add(operation)
             self._write(lease)
@@ -332,12 +333,20 @@ class LeaseStore:
     def operation(self, operation_id: str) -> Operation | None:
         """Archived facts for one operation. `None` means "not known", never "not issued"."""
 
-        path = self.operations_dir() / f"{_safe_name(operation_id)}.json"
+        if not _valid_id(operation_id):
+            return None
+        path = self.operations_dir() / f"{_operation_key(operation_id)}.json"
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return None
-        return _operation_from(payload) if isinstance(payload, dict) else None
+        if not isinstance(payload, dict):
+            return None
+        # The name on the file is a hash, so the record's own id is the identity: without this
+        # check a look-alike key returned somebody else's facts (retest 2026-11-27, F46-05).
+        if str(payload.get("operation_id") or "") != operation_id:
+            return None
+        return _operation_from(payload)
 
     def archive(self, operation: Operation) -> None:
         """Persist one operation's facts even when no lease is held any more.
@@ -348,7 +357,7 @@ class LeaseStore:
 
         with self._exclusive():
             self.operations_dir().mkdir(parents=True, exist_ok=True)
-            path = self.operations_dir() / f"{_safe_name(operation.operation_id)}.json"
+            path = self.operations_dir() / f"{_operation_key(operation.operation_id)}.json"
             _atomic_write(path, operation.dumps())
             lease = self.read()
             if lease.lease_id and lease.lease_id == operation.lease_id:
@@ -402,8 +411,18 @@ def _atomic_write(path: Path, text: str) -> None:
     os.replace(staging, path)
 
 
-def _safe_name(value: str) -> str:
-    return "".join(char if char.isalnum() or char in "-_." else "_" for char in value)[:80] or "op"
+def _valid_id(value: str) -> bool:
+    """An operation id we accept from a caller: ours are hex, and nothing else may alias them."""
+
+    if not value or len(value) > 128:
+        return False
+    return all(char.isalnum() or char in "-_." for char in value)
+
+
+def _operation_key(value: str) -> str:
+    """The file name for an operation: a digest, so two different ids cannot share a record."""
+
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:32]
 
 
 def archive_late_reply(
@@ -412,24 +431,48 @@ def archive_late_reply(
     """Turn one late `action_result` into an archived operation, without inventing facts.
 
     This is the *only* place a timed-out action's fate gets recorded. It never returns the reply to
-    a caller, and it refuses to guess: `ok` proves the action ran; an explicit pre-navigation
-    refusal proves it did not; anything else stays `navigation_issued = None`.
+    a caller, and it refuses to guess. The order matters and was wrong once: a `policy.domain`
+    refusal arrives **after** the navigation, carrying `navigation_id`, and classifying by the error
+    prefix wrote `issued: false` for a page that had in fact been navigated — the one answer that
+    invites a caller to navigate again (retest 2026-11-27, F46-02).
     """
 
     raw = reply.get("data")
     data: dict[str, Any] = raw if isinstance(raw, dict) else {}
     error = str(reply.get("error") or "")
     ok = reply.get("ok") is True
-    refused = error.startswith("policy.") or error in {"no_active_tab", "policy.params"}
+    navigated = bool(data.get("navigation_id")) or _attempts(data) >= 1
+    # Pre-navigation refusals only. Everything else — including policy errors raised *after* the
+    # tab moved, HTTP 403/429, and unknown bridge failures — stays unknown unless it proves a
+    # navigation happened.
+    refused_before_navigation = error in {
+        "policy.url_scheme",
+        "policy.params",
+        "no_active_tab",
+    }
+    if ok or navigated:
+        issued: bool | None = True
+    elif refused_before_navigation:
+        issued = False
+    else:
+        issued = None
     operation = Operation(
         operation_id=request_id,
         action=action,
         state="settled",
         quiescent=True,
-        navigation_issued=True if ok else (False if refused else None),
+        navigation_issued=issued,
         navigation_id=str(data.get("navigation_id") or ""),
         tab_id=data.get("tab_id") if isinstance(data.get("tab_id"), int) else None,
-        outcome="landed" if ok else "refused" if refused else "unknown",
+        outcome=(
+            "landed"
+            if ok
+            else "navigated_then_refused"
+            if navigated
+            else "refused"
+            if issued is False
+            else "unknown"
+        ),
         error_code=error,
         started_at=at,
         settled_at=at,
@@ -437,3 +480,8 @@ def archive_late_reply(
     )
     store.archive(operation)
     return operation
+
+
+def _attempts(data: dict[str, Any]) -> int:
+    value = data.get("navigation_attempts")
+    return value if isinstance(value, int) and value > 0 else 0

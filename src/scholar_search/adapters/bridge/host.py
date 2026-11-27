@@ -123,11 +123,18 @@ class BridgeHost:
                 self._closed = True
                 self._lock.notify_all()
 
-    def _wait(self, request_id: str, deadline: float) -> dict[str, Any] | None:
+    def _wait(self, request_id: str, deadline: float, action: str = "") -> dict[str, Any] | None:
         with self._lock:
             while self._pending.get(request_id) is None and not self._closed:
                 remaining = deadline - self._clock()
                 if remaining <= 0:
+                    # The transfer out of `_pending` happens in *this* critical section. Doing it
+                    # in the caller left a gap where a reply was in neither map and got dropped —
+                    # the one fact that answers "did it navigate" (retest 2026-11-27, F46-03).
+                    if request_id in self._pending and self._pending[request_id] is None:
+                        self._pending.pop(request_id, None)
+                        if action:
+                            self._orphans[request_id] = {"action": action, "at": self._clock()}
                     break
                 self._lock.wait(remaining)
             return self._pending.pop(request_id, None)
@@ -244,13 +251,10 @@ class BridgeHost:
                 self._pending.pop(request_id, None)
             return {"ok": False, "error": "bridge.write", "id": request_id}
 
-        reply = self._wait(request_id, deadline)
+        reply = self._wait(request_id, deadline, action)
         if reply is None:
-            # The caller is about to be told "timeout". Whether the browser navigated is still
-            # open, so the request id stays known as an orphan: a later reply for it is the only
-            # evidence that can answer that question (plan §二.3, P1a).
-            with self._lock:
-                self._orphans[request_id] = {"action": action, "at": self._clock()}
+            # Whether the browser navigated is still open. The orphan entry was registered inside
+            # `_wait`'s critical section, so a reply arriving at the boundary cannot be lost.
             return {
                 "ok": False,
                 "error": "bridge.timeout" if not self.closed else "bridge.closed",

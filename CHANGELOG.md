@@ -36,6 +36,50 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.47] - 2026-11-27
+
+0.14.46 复验的 2 条 P1 与 3 条 P2（`docs/reviews/wensu-0.14.46-lease-receipt-2026-11-27.md`）。
+
+### Fixed — 超时之后调用方拿不到 `operation_id`（F46-01，P1）
+
+`navigation_status` 的说明让人"从 `evidence` 或 `last_job` 取 operation_id"，而那条链路根本没把 id 送到：
+适配器生成 transport id 后只取 `reply.data`，超时异常的 outcome 也不带 id，`evidence`/`last_job` 白名单里
+也没有它。现在：
+
+* `BridgeAdapter` 把本次动作的 id 放进 outcome 的 `data.operation_id`（超时也一样）；
+* 失败动作转成 `ActionError` 时带上 `operation_id`；
+* 读取回包顶层、`evidence`、`last_job` 都带它。
+
+它指的是**失败或未确认的那一次动作**，不是前一条成功 goto 的 id。
+
+### Fixed — `policy.domain` 被误判为"未发出"（F46-02，P1）
+
+`archive_late_reply` 曾把任何 `policy.*` 都写成 `navigation_issued: false`。但 worker 在**已经导航、已取得
+落地页之后**仍可能因越域返回 `policy.domain`，回包里带着 `navigation_attempts`、`tab_id`、`navigation_id`。
+按错误前缀猜 false 是最危险的一种错——它邀请调用方再导航一次。现在按证据判断：
+
+| 回包 | issued | outcome |
+|---|---|---|
+| `ok: true`，或带 `navigation_id` / `navigation_attempts ≥ 1` | `true` | `landed` / `navigated_then_refused` |
+| 仅导航前拒绝（`policy.url_scheme`、`policy.params`、`no_active_tab`） | `false` | `refused` |
+| 其他（HTTP 403/429、未知 bridge 错误） | `null` | `unknown` |
+
+### Fixed — 超时交接的空档会丢回包（F46-03，P2）
+
+`_wait` 弹出 pending 与调用方登记 orphan 之间有两段临界区，落在中间的回包两边都不认。现在
+pending→orphan 的转移在 `_wait` 的同一个临界区内完成，边界上到达的回包也会被归档一次。
+
+### Fixed — 账本读不出来时声称"已阻断准入"（F46-04，P2）
+
+`admission_blocked` 描述的是**本版实际准入行为**，不能同时用来表达"记录不可读"。`observe` 阶段它恒为
+`false`；读取失败改用 `readable: false` + `error: "lease_state_unreadable"` 报告。
+
+### Fixed — 不存在的 id 可能命中别人的账本（F46-05，P2）
+
+文件名由 id 清洗而来，`probe/collision` 与 `probe?collision` 会落到同一文件，而读取时又不核对记录里的 id。
+现在文件名是 id 的摘要，读取时必须 `payload.operation_id == 请求 id`；超过 128 字符或含 `[A-Za-z0-9._-]`
+之外的字符直接判未知，不再截断或替换。
+
 ## [0.14.46] - 2026-11-27
 
 租约与操作回执的第 2、3 步（`observe` 模式：只记录与追问，不强制准入）。

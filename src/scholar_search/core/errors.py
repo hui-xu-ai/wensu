@@ -40,10 +40,14 @@ class ActionError(ScholarSearchError):
         code: str,
         stage: str | None = None,
         diagnostics: dict[str, object] | None = None,
+        operation_id: str = "",
     ) -> None:
         super().__init__(message)
         self.verb = verb
         self.code = code
+        # Which action this was, so a caller told "timeout" can ask the ledger what became of it
+        # (F46-01). Empty when the action never reached the wire.
+        self.operation_id = operation_id
         # Where in the plan it stopped. `stage` is a short kind label such as
         # `wait.capture` or `click.submit`, never a selector: three different waits in
         # one WoS search used to be indistinguishable from the outside.

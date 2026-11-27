@@ -195,6 +195,44 @@ def test_a_damaged_lease_file_is_quarantined_not_free(tmp_path) -> None:
     assert store.acquire(lease_id="L1") is None, "a damaged record must not admit a new task"
 
 
+def test_two_ids_that_would_alias_one_file_stay_separate(tmp_path) -> None:
+    """F46-05: sanitising the id into a filename let `probe/collision` answer for `probe?collision`.
+
+    The file name is a digest now, and the record's own id is checked on read.
+    """
+
+    from scholar_search.core.lease import LeaseStore, Operation
+
+    store = LeaseStore(tmp_path / "coordination")
+    store.archive(Operation(operation_id="probeA", action="goto", navigation_issued=True))
+
+    assert store.operation("probe?collision") is None
+    assert store.operation("probe/collision") is None
+    assert store.operation("probeA" + "x" * 200) is None, "over-long ids are refused, not truncated"
+    assert store.operation("probeA") is not None
+
+
+def test_an_unreadable_lease_record_does_not_claim_to_block(tmp_path, monkeypatch) -> None:
+    """F46-04: `admission_blocked` describes what admission does, not how healthy the record is."""
+
+    from scholar_search import bootstrap
+    from scholar_search.core.lease import LeaseStore
+
+    monkeypatch.setenv("SCHOLAR_SEARCH_BROWSER_STATE", str(tmp_path / "browser-state"))
+
+    def explode() -> object:
+        raise PermissionError("no access")
+
+    monkeypatch.setattr(LeaseStore, "read", lambda self: explode())
+
+    summary = bootstrap._lease_summary()
+
+    assert summary["state"] == "unknown", summary
+    assert summary["readable"] is False, summary
+    assert summary["error"] == "lease_state_unreadable", summary
+    assert summary["admission_blocked"] is False, "observe mode must never claim to enforce"
+
+
 def test_navigation_status_reports_unknown_rather_than_not_issued(tmp_path, monkeypatch) -> None:
     """`known: false` must never be read as `navigation_issued: false` (protocol-lease.md §7)."""
 
@@ -264,7 +302,7 @@ def test_status_reports_the_lease_beside_the_lock(tmp_path, monkeypatch) -> None
         "L1",
         lease.fence,
         Operation(
-            operation_id="op/1",
+            operation_id="op-1",
             action="goto",
             navigation_issued=None,
             navigation_id="nav-1",
@@ -273,7 +311,7 @@ def test_status_reports_the_lease_beside_the_lock(tmp_path, monkeypatch) -> None
     )
     store.finish(lease_id="L1", fence=lease.fence, evidence="refused_before_navigation")
 
-    archived = store.operation("op/1")
+    archived = store.operation("op-1")
 
     assert archived is not None
     assert archived.navigation_issued is None, "unknown stays unknown across a restart"

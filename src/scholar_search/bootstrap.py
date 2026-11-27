@@ -236,10 +236,19 @@ def _lease_summary() -> dict[str, object]:
     try:
         lease = LeaseStore().read()
     except (OSError, ValueError):
-        return {"state": "unknown", "admission_blocked": True}
+        # Observe mode does not block admission, and this field says what admission actually does.
+        # Using it to mean "the record is unreadable, be careful" made one field carry two
+        # meanings — the mistake the retest called out (F46-04).
+        return {
+            "state": "unknown",
+            "readable": False,
+            "error": "lease_state_unreadable",
+            "admission_blocked": False,
+        }
     unresolved = [operation.operation_id for operation in lease.unresolved()]
     return {
         "state": lease.state,
+        "readable": True,
         "fence": lease.fence,
         "job_id": lease.job_id or None,
         "owner_finished": lease.owner_finished,
