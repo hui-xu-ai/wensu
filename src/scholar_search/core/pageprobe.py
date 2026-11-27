@@ -178,6 +178,41 @@ def citation_doi(path: Path) -> str:
     return meta_content(raw, "citation_doi")
 
 
+def _pdf_url(raw: str) -> str:
+    """The article's own PDF address, not the first `.pdf` on the page.
+
+    Taking the first link matched MDPI's journal flyer (`mdpi-res.com/journals/3/flyer.pdf`) while
+    the page was carrying `citation_pdf_url` for the article itself, and that field is what a reader
+    uses to find the paper (real-browser acceptance 2026-11-27, F53-02). Order:
+
+    1. `citation_pdf_url` — the page stating its own PDF;
+    2. a link whose address contains the page's own DOI, or ends next to the article path (`/pdf`);
+    3. nothing. A plausible-looking wrong file is worse than an empty field.
+    """
+
+    declared = meta_content(raw, "citation_pdf_url")
+    if declared:
+        return declared
+    doi = meta_content(raw, "citation_doi")
+    candidates: list[str] = [
+        str(match) for match in _PDF_LINK.findall(raw) if "flyer" not in str(match).casefold()
+    ]
+    if doi:
+        for candidate in candidates:
+            if doi.casefold() in candidate.casefold():
+                return candidate
+    # `…/1424-8220/26/4/1303/pdf` next to `…/1424-8220/26/4/1303`: same article, PDF view.
+    for candidate in candidates:
+        tail = candidate.rstrip("/").rsplit("/", 1)[-1].casefold()
+        if tail in {"pdf", "pdfviewer", "epdf"}:
+            return candidate
+    # A page that offers exactly one PDF is telling us that is the article's — there is nothing to
+    # choose between, and the flyer problem only exists when there were several.
+    if len(candidates) == 1:
+        return candidates[0]
+    return ""
+
+
 def citation_fulltext_url(path: Path) -> str:
     """The page's own full-text HTML address, from `<meta name="citation_fulltext_html_url">`.
 
@@ -275,8 +310,7 @@ def classify_mhtml(path: Path, *, url: str = "") -> dict[str, object]:
     body_headings = len(_BODY_HEADING.findall(raw))
     hits = sum(1 for marker in PAYWALL_MARKERS if marker in _text_of(lowered))
 
-    pdf_match = _PDF_LINK.search(raw)
-    pdf_url = pdf_match.group(1) if pdf_match else ""
+    pdf_url = _pdf_url(raw)
 
     heading = _H1.search(raw)
     title = _text_of(heading.group(1))[:300] if heading else ""

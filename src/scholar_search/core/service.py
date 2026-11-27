@@ -1871,6 +1871,10 @@ class ScholarService:
                 # contradicts it, nothing confirms it). A caller that needs article identity can
                 # treat `publisher_only` as "unconfirmed" instead of guessing (audit R31-03).
                 "identity": identity,
+                # The value the identity decision actually used. `identity: declared` without it
+                # made a caller re-derive the DOI from the references, and one probe got a negative
+                # answer out of a correct capture (real-browser acceptance 2026-11-27, F53-03).
+                "declared_doi": declared or None,
                 "mhtml_path": str(readable),
                 # Which tab and which navigation produced this capture (ADR 0030).
                 "tab_id": last.get("tab_id"),

@@ -87,12 +87,19 @@ def test_a_frame_that_was_written_never_reports_not_issued() -> None:
     assert data.get("operation_issued") is True, "a written frame must not claim 'not issued'"
 
 
-def test_a_connect_failure_does_not_reuse_the_previous_operation_id() -> None:
+def test_a_connect_failure_does_not_reuse_the_previous_operation_id(monkeypatch) -> None:
     """F47-02: `_last_request_id` was shared, so the second failure answered with the first id."""
 
     adapter = BridgeAdapter()
     adapter._last_request_id = "previous-success"
     adapter._dispatched = "previous-success"
+
+    # Hermetic: a live host on this machine would make the "connect fails" scenario unreachable
+    # (the frame would really be sent, and `operation_issued: true` would be the correct answer).
+    def no_host() -> None:
+        raise ConnectionError("no live native host found")
+
+    monkeypatch.setattr(adapter, "_connect", no_host)
 
     outcome = adapter.execute(Action("goto", {"url": URL}), timeout_ms=50)
 

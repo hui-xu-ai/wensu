@@ -36,6 +36,47 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.54] - 2026-11-27
+
+真实浏览器验收（`docs/reviews/wensu-0.14.53-real-browser-2026-11-27.md`）的三项内容问题。
+正常读取、正文判定、捕获归属、哈希与配额那一轮全部通过，这三项是**内容保真度**。
+
+### Fixed — 默认 `sections` 路径丢掉正文表格（F53-01，P1）
+
+MDPI 把每张表包在 `<div class="html-table_show …">` 里，而这个 div 是 `section` 容器的**兄弟节点**，
+`_own_blocks(section)` 永远走不到：真实捕获上 `tables_rendered: 0, table_rows: 0`，三张正文表
+（5/12/5 行）连同表头一起消失，**且没有任何告警**。
+
+现在 `_collect_sections` 之后有一遍 `_adopt_orphan_tables`：不在任何 section 里的表格按
+`_table_markdown` 渲染，挂到它**前一个标题所属的 section**（找不到就收到文末 `### Tables`）；
+单行表格按布局表计（`tables_layout`），渲染失败计入 `tables_unplaced`。
+
+同一份真实捕获重跑：`tables_rendered: 3`、`table_rows: 25`，
+`Sample Composition` / `Manufacturing Technique` / `Tensile Strength (KPa)` /
+`Mean Absolute Angle Error (°)` 四个表头都出现在 `page.md`。
+
+### Fixed — `pdf_url` 选成了期刊宣传册（F53-02，P2）
+
+`_PDF_LINK` 取全页第一个 `.pdf`，MDPI 页面上那是 `mdpi-res.com/journals/3/flyer.pdf`。现在的顺序：
+
+1. 页面自己声明的 `citation_pdf_url`；
+2. 地址里含页面自报 DOI 的候选；
+3. 路径尾段是 `pdf`/`pdfviewer`/`epdf` 的候选（`…/26/4/1303/pdf` 之于 `…/26/4/1303`）；
+4. 只剩**一个**候选时用它（"只有一个"就是页面的意思）；
+5. 否则留空——一个看起来合理的错文件比空字段更糟。
+
+同一份捕获上现在是 `https://www.mdpi.com/1424-8220/26/4/1303/pdf`。只改元数据定位，不增加任何下载能力。
+
+### Fixed — `identity: declared` 却没有 `declared_doi`（F53-03，P2）
+
+`_page_evidence` 早就留了这个字段，成功结果的组装没传。现在成功回包顶层带 `declared_doi`（判定用的
+原值），缓存命中同样带；不再让调用方去参考文献里重新猜 DOI。
+
+### 一并修正的测试
+
+`test_a_connect_failure_does_not_reuse_the_previous_operation_id` 之前依赖"本机没有活宿主"，
+在有宿主运行时会把"帧真的发出去了"误报成失败。现在显式让 `_connect` 失败，场景是它要测的那个。
+
 ## [0.14.53] - 2026-11-27
 
 两处"失败是静默的"修补：安装器没给租约目录权限，以及租约记录不可信时检查反而放行。

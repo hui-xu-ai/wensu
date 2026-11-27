@@ -698,7 +698,55 @@ def _collect_sections(doc: Any) -> list[tuple[str, int, list[str]]]:
             kept.extend(_split_long(_fix_decimals(text)))
         if kept:
             collected.append((title, level, kept))
-    return collected
+    return _adopt_orphan_tables(doc, collected)
+
+
+def _adopt_orphan_tables(
+    doc: Any, collected: list[tuple[str, int, list[str]]]
+) -> list[tuple[str, int, list[str]]]:
+    """Body tables that sit **outside** every section, folded into the section above them.
+
+    MDPI wraps each table in a `<div class="html-table_show …">` that is a sibling of the section
+    containers, so `_own_blocks(section)` never reaches them: the acceptance capture produced
+    `tables_rendered: 0` and `table_rows: 0` while three body tables (5, 12 and 5 rows) were on the
+    page, and nothing warned (real-browser acceptance 2026-11-27, F53-01). Figures had the same
+    shape of problem and got `_figure_markdown`; tables now get the same treatment, but attached to
+    the section they belong to instead of piled at the end.
+    """
+
+    orphans = doc.xpath(
+        "//table[not(ancestor::section[@id]) and not(ancestor::figure) and not(ancestor::thead)]"
+    )
+    if not orphans:
+        return collected
+
+    remaining = list(collected)
+    trailing: list[str] = []
+    for table in orphans:
+        rows = table.xpath(".//tr")
+        if len(rows) < 2:
+            # A one-row table is layout (MDPI uses one for the licence banner), not content.
+            _OWN_COUNTERS["tables_layout"] = int(_OWN_COUNTERS.get("tables_layout", 0)) + 1
+            continue
+        markdown = _table_markdown(table, _OWN_COUNTERS)
+        if not markdown.strip():
+            _OWN_COUNTERS["tables_unplaced"] = int(_OWN_COUNTERS.get("tables_unplaced", 0)) + 1
+            continue
+        _OWN_COUNTERS["table_rows"] = int(_OWN_COUNTERS.get("table_rows", 0)) + len(rows)
+        heading = table.xpath("preceding::*[self::h1 or self::h2 or self::h3 or self::h4][1]")
+        anchor = _text(heading[0]) if heading else ""
+        placed = False
+        if anchor:
+            for index, (title, level, paragraphs) in enumerate(remaining):
+                if title == anchor or anchor.startswith(title) or title.startswith(anchor):
+                    remaining[index] = (title, level, [*paragraphs, markdown])
+                    placed = True
+                    break
+        if not placed:
+            trailing.append(markdown)
+    if trailing:
+        remaining.append(("Tables", 3, trailing))
+    return remaining
 
 
 def _cut_tail(markdown: str) -> str:
