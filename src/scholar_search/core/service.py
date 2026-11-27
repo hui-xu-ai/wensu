@@ -1902,7 +1902,14 @@ class ScholarService:
             # once and atomically. Everything up to here worked on staged bytes, so a read that
             # looked twice or glanced at the reader's tab leaves no half-described file behind
             # (audit 2026-11-26, R31-04).
-            published, capture_sha256 = self._publish_page(readable, _page_meta(saved), identifier)
+            #
+            # The storage key is the DOI the answer can *prove*, not the one the caller happened to
+            # pass: a URL-only request has no identifier, and the capture then landed under a
+            # title+hash folder although the page declared its DOI — the same article read twice
+            # would produce two files, and a DOI read later would not replace either (real read
+            # 2026-11-27, F57-01). `declared` is only used when identity accepted it.
+            storage_key = identifier or (declared if not refused else "")
+            published, capture_sha256 = self._publish_page(readable, _page_meta(saved), storage_key)
             readable = published
 
             result = {

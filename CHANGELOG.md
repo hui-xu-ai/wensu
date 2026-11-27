@@ -36,6 +36,32 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.58] - 2026-11-27
+
+### Fixed — URL-only 读取把捕获存进了标题目录，而不是页面 DOI 目录（F57-01，P2）
+
+真机单次读取（`docs/reviews/wensu-0.14.57-single-read-2026-11-27.md`）：请求只带 URL，读取成功、
+`identity: url`，但文件落在
+
+```text
+pages/A-chemotactic-microrobot-with-integrated-iridescent-surface-ae7b52ea/page.mhtml
+```
+
+而不是 `pages/10.1016_j.cej.2023.144222/page.mhtml`。原因是发布时用的是**请求的 identifier**
+（URL-only 请求为空），而页面自报的 DOI 已经用于身份判定、却没有用于存储键。后果是"一篇文献一个
+捕获文件"这条规则被打破：同一篇论文按 DOI 读一次、按 URL 读一次会得到两个文件，后一次不会替换前一次。
+
+现在存储键取"答案能证明的 DOI"：`identifier or declared`（只有身份判定通过时才用 `declared`；
+被拒绝的捕获仍走标题+哈希）。页面缓存键不变——它按请求键查找，改了会让 DOI 请求查不到 URL 读取过的缓存。
+
+`background-0.14.58.js`（worker 内容未变）。
+
+### 本轮真机验收的分类说明
+
+- 单次真实读取：F55-01 端到端通过；F56-01 的 `denied` 分支也已在仓库 `.venv` 上实测；
+- 纯官方版验证墙：真实 10 秒等待 + `verification_timeout` 通过；
+- 人工放行：官方 `_await_gate_clear` 在人工点击后返回 `cleared=true`，同事务内抓取成功，但那是本地驱动
+  复用官方原语，**不等于**"单个公开 `page_read` 内续抓"，后者仍未验证。
 ## [0.14.57] - 2026-11-27
 
 我按你的要求自己装了一遍 0.14.56（隔离 venv，真 wheel），测试脚本在 `D:\…\.tmp` 里跑的。

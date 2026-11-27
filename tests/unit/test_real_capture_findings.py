@@ -140,6 +140,58 @@ def test_a_url_only_request_is_not_refused_for_declaring_a_doi(tmp_path: Path) -
     assert answer["declared_doi"] == "10.1016/j.cej.2023.144222", answer
 
 
+def test_a_url_only_read_stores_the_capture_under_the_page_s_doi(tmp_path: Path) -> None:
+    """F57-01: the answer proved a DOI, then filed the file under a title+hash folder.
+
+    The same article read twice (once by DOI, once by URL) produced two files, and the later read
+    of one never replaced the other — which breaks "one article, one capture file".
+    """
+
+    from test_page_read import build_service, write_mhtml
+
+    doi = "10.1016/j.cej.2023.144222"
+    html = (
+        "<!DOCTYPE html><html><head>"
+        f'<meta name="citation_doi" content="{doi}">'
+        "<title>A microrobot</title></head><body><article>"
+        "<h2>1. Introduction</h2>"
+        "<p>This paragraph is long enough to be counted as prose, and it mentions the material, "
+        "the measurement and the conclusion so a reader would call it body text.</p>"
+        "<p>A second paragraph follows, also long enough to count, describing another measurement "
+        "and its outcome in the same register as the first one.</p>"
+        "</article></body></html>"
+    )
+    blob = write_mhtml(tmp_path / "page.mhtml", html).read_bytes()
+    service = build_service(
+        tmp_path,
+        [
+            [
+                {"verb": "goto", "data": {"url": SD}},
+                {"verb": "sleep", "data": {"ms": 1}},
+                {
+                    "verb": "snapshot",
+                    "data": {
+                        "token": "t1",
+                        "total": len(blob),
+                        "base64": __import__("base64").b64encode(blob).decode("ascii"),
+                        "url": SD,
+                        "title": "A microrobot",
+                        "captcha_visible": False,
+                    },
+                },
+            ]
+        ],
+    )
+
+    answer = service.read_page(url=SD)
+    stored = Path(str(answer["mhtml_path"]))
+
+    assert answer["status"] == "ok", answer
+    assert stored.parent.name == "10.1016_j.cej.2023.144222", stored
+    assert stored.name == "page.mhtml"
+    assert "/pages/" in stored.as_posix(), stored
+
+
 def test_the_identity_rules_keep_refusing_what_they_can_prove() -> None:
     from scholar_search.core.service import _page_identity
 

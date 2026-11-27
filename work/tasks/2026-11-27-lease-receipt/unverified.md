@@ -46,7 +46,41 @@
 0.14.46 的 `navigation_status` 与 0.14.52 的 `lease_check` 都依赖这个目录可写；0.14.53 起
 `lease_check` 在记录不可信时**拒绝**（`lease_protocol_unavailable`）而不是放行。
 
-## 3. 真机样本：已补两类，仍缺两类
+## 3. 真机样本：四类已补，三类仍缺
+
+### ✅ F55-01 端到端通过（0.14.57 单次真实读取）
+
+`docs/reviews/wensu-0.14.57-single-read-2026-11-27.md`：URL-only 请求 → `ok / ok / publish`、
+`identity: url`、`full_text: true`、`capture_navigation: match`、`declared_doi=10.1016/j.cej.2023.144222`、
+捕获 2,874,736 B（SHA 与回包一致）、配额 288→286、收尾 `browser_lease: free`、`browser_lock: free`。
+
+**该轮有一项未满足，已修（0.14.58）**：文件落在 `pages/A-chemotactic-…-ae7b52ea/` 而不是 DOI 目录，
+因为发布时用的是请求的 identifier（URL-only 为空）。现在用"答案能证明的 DOI"作存储键（F57-01）。
+
+### ✅ F56-01 权限分支（同一轮）
+
+仓库 `.venv` 解释器 → `browser_lock: denied`、`browser_busy: false`；安装版读取前后均为 `free`。
+两种真实环境已分开。
+
+### ✅ 真实 10 秒验证超时（0.14.57 纯官方版）
+
+`docs/reviews/wensu-0.14.57-official-wall-2026-11-27.md`：自然出现 Are-you-a-robot 墙，`goto` 1476 ms，
+`await_gate_clear` 真等 **10127 ms**，回包 `blocked / timeout / verification_timeout / wall / waited: true`，
+未发布、未重试、未代点；配额差额 1。我离线核过 `acceptance.json` 与 `actions.jsonl`。
+
+### ⚠️ 人工放行后的"唤醒→等待→抓取"（**只到 transaction 层**）
+
+`docs/reviews/wensu-0.14.57-manual-verification-2026-11-27.md`：同一 `_browser_transaction()` 内
+`_await_gate_clear()`（`cleared=true`，10076 ms）→ `sleep 1200` → `_snapshot_locked` → `_publish_page`，
+未重新导航、额外配额 0、身份与 DOI 匹配。留存副本 SHA 与 `page.md` 字节数我都离线核过；
+该捕获 **0 个 `<table>`**，`table_rows=0` 正确。
+
+### ❌ 仍然缺
+
+- **单个公开 `page_read` 调用内**人工放行后直接续抓（上面那次是本地驱动复用官方原语）；
+- 页面**自然自清**（无人工点击）；
+- 自然出现的 `bridge.timeout` + 迟到回包（0.14.48 起的归档路径），以及依赖它的归档/锁/去重/恢复协议；
+- `SCHOLAR_SEARCH_LEASE_MODE=enforce` 的真机行为，与 worker 旧代续体围栏（§1）。
 
 ### ✅ 真实 10 秒验证超时（0.14.57 纯官方版，已验收）
 
