@@ -24,8 +24,8 @@ from urllib.parse import urlparse
 
 from .. import __version__
 from ..adapters.bridge import BridgeAdapter
+from . import config
 from .cache import Cache
-from .config import browser_state_dir
 from .contracts import (
     Action,
     ActionOutcome,
@@ -68,7 +68,6 @@ ANSWER_SLICE_MS = 1_200
 _ARTICLE_SETTLE_MS = 1_200
 # ADR 0031: observation budgets. The first is how long tab metadata may be watched before the
 # capture happens anyway; the second keeps a single observation RPC well inside the host limit.
-_READINESS_BUDGET_MS = 30_000
 _OBSERVE_RPC_MS = 8_000
 _SECOND_LOOK_MS = 1_500
 
@@ -548,7 +547,7 @@ def _page_spec(publisher: Publisher) -> ChannelSpec:
 
 # A page snapshot moves a few megabytes through the browser's own write path. The host
 # rejects any deadline above 15 s (`policy.deadline`), so this is the ceiling too.
-SNAPSHOT_TIMEOUT_MS = 55_000
+SNAPSHOT_TIMEOUT_MS = config.SNAPSHOT_TIMEOUT_MS
 # Below the native host's hard ceiling (`native-host/main.py` rejects `timeout_ms > 60_000`), so a
 # slow `pageCapture` fails with our own timeout and a receipt instead of being cut off at the wire
 # — and there is room for the reply to come back. 15 s was measured too short: a real article
@@ -2059,7 +2058,7 @@ class ScholarService:
                 break
             follow_up = adapter.execute(
                 Action("snapshot", {"token": token, "offset": len(buffer)}),
-                timeout_ms=SNAPSHOT_TIMEOUT_MS,
+                timeout_ms=config.snapshot_timeout_ms(),
             )
             if not follow_up.ok:
                 raise ActionError(
@@ -2267,8 +2266,9 @@ class ScholarService:
         evidence["strategy"] = "observe"
         spent_ms = 0.0
         state = "observing"
-        while spent_ms < _READINESS_BUDGET_MS:
-            budget = int(min(_OBSERVE_RPC_MS, _READINESS_BUDGET_MS - spent_ms))
+        budget_ms = config.readiness_budget_ms()
+        while spent_ms < budget_ms:
+            budget = int(min(_OBSERVE_RPC_MS, budget_ms - spent_ms))
             if budget <= 0:
                 break
             params: dict[str, Any] = {"mode": "observe", "observe_ms": budget}
@@ -2311,7 +2311,7 @@ class ScholarService:
                 break
         evidence["state"] = state
         evidence["elapsed_ms"] = int(spent_ms)
-        evidence["budget_exhausted"] = state == "observing" and spent_ms >= _READINESS_BUDGET_MS
+        evidence["budget_exhausted"] = state == "observing" and spent_ms >= budget_ms
         if state == "risk":
             raise RiskBlocked(
                 f"the page asks for a person ({(evidence.get('page_state') or {}).get('title')})",
@@ -2394,7 +2394,7 @@ class ScholarService:
     def _browser_lock_path(self) -> Path:
         """The lock that serialises the browser — machine-scoped, not per-home (ADR 0029)."""
 
-        return browser_state_dir() / "browser.lock"
+        return config.browser_state_dir() / "browser.lock"
 
     def _stage_page(self, payload: bytes, meta: dict[str, str]) -> Path:
         """Write a captured page into `pages/.probe/`: inspection, not storage.
@@ -2507,7 +2507,7 @@ class ScholarService:
         if isinstance(tab_id, int):
             params["tab_id"] = tab_id
         action = Action("snapshot", params) if params else Action("snapshot")
-        first = adapter.execute(action, timeout_ms=SNAPSHOT_TIMEOUT_MS)
+        first = adapter.execute(action, timeout_ms=config.snapshot_timeout_ms())
         if not first.ok:
             if str(first.error or "").startswith("policy."):
                 # `snapshot` reads "the tab the user is looking at", and a browser tab is not

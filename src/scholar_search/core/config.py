@@ -22,6 +22,42 @@ ENV_HOME = "SCHOLAR_SEARCH_HOME"
 # lock, so two homes driving the same browser cannot interleave navigations. Quota and cooldown
 # deliberately stay per-home until that change gets its own migration.
 ENV_BROWSER_STATE = "SCHOLAR_SEARCH_BROWSER_STATE"
+# Diagnostic budgets (ADR 0031). They exist so a *branch* can be exercised on one ordinary read
+# instead of waiting for a slow network or a fault: shrink the observation budget to see
+# `budget_exhausted`, shrink the capture budget to see `capture_unconfirmed` and then ask
+# `navigation_status` about the operation. They are read from this process's environment only —
+# never from a request — and they are clamped, so no caller can widen a budget through them.
+ENV_READINESS_BUDGET_MS = "SCHOLAR_SEARCH_READINESS_BUDGET_MS"
+ENV_SNAPSHOT_TIMEOUT_MS = "SCHOLAR_SEARCH_SNAPSHOT_TIMEOUT_MS"
+READINESS_BUDGET_MS = 30_000
+SNAPSHOT_TIMEOUT_MS = 55_000
+# Floors are what makes a diagnostic meaningful: below them the branch is not being tested, the
+# read is just broken.
+_MIN_READINESS_MS = 50
+_MIN_SNAPSHOT_MS = 200
+
+
+def _budget(name: str, default: int, floor: int, ceiling: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return max(floor, min(ceiling, value))
+
+
+def readiness_budget_ms() -> int:
+    """How long to watch tab metadata before capturing anyway (ADR 0031, I3)."""
+
+    return _budget(ENV_READINESS_BUDGET_MS, READINESS_BUDGET_MS, _MIN_READINESS_MS, 300_000)
+
+
+def snapshot_timeout_ms() -> int:
+    """Budget for one capture, never above the native host's single-RPC ceiling (60 s)."""
+
+    return _budget(ENV_SNAPSHOT_TIMEOUT_MS, SNAPSHOT_TIMEOUT_MS, _MIN_SNAPSHOT_MS, 55_000)
 
 
 @dataclass(frozen=True, slots=True)

@@ -36,6 +36,27 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.65] - 2026-11-27
+
+### Added — 两个诊断用预算开关（让"只剩等自然故障"的两条分支可以当场验）
+
+之前我说 `budget_exhausted` 与"迟到回执"只能等自然样本——**这个判断太保守**。两条都是**时序分支**，
+把预算调短就能在**一次普通读取**里走到，不需要额外访问、不需要制造验证墙。
+
+| 环境变量 | 默认 | 允许范围 | 作用 |
+|---|---|---|---|
+| `SCHOLAR_SEARCH_READINESS_BUDGET_MS` | 30000 | 50–300000 | 观测预算；调小 ⇒ `budget_exhausted: true`（仍会抓） |
+| `SCHOLAR_SEARCH_SNAPSHOT_TIMEOUT_MS` | 55000 | 200–55000 | 抓取预算；调小 ⇒ `capture_unconfirmed`，随后可按 `operation_id` 查迟到回执 |
+
+三条约束，避免它们变成后门：
+
+1. **只读本进程环境**，不接受请求参数——`validate_params("snapshot", {"budget_ms": …})` 仍然是
+   `policy.params`（有测试）；
+2. **只能调小不能调大**：抓取预算上限就是宿主单 RPC 的 55 s，超过会被静默夹回；
+3. **有下限**（50 ms / 200 ms）：低于它测到的不是分支，是坏掉的读取。
+
+`background-0.14.65.js`（worker 内容未变）。
+
 ## [0.14.64] - 2026-11-27
 
 ADR 0031 的 **P2（worker 侧）**：观测模式真正落地，并且开始广告。**从这一版起，抓取时机不再由
