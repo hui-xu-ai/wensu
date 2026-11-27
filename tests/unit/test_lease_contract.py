@@ -233,6 +233,51 @@ def test_an_unreadable_lease_record_does_not_claim_to_block(tmp_path, monkeypatc
     assert summary["admission_blocked"] is False, "observe mode must never claim to enforce"
 
 
+def test_the_action_envelope_is_a_closed_schema() -> None:
+    """`context` is checked by type, not coerced: a peer with a different idea is refused."""
+
+    from scholar_search.core.lease import CONTEXT_KEYS, build_context, validate_context
+
+    good = build_context(job_id="j1", lease_id="L1", fence=3, operation_id="op1", tab_id=7)
+
+    assert set(good) <= CONTEXT_KEYS, good
+    assert validate_context(good) is None
+    assert validate_context(None) is None, "an absent envelope is not an error"
+    # Unknown keys, wrong types, missing version, negative fence: all the same refusal.
+    assert validate_context({**good, "extra": 1}) == "policy.context"
+    assert validate_context({**good, "fence": "3"}) == "policy.context"
+    assert validate_context({**good, "fence": -1}) == "policy.context"
+    assert validate_context({"job_id": "j"}) == "policy.context"
+    assert validate_context({**good, "tab_id": True}) == "policy.context"
+    assert validate_context({**good, "lease_id": ""}) == "policy.context"
+
+
+def test_the_host_refuses_a_malformed_envelope_before_the_extension_sees_it() -> None:
+    from scholar_search.adapters.bridge.policy import validate_request
+
+    ok = validate_request({"action": "sleep", "params": {"ms": 1}, "context": {"version": 1}})
+    assert ok is None
+
+    bad = validate_request({"action": "sleep", "params": {"ms": 1}, "context": {"version": 0}})
+    assert bad == "policy.context"
+
+
+def test_an_adapter_without_a_provider_sends_no_envelope() -> None:
+    """Nothing changes for a plain read: no provider, no `context` key, same wire format."""
+
+    from scholar_search.adapters.bridge import BridgeAdapter
+
+    adapter = BridgeAdapter()
+    assert adapter._context_for("op-1") == {}
+
+    adapter.context_provider(lambda: {"job_id": "j1", "lease_id": "L1", "fence": 2})
+    envelope = adapter._context_for("op-1")
+
+    assert envelope["operation_id"] == "op-1", "this attempt's id, not the provider's"
+    assert envelope["job_id"] == "j1"
+    assert envelope["fence"] == 2
+
+
 def test_navigation_status_reports_unknown_rather_than_not_issued(tmp_path, monkeypatch) -> None:
     """`known: false` must never be read as `navigation_issued: false` (protocol-lease.md §7)."""
 

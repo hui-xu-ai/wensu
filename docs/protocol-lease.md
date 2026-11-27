@@ -68,6 +68,20 @@ releasing → free
 
 `job_id` 沿用 `page_read` 回包里的那个，不再新增。`navigation_id` 仍是"这一次导航"，不是 `job_id`。
 
+### 动作信封 `context`（0.14.50 起，闭合 schema）
+
+```json
+{"version": 1, "endpoint_epoch": "…", "worker_epoch": "…",
+ "job_id": "…", "lease_id": "…", "fence": 17, "operation_id": "…", "tab_id": 123}
+```
+
+- 键闭集（`CONTEXT_KEYS`）：未知键 = 协议错误，不是"忽略即可"；
+- **按类型校验，不做强制转换**：`fence: "3"` 与 `fence: 3` 不是同一件事；
+- 内核没有身份来源时不发这个键——普通读取的线上格式一字不变；
+- worker 原样回显到 `action_result.context`，用于核对"这条结果属于我发的那次动作"；
+- 本版**只报告不拒绝**：宿主已能校验（`policy.context`），但内核尚不设置严格模式。
+
+
 ## 6 · 持久化白名单
 
 只有 `RECEIPT_KEYS` 里的键可以进共享回执文件（身份、状态、发出与否、导航 id、tab id、时间、错误码）。

@@ -711,9 +711,21 @@ async function onHostMessage(message, channel) {
   }
   if (message.type !== "action") return;
 
-  const { id, action, params } = message;
+  const { id, action, params, context } = message;
+  // The envelope the kernel sent (docs/protocol-lease.md §5). Echoed back with every reply for
+  // this action, so the caller can confirm the result belongs to the action it sent — this slice
+  // only reports, it never refuses on it.
+  const envelope = context && typeof context === "object" ? context : {};
   const domains = domainsFor(message);
-  const reply = (payload) => channel.postMessage({ type: "action_result", id, ...payload });
+  const reply = (payload) =>
+    channel.postMessage({
+      type: "action_result",
+      id,
+      // Which lease/fence/operation this reply is for. Absent when the kernel sent no envelope,
+      // which is what an older kernel does.
+      ...(envelope.lease_id || envelope.operation_id ? { context: envelope } : {}),
+      ...payload,
+    });
 
   try {
     if (action === "snapshot") {

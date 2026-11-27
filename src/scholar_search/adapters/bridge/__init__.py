@@ -25,6 +25,7 @@ import os
 import socket
 import uuid
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +61,10 @@ class BridgeAdapter:
         self._last_request_id: str = ""
         # The id whose frame was actually written: only then may a failure not claim "not issued".
         self._dispatched: str = ""
+        # Optional identity provider: returns the lease/job part of the action envelope, and
+        # `execute` adds this attempt's `operation_id`. Unset means "send no context".
+        self._context_provider: Callable[[], dict[str, Any]] | None = None
+        self._context: dict[str, Any] = {}
         self.domains: tuple[str, ...] | None = None
 
     # -- discovery -----------------------------------------------------
@@ -367,6 +372,10 @@ class BridgeAdapter:
             "timeout_ms": timeout_ms,
             "domains": list(self.domains or ()),
         }
+        if self._context:
+            # The identity block (plan §三). Sent only when a caller set one up: an empty context
+            # is omitted so nothing changes for a plain read or an older peer.
+            request["context"] = dict(self._context)
         self._socket.sendall((json.dumps(request, ensure_ascii=False) + "\n").encode("utf-8"))
         # From here on the frame is out: a failure can no longer claim "it was never issued".
         self._dispatched = request_id
@@ -403,10 +412,37 @@ class BridgeAdapter:
             url=url if isinstance(url, str) else None,
         )
 
+    def context_provider(self, provider: Callable[[], dict[str, Any]] | None) -> None:
+        """Install (or clear) the identity source for the action envelope."""
+
+        self._context_provider = provider
+
+    def _context_for(self, request_id: str) -> dict[str, Any]:
+        """The envelope for one attempt: the provider's fields plus this attempt's id."""
+
+        if self._context_provider is None:
+            return {}
+        from ...core.lease import build_context
+
+        try:
+            base = self._context_provider() or {}
+        except Exception:  # a broken provider must not break the action
+            base = {}
+        return build_context(
+            job_id=str(base.get("job_id") or ""),
+            lease_id=str(base.get("lease_id") or ""),
+            fence=int(base.get("fence") or 0),
+            operation_id=request_id,
+            endpoint_epoch=str(base.get("endpoint_epoch") or ""),
+            worker_epoch=str(base.get("worker_epoch") or ""),
+            tab_id=base.get("tab_id") if isinstance(base.get("tab_id"), int) else None,
+        )
+
     def execute(self, action: Action, *, timeout_ms: int) -> ActionOutcome:
         # One identity per attempt, allocated *before* anything can fail, so a failure can never
         # report the previous action's id (retest 2026-11-27, F47-02).
         request_id = uuid.uuid4().hex
+        self._context = self._context_for(request_id)
         try:
             self._connect()
             return self._send(action, timeout_ms, request_id)

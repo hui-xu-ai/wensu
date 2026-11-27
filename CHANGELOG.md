@@ -36,6 +36,32 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.50] - 2026-11-27
+
+P1b 第二步：**动作信封 `context`**（闭合 schema、双端校验、只报不拒）。
+
+### Added — 每个动作可以带一份身份信封
+
+```json
+{"version": 1, "endpoint_epoch": "…", "worker_epoch": "…",
+ "job_id": "…", "lease_id": "…", "fence": 17, "operation_id": "…", "tab_id": 123}
+```
+
+- 键是**闭集**（`CONTEXT_KEYS`）：未知键视为协议错误，不是"忽略即可"；
+- **按类型校验、不做强制转换**：`fence: "3"` 与 `fence: 3` 不是同一件事；
+- 内核没有身份来源时**不发这个键**——普通读取的线上格式一字未变；
+- worker 把信封原样回显在 `action_result.context`，用于核对"这条结果属于我发的那次动作"。
+
+### 现在的位置：能校验，但还不拒绝
+
+宿主已经会在写帧之前拒绝格式错误的信封（`policy.context`）；内核这一版**不设置严格模式**，
+也不因信封缺失拒绝任何请求。这一步的目的与前一步相同：先让字段在真实链路里跑一轮，看清它到底
+长什么样，再让它参与准入。
+
+严格模式（`enforce`，缺信封即拒绝）与 P2 的三处强制一起做——那一步会改变行为，需要单独一版与验收。
+
+`background-0.14.50.js`。
+
 ## [0.14.49] - 2026-11-27
 
 P1b 的第一步：**能力协商**（`features` + `worker_epoch`）。仍然不强制、不拒绝任何请求。

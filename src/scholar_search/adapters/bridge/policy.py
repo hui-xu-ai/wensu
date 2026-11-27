@@ -15,6 +15,7 @@ from collections.abc import Iterable
 from typing import Any
 from urllib.parse import urlparse
 
+from ...core.lease import validate_context
 from ...core.params import validate_params
 from ...core.publishers import publisher_domains
 
@@ -93,6 +94,12 @@ def validate_request(message: dict[str, Any], domains: Iterable[str] | None = No
     action = message.get("action")
     if not isinstance(action, str) or action not in VERBS:
         return "policy.verb"
+
+    # The identity block is a closed schema (plan §三). Checked here so a malformed envelope is
+    # refused *before* the frame reaches the extension.
+    error = validate_context(message.get("context"))
+    if error is not None:
+        return error
 
     params = message.get("params", {})
     error = validate_params(action, params)

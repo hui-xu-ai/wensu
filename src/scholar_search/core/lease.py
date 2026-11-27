@@ -218,6 +218,81 @@ def feature_supported(build: dict[str, Any] | None, name: str, minimum: int = 1)
     return isinstance(value, int) and value >= minimum
 
 
+# The action envelope's identity block (plan §三 `context`). A closed schema: unknown keys are a
+# protocol error, not something to ignore, because a peer that sends fields we do not understand is
+# a peer whose semantics we cannot assume.
+CONTEXT_KEYS: frozenset[str] = frozenset(
+    {
+        "version",
+        "endpoint_epoch",
+        "worker_epoch",
+        "job_id",
+        "lease_id",
+        "fence",
+        "operation_id",
+        "tab_id",
+    }
+)
+
+
+def build_context(
+    *,
+    job_id: str = "",
+    lease_id: str = "",
+    fence: int = 0,
+    operation_id: str = "",
+    endpoint_epoch: str = "",
+    worker_epoch: str = "",
+    tab_id: int | None = None,
+) -> dict[str, Any]:
+    """The identity block for one action, with empty fields left out."""
+
+    context: dict[str, Any] = {"version": 1}
+    for key, value in (
+        ("endpoint_epoch", endpoint_epoch),
+        ("worker_epoch", worker_epoch),
+        ("job_id", job_id),
+        ("lease_id", lease_id),
+        ("operation_id", operation_id),
+    ):
+        if value:
+            context[key] = value
+    if fence:
+        context["fence"] = fence
+    if isinstance(tab_id, int):
+        context["tab_id"] = tab_id
+    return context
+
+
+def validate_context(context: Any) -> str | None:
+    """Return an error code, or None when the block is well-formed.
+
+    Types are checked, not coerced: a peer that sends `fence: "3"` has a different idea of the
+    protocol than we do, and guessing which one it meant is how a stale action slips through.
+    """
+
+    if context is None:
+        return None
+    if not isinstance(context, dict):
+        return "policy.context"
+    unknown = set(context) - CONTEXT_KEYS
+    if unknown:
+        return "policy.context"
+    version = context.get("version")
+    if not isinstance(version, int) or version < 1:
+        return "policy.context"
+    for key in ("endpoint_epoch", "worker_epoch", "job_id", "lease_id", "operation_id"):
+        if key in context and not (isinstance(context[key], str) and context[key]):
+            return "policy.context"
+    if "fence" in context and not (isinstance(context["fence"], int) and context["fence"] >= 0):
+        return "policy.context"
+    if "tab_id" in context and not (
+        isinstance(context["tab_id"], int) and not isinstance(context["tab_id"], bool)
+    ):
+        return "policy.context"
+    return None
+
+
 def missing_features(build: dict[str, Any] | None) -> list[str]:
     """Which required features the connected build does not advertise."""
 
