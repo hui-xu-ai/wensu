@@ -34,26 +34,17 @@
 | `action`（无 `context`） | 照常执行 |
 | `action{fence:5}` | 照常执行 |
 
-## 2. 安装器最小 ACL（未做）
+## 2. ~~安装器最小 ACL（未做）~~ 已于 0.14.55 用真机读数关闭
 
-`coordination/` 需要低完整性可写（浏览器启动的宿主是低完整性进程）。目前没有任何证据说明真机上
-宿主能写进去；0.14.46 的 `navigation_status` 与 0.14.52 的 `lease_check` 都依赖这个目录可写。
+0.14.55 起宿主的 `info` 带 `coordination_writable`：它在浏览器给它的**低完整性**下真的写一个临时文件
+再删掉。真机读数 `true`（`docs/reviews/wensu-0.14.55-coordination-elsevier-2026-11-27.md` §1），
+因此"宿主能不能写租约目录"不再是未知。
 
-**更正（0.14.53）**：本文件早先写的是"`lease_check` 读不到记录时按 `free` 处理 ⇒ 会拒绝一切带租约的帧"。
-**这句话是错的，方向正好相反。** 按 0.14.52 的实际代码，记录不可读时 `LeaseStore.read()` 返回
-`quarantined`，而 `lease_check` 里"记录没有 `lease_id`"那条短路让它返回 `None` ⇒ **帧照发**。
-也就是说权限失败的后果不是"全部拒绝"，而是**静默不设防**：谁也不知道旧导航是否还在落地，宿主替它放行。
+**仍未证明的相邻部分**（不要把它一起划掉）：这次只证明了"写/删一个文件"可以。**完整的归档、锁、去重与
+恢复协议**没有真机样本；要等真实出现一次 `bridge.timeout`、再用 `navigation_status` 查到回执才算。
 
-0.14.53 改了两处：
-
-1. `lease_check` 对 `quarantined`/`unknown`/读取异常一律返回 `lease_protocol_unavailable`（拒绝，且原因
-   指向可修的东西），不再因为"记录里没有 `lease_id`"而放行；
-2. `install.ps1` 创建并给 `browser-state/coordination` 打低完整性标签（尊重
-   `SCHOLAR_SEARCH_BROWSER_STATE` 覆盖）。
-
-**仍未验证**：真机上这次 ACL 是否足够。它只能在真实读取自然出现一次 `bridge.timeout`、再用
-`navigation_status(<operation_id>)` 查到回执时才能确认；在那之前，"宿主能写进 coordination/" 只是
-安装器的意图，不是观测到的事实。
+0.14.46 的 `navigation_status` 与 0.14.52 的 `lease_check` 都依赖这个目录可写；0.14.53 起
+`lease_check` 在记录不可信时**拒绝**（`lease_protocol_unavailable`）而不是放行。
 
 ## 3. 真机样本仍然缺
 
