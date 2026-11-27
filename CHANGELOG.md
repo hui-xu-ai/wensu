@@ -36,6 +36,34 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.51] - 2026-11-27
+
+P2 第一步：**内核侧准入（`enforce`），默认关闭**。
+
+### Added — `SCHOLAR_SEARCH_LEASE_MODE`
+
+- `observe`（默认）：一切照旧，不创建租约、不拒绝任何请求——0.14.46 起的观测行为未变；
+- `enforce`（显式开启）：读取进入浏览器事务前先取共享租约，取不到就**拒绝**，且拒绝发生在
+  任何动作被规划之前，因此**不扣额度**：
+
+| 情况 | 结果 |
+|---|---|
+| 已有一份 `active` 租约 | 拒绝，原因 `lease_held` |
+| 旧租约停在 `unconfirmed`/`recovering`/`quarantined` | 拒绝，原因 `lease_unconfirmed`（**不会**按时间解锁） |
+| 连接到的构建没有声明 `lease_control` | 拒绝，原因 `lease_protocol_unavailable`（宁可不做，也不假装保护） |
+| 取到租约 | 正常执行；结束时按证据收尾，能收就释放到 `free` |
+
+收尾证据只有两种：调用抛异常且从未派发 ⇒ `refused_before_navigation`；调用正常结束 ⇒
+`settled_with_receipt`。**没有"超时自动解锁"、"下一个请求解锁"这类边**。
+
+### 边界（本轮故意不做）
+
+宿主侧每次派发前的强制、worker 每个续体的旧代隔离、安装器 ACL 都还没做。所以这一版
+`enforce` 只挡住"同一台机器上另一个 home / 另一个进程抢先取租约"这一类；`status.browser_lease`
+的 `admission_blocked` 仍然只在 `enforce` 下才可能为 `true`，措辞与行为一致。
+
+`background-0.14.51.js`（worker 内容未变）。
+
 ## [0.14.50] - 2026-11-27
 
 P1b 第二步：**动作信封 `context`**（闭合 schema、双端校验、只报不拒）。

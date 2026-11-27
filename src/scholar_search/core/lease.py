@@ -218,6 +218,19 @@ def feature_supported(build: dict[str, Any] | None, name: str, minimum: int = 1)
     return isinstance(value, int) and value >= minimum
 
 
+LEASE_MODES: frozenset[str] = frozenset({"observe", "enforce"})
+# Off by default on purpose: `enforce` refuses requests, so it is opt-in until the whole chain
+# (kernel entry, host dispatch, worker continuations) can honour it.
+ENV_LEASE_MODE = "SCHOLAR_SEARCH_LEASE_MODE"
+
+
+def lease_mode() -> str:
+    """`observe` (default) or `enforce`. Anything unrecognised stays `observe`."""
+
+    value = str(os.environ.get(ENV_LEASE_MODE) or "observe").strip().lower()
+    return value if value in LEASE_MODES else "observe"
+
+
 # The action envelope's identity block (plan §三 `context`). A closed schema: unknown keys are a
 # protocol error, not something to ignore, because a peer that sends fields we do not understand is
 # a peer whose semantics we cannot assume.

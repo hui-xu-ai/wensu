@@ -46,7 +46,7 @@ from .errors import (
     ScholarSearchError,
 )
 from .export import to_csv, to_endnote, to_markdown, to_ris
-from .lease import LeaseStore
+from .lease import LeaseStore, lease_mode, missing_features
 from .locking import interprocess_lock
 from .page_nav import article_navigation
 from .pageprobe import challenge_in_title, citation_doi, citation_fulltext_url, classify_mhtml
@@ -506,11 +506,12 @@ class _BrowserTransaction:
     are acquired and released in one place.
     """
 
-    __slots__ = ("_lock", "_service")
+    __slots__ = ("_lease", "_lock", "_service")
 
     def __init__(self, service: ScholarService) -> None:
         self._service = service
         self._lock = interprocess_lock(service._browser_lock_path(), timeout_s=180.0)
+        self._lease: tuple[str, int] | None = None
 
     def __enter__(self) -> None:
         self._lock.__enter__()
@@ -519,6 +520,9 @@ class _BrowserTransaction:
             # Fail here, not halfway through: a profile that is explicitly requested
             # but not running must not silently fall back to another browser.
             self._service._pin_transaction_host()
+            # Opt-in admission (plan §二.2). Off unless `SCHOLAR_SEARCH_LEASE_MODE=enforce`, and
+            # even then it only refuses — it never retries or clears anything.
+            self._lease = self._service._lease_enter()
         except BaseException:
             self._service._transaction_depth -= 1
             self._lock.__exit__(None, None, None)
@@ -529,7 +533,11 @@ class _BrowserTransaction:
         self._service._transaction_depth -= 1
         if self._service._transaction_depth == 0:
             self._service._close_pinned()
-        self._lock.__exit__(exc_type, exc, tb)  # type: ignore[arg-type]
+        try:
+            self._service._lease_exit(self._lease, exc)
+        finally:
+            self._lease = None
+            self._lock.__exit__(exc_type, exc, tb)  # type: ignore[arg-type]
 
 
 def _home_from_state_dir(state_dir: Path) -> Path:
@@ -1942,6 +1950,64 @@ class ScholarService:
                     stage="snapshot",
                 )
         return bytes(buffer[:total])
+
+    def _lease_enter(self) -> tuple[str, int] | None:
+        """Take the shared lease — only in `enforce` mode, and only if the chain can honour it.
+
+        Returns `(lease_id, fence)` when a lease is held, `None` in observe mode. A refusal raises
+        `ScholarSearchError` whose `code` is one of the `lease_*` reasons, so the read answers
+        `blocked` with a stage of `navigate` and spends nothing: the refusal happens before any
+        action is planned, let alone dispatched.
+        """
+
+        if lease_mode() != "enforce":
+            return None
+        build = self._bridge_build()
+        missing = missing_features(build)
+        if missing:
+            raise ScholarSearchError(
+                "the connected browser build does not advertise "
+                f"{', '.join(missing)}: run `wensu doctor`, reload the extension, then try again "
+                "— refusing rather than pretending to protect this call"
+            )
+        store = LeaseStore()
+        job_id = uuid.uuid4().hex[:12]
+        lease = store.acquire(lease_id=f"lease-{job_id}", job_id=job_id)
+        if lease is None:
+            current = store.read()
+            reason = (
+                "lease_unconfirmed"
+                if current.state in {"unconfirmed", "recovering", "quarantined"}
+                else "lease_held"
+            )
+            raise ScholarSearchError(
+                f"the browser is not available: {reason} (lease state {current.state}) — "
+                "wait for the previous call to settle, or ask `navigation_status` about it"
+            )
+        return lease.lease_id, lease.fence
+
+    def _lease_exit(self, lease: tuple[str, int] | None, exc: object) -> None:
+        """Declare the call finished. Evidence decides whether the lease frees, nothing else."""
+
+        if lease is None:
+            return
+        lease_id, fence = lease
+        store = LeaseStore()
+        # A call that raised before any action is the one case we can prove was not issued; every
+        # other path leaves the operation's fate to the receipt that arrives (or does not).
+        evidence = "refused_before_navigation" if exc is not None else "settled_with_receipt"
+        with suppress(OSError, ValueError, ScholarSearchError):
+            store.finish(lease_id=lease_id, fence=fence, evidence=evidence)
+
+    def _bridge_build(self) -> dict[str, Any]:
+        """What the connected build advertised in its handshake, or `{}`."""
+
+        try:
+            describe = getattr(self._transaction_adapter(), "info", None)
+            info = describe() if callable(describe) else {}
+        except (ActionError, ScholarSearchError, OSError):
+            return {}
+        return info if isinstance(info, dict) else {}
 
     def browser_busy(self) -> bool:
         """Is another read holding the browser right now?
