@@ -88,6 +88,76 @@ def test_a_page_with_no_declaration_and_several_pdfs_reports_nothing(tmp_path: P
     assert classify_mhtml(path)["pdf_url"] == ""
 
 
+SD = "https://www.sciencedirect.com/science/article/pii/S1385894723029534"
+
+
+def test_a_url_only_request_is_not_refused_for_declaring_a_doi(tmp_path: Path) -> None:
+    """F55-01: comparing a declared DOI with an empty request refused a correct capture.
+
+    The address and the PII both matched what was asked for, and the page declared a real DOI —
+    the comparison baseline was missing, not the identity.
+    """
+
+    from test_page_read import build_service, write_mhtml
+
+    html = (
+        "<!DOCTYPE html><html><head>"
+        '<meta name="citation_doi" content="10.1016/j.cej.2023.144222">'
+        "<title>An SD article</title></head><body><article>"
+        "<h2>1. Introduction</h2>"
+        "<p>This paragraph is long enough to be counted as prose, and it mentions the material, "
+        "the measurement and the conclusion so a reader would call it body text.</p>"
+        "<p>A second paragraph follows, also long enough to count, describing another measurement "
+        "and its outcome in the same register as the first one.</p>"
+        "</article></body></html>"
+    )
+    blob = write_mhtml(tmp_path / "page.mhtml", html).read_bytes()
+    service = build_service(
+        tmp_path,
+        [
+            [
+                {"verb": "goto", "data": {"url": SD}},
+                {"verb": "sleep", "data": {"ms": 1}},
+                {
+                    "verb": "snapshot",
+                    "data": {
+                        "token": "t1",
+                        "total": len(blob),
+                        "base64": __import__("base64").b64encode(blob).decode("ascii"),
+                        "url": SD,
+                        "title": "An SD article",
+                        "captcha_visible": False,
+                    },
+                },
+            ]
+        ],
+    )
+
+    answer = service.read_page(url=SD)
+
+    assert answer["status"] == "ok", answer
+    assert answer["identity"] == "url", answer
+    assert answer["declared_doi"] == "10.1016/j.cej.2023.144222", answer
+
+
+def test_the_identity_rules_keep_refusing_what_they_can_prove() -> None:
+    from scholar_search.core.service import _page_identity
+
+    other = "https://www.sciencedirect.com/science/article/pii/S1385894723029999"
+    doi = "10.1016/j.cej.2023.144222"
+
+    # URL-only: the address's article token is the constraint.
+    assert _page_identity(SD, doi, "", SD) == (False, "url")
+    assert _page_identity(SD, "", "", SD) == (False, "url")
+    assert _page_identity(other, "", "", SD) == (True, "mismatch")
+    # A DOI was asked for: declared mismatch and URL mismatch still refuse.
+    assert _page_identity(SD, doi, doi, SD) == (False, "declared")
+    assert _page_identity(SD, doi, "10.1016/j.cej.2023.999999", SD) == (True, "mismatch")
+    assert _page_identity(SD, "", doi, SD) == (False, "publisher_only")
+    # An absent baseline never becomes permission by accident.
+    assert _page_identity("", doi, "", "") == (False, "publisher_only")
+
+
 def test_a_declared_doi_is_echoed_with_the_identity_it_produced(tmp_path: Path) -> None:
     """F53-03: `identity: declared` without the value it declared."""
 

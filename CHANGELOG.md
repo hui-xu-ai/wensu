@@ -36,6 +36,43 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.56] - 2026-11-27
+
+真机验收的一条例外（`docs/reviews/wensu-0.14.55-coordination-elsevier-2026-11-27.md`）。
+同轮确认：`coordination_writable: true`——浏览器启动的低完整性宿主真的能写租约目录，
+`unverified.md` §2 可以划掉。
+
+### Fixed — URL-only 请求被"和空 DOI 比较"误拒绝（F55-01，P1）
+
+只传 `url` 时 `identifier` 是空串，而身份判断拿页面自报的 DOI 去和它比：
+
+```python
+wanted = identifier.casefold()          # ""
+declared_doi.casefold() == wanted       # 任何真实 DOI 都不等于空串
+```
+
+于是一次**地址完全相同、PII 相同、`capture_navigation: match`** 的 ScienceDirect 捕获被判
+`capture_mismatch` 并删掉了字节——它没有证明抓到别的文章，只证明了"没有比较基准"。
+
+现在 `_page_identity` 区分两种请求：
+
+| 请求 | 依据 | 拒绝条件 |
+|---|---|---|
+| 给了 DOI | 页面自报 DOI / 地址里的 DOI | 声明或地址里的 DOI **不同**（原有规则不变） |
+| 只给 URL | 请求地址与捕获地址的**文章身份**（PII 之类的路径令牌） | 同一出版社、**另一个**文章令牌 |
+
+`next` 也改成陈述事实（"页面声明了 X，捕获地址是 Y"），不再在没有证据时归因于"标签页被移动"。
+
+回归覆盖报告要求的四种情形：同 PII 的 URL-only（页面声明 DOI）通过、不同 PII 拒绝、
+显式 DOI 冲突拒绝、URL-only 且页面不声明 DOI 通过；另有"地址为空时不因缺少基准而放行"。
+
+### 已知副作用（本轮未处理）
+
+那次误拒绝把 `capture_mismatch` 写进了页面 blocked 缓存。修复后不会再产生新的错误条目，
+但**已写入的旧条目要等它的 TTL 过期**（`_PAGE_WALL_TTL_S`），不会自动清。
+
+`background-0.14.56.js`（worker 内容未变）。
+
 ## [0.14.55] - 2026-11-27
 
 ### Added — 宿主自己回答"我能不能写租约记录"

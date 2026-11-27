@@ -354,21 +354,33 @@ def _is_home_page(url: str) -> bool:
     return path in {"", "/"} or len([part for part in path.split("/") if part]) <= 0
 
 
-def _page_identity(captured_url: str, declared_doi: str, identifier: str) -> tuple[bool, str]:
+def _page_identity(
+    captured_url: str,
+    declared_doi: str,
+    identifier: str,
+    requested_url: str = "",
+) -> tuple[bool, str]:
     """(refused, evidence) — is this capture the article that was asked for?
 
     Three strengths of evidence, because publisher attribution is not article identity (audit
     2026-11-26, R31-03: a Wiley request answered with another Wiley DOI passed on the host alone):
 
     * `declared` — the page prints the DOI that was asked for;
-    * `url` — the address carries that DOI;
+    * `url` — the address carries that DOI, or (URL-only request) the article identity the caller
+      named;
     * `publisher_only` — neither, but nothing contradicts it either: ScienceDirect addresses an
       article by PII and a legitimate page can hold no DOI anywhere, so silence is not proof of
       the wrong article;
-    * `mismatch` — the page prints or carries a *different* DOI, which is positive proof that it
-      is another article, and the only case that refuses.
+    * `mismatch` — the page prints or carries a *different* DOI or a *different* article identity,
+      which is positive proof that it is another article, and the only case that refuses.
+
+    A URL-only request has no DOI to compare against, and comparing a declared DOI with an empty
+    string refused a correct ScienceDirect capture whose address and PII both matched
+    (real-browser acceptance 2026-11-27, F55-01). In that case the address is the constraint.
     """
 
+    if not identifier:
+        return _url_identity(captured_url, requested_url)
     wanted = identifier.casefold()
     if declared_doi:
         return (False, "declared") if declared_doi.casefold() == wanted else (True, "mismatch")
@@ -377,6 +389,37 @@ def _page_identity(captured_url: str, declared_doi: str, identifier: str) -> tup
         matched = found.group(0).casefold().startswith(wanted)
         return (False, "url") if matched else (True, "mismatch")
     return (False, "publisher_only")
+
+
+# The article identity a publisher prints in its own paths: Elsevier's PII, and the ids other
+# publishers use in place of one. Two addresses with the same token are the same article.
+_ARTICLE_TOKEN = re.compile(
+    r"/(?:pii|doi/(?:abs|full|pdf|epdf)?/?|article/(?:abs/)?|abs/)([A-Za-z0-9()\-._/]+)",
+    re.IGNORECASE,
+)
+
+
+def _url_identity(captured_url: str, requested_url: str) -> tuple[bool, str]:
+    """Compare two addresses as *articles* when no DOI was asked for.
+
+    Refusing here needs positive proof, exactly like the DOI branch: a different article token, on
+    the same publisher, in both addresses. Tolerating the rest keeps a legitimate capture (a
+    landing page that redirects to a `/full` view, a locale prefix) from being thrown away.
+    """
+
+    captured = (captured_url or "").strip()
+    requested = (requested_url or "").strip()
+    if not captured:
+        return (False, "publisher_only")
+    if not requested:
+        return (False, "url")
+    if captured.split("?")[0].rstrip("/") == requested.split("?")[0].rstrip("/"):
+        return (False, "url")
+    asked = _ARTICLE_TOKEN.search(requested)
+    got = _ARTICLE_TOKEN.search(captured)
+    if asked and got and asked.group(1).casefold() != got.group(1).casefold():
+        return (True, "mismatch")
+    return (False, "url")
 
 
 def _page_evidence_site(url: str, publisher: Publisher, identifier: str) -> bool:
@@ -1771,8 +1814,11 @@ class ScholarService:
             # page and no DOI metadata still came back `ok`).
             declared = citation_doi(readable) if readable.is_file() else ""
             captured_url = str(saved.get("url") or "")
-            refused, identity = _page_identity(captured_url, declared, identifier)
-            if declared and declared.casefold() != identifier.casefold():
+            # `target` is the address this read navigated to: what a URL-only request constrained.
+            refused, identity = _page_identity(captured_url, declared, identifier, target)
+            if identifier and declared and declared.casefold() != identifier.casefold():
+                # Only meaningful when the caller named a DOI. Comparing a declared DOI with an
+                # empty request refused a correct ScienceDirect capture (F55-01).
                 refused = True
             # A publisher that answers a deep link with its home page is not showing a partial
             # article: the P5 acceptance got 192 words of an ACS home page reported as
@@ -1836,9 +1882,12 @@ class ScholarService:
                         "issued (ADR 0030): ask again — something moved the tab."
                         if capture_navigation == "mismatch"
                         else (
-                            "the captured page is not this article (its address or its own DOI "
-                            "says so): ask again — the browser tab moved between the navigation "
-                            "and the capture."
+                            # State what was observed. Claiming the tab moved blamed the reader
+                            # for a wrong comparison (F55-01).
+                            "the captured page names another article than the one asked for "
+                            f"(page declares {declared or 'no DOI'}, "
+                            f"captured {captured_url or 'no URL'}); "
+                            "this is a different article, not a slow click."
                         )
                         if refused
                         else (
