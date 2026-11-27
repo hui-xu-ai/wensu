@@ -118,3 +118,34 @@ releasing → free
 3. `status` 增加 `browser_lease`（摘要）与 `browser_lock_held`（原始锁事实）；
 4. `navigation_status` 工具 + 控制命令；
 5. 全部为 `observe`，不强制准入；验收靠假 streams、真 worker VM、进程重启与 wheel 解包。
+
+## 10 · 观测模式与捕获回执（ADR 0031，P0 契约）
+
+`snapshot` 有两个模式，**同一条动词、不同语义**：
+
+| 参数 | 值 | 语义 |
+|---|---|---|
+| `mode` | `capture`（默认） | 现有行为：`pageCapture` 生成字节 |
+| `mode` | `observe` | **零字节**：只轮询 `tabs.get()` 的 `status/url/title` |
+| `observe_ms` | `0 < n ≤ 35000` | 仅 `mode=observe` 合法；观测预算 |
+
+闭合规则（`params.py` 与宿主 `policy.py` 共用同一函数，两处同时生效）：
+
+- `mode` 不在集合内 ⇒ `policy.params`；
+- `mode=observe` 与 `token`/`offset` 同时出现 ⇒ `policy.params`（一次请求不装两件事）；
+- `observe_ms` 没有 `mode=observe` 陪伴 ⇒ `policy.params`；
+- 未知参数一律 `policy.params`。
+
+**协商**：worker 在 `hello_ack.features` 广告 `readiness_observe: 1` 与 `capture_receipts: 1`；
+内核 `readiness_supported(build)` 要求两者齐全才可发观测参数。本版 worker 不广告，因此本版内核
+**不会**发出 `mode=observe`——契约先行的意义是让下一版 worker 可以安全接收，而不是提前使用。
+
+**观测回包**（P2 实现）：`{ok, mode: "observe", state: "candidate"|"observing"|"risk"|"tab_lost",
+elapsed_ms, budget_exhausted, page_state: {status, url, title}, navigation_id, tab_id}`。
+`candidate` 只是"值得尝试抓取"，**不是**成功。
+
+**捕获回执**（P1 实现）：`capture_id`、`attempt_index`（1 或 2）、`capture_issued`（true/false/null）；
+迟到结果按 `capture_id` 归档，只更新原 operation 的事实（见 §7 与 ADR 0030）。
+
+**预算**：人工验证 10 s / 首次观测 30 s / 第二次观测 ≤10 s / 捕获+传回 55 s。四者互不推导；
+观测到期**仍发起第一次捕获**，捕获预算到期只报 `capture_unconfirmed`，不得表述为"网页没有全文"。

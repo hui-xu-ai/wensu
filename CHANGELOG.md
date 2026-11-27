@@ -36,6 +36,37 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.61] - 2026-11-27
+
+ADR 0031 的 **P0：契约先行**。本版**没有**改变任何浏览器行为，也没有发出新参数——worker 尚未
+广告 `readiness_observe`，内核因此不会用它。目的是让下一版 worker 能安全接收。
+
+### Added — `snapshot` 的观测模式（零字节）
+
+`mode: "capture"`（默认，现有行为）/ `mode: "observe"`（只读标签页元数据，不调用 `pageCapture`），
+外加 `observe_ms`（仅观测模式有效，上限 35 s——观测是一次 RPC，必须远低于宿主 60 s 上限）。
+闭合校验在 `params.py` 与宿主 `policy.py` **两处同时生效**（宿主导入同一函数）：
+
+- 未知 `mode` ⇒ `policy.params`；
+- `mode=observe` 与 `token`/`offset` 并存 ⇒ `policy.params`（一个请求不装两件事）；
+- `observe_ms` 缺少 `mode=observe` ⇒ `policy.params`；
+- 任何未知参数 ⇒ `policy.params`。
+
+用两个模式而不是 `probe_only: true`：布尔写错一个字符就把"观察"变成"生成一次 MHTML"。
+
+### Added — 功能协商的命名
+
+`READINESS_FEATURES = {readiness_observe: 1, capture_receipts: 1}` 与 `readiness_supported(build)`：
+两者齐全才可发观测参数。本版 worker 不广告，故不发送。
+
+### Docs
+
+- `docs/adr/0031-readiness-observe-and-capture-receipts.md`：三层证据、两模式、四类预算互不推导、
+  I1–I10 不变式、拒绝的备选（含"只调大预算"与"全站 scripting"）；
+- `docs/protocol-lease.md` §10：参数表、闭合规则、观测与捕获回执的字段、预算语义。
+
+`background-0.14.61.js`（worker 内容未变）。
+
 ## [0.14.60] - 2026-11-27
 
 三处实错，来自对就绪方案的评审（`work/tasks/2026-11-27-lease-receipt/gpt-readiness-review.md`）。

@@ -68,7 +68,7 @@ ALLOWED_KEYS: dict[str, frozenset[str]] = {
     "sleep": frozenset({"ms"}),
     # No parameters for a capture; `token`/`offset` read the bytes back in chunks, because
     # the browser's download manager blocks every `.mhtml` it writes (ADR 0018).
-    "snapshot": frozenset({"token", "offset", "tab", "tab_id"}),
+    "snapshot": frozenset({"token", "offset", "tab", "tab_id", "mode", "observe_ms"}),
     # Waiting for a person: the markers to watch for and the two budgets. Nothing here makes a
     # request — the extension polls `tabs.get().title` (ADR 0027).
     "await_gate_clear": frozenset({"halt_titles", "halt_url_markers", "timeout_ms", "poll_ms"}),
@@ -90,6 +90,11 @@ GOTO_KEEP = True
 READ_TEXT_MODES = frozenset({"inner", "text"})
 # Which tab a capture reads: the dedicated work tab, or whatever the user is looking at.
 SNAPSHOT_TABS = frozenset({"work", "active"})
+# Two modes of `snapshot` (ADR 0031): `capture` writes bytes, `observe` only reads tab metadata.
+SNAPSHOT_MODES = frozenset({"capture", "observe"})
+# An observation is a metadata poll, not a wait for content: it has to end well inside the one
+# RPC the native host allows (60 s), leaving room for the reply.
+MAX_OBSERVE_MS = 35_000
 
 
 def _tab_id(value: Any) -> bool:
@@ -171,6 +176,26 @@ def validate_params(verb: str, params: Any) -> str | None:
             return "policy.params"
         if "token" in params and not isinstance(params["token"], str):
             return "policy.params"
+        if "mode" in params:
+            # ADR 0031: `observe` reads tab metadata and produces **no bytes**; `capture` is the
+            # default and the only mode that calls `pageCapture`. Two modes of one verb, not a
+            # boolean: a wrong boolean quietly turns an observation into a capture.
+            if params["mode"] not in SNAPSHOT_MODES:
+                return "policy.params"
+            if params["mode"] == "observe" and ("token" in params or "offset" in params):
+                # Observing a capture mid-transfer is two requests in one: refuse it here rather
+                # than leave the worker to pick which one to honour.
+                return "policy.params"
+        if "observe_ms" in params:
+            if params.get("mode") != "observe":
+                return "policy.params"
+            budget = params["observe_ms"]
+            if (
+                not isinstance(budget, int)
+                or isinstance(budget, bool)
+                or not 0 < budget <= MAX_OBSERVE_MS
+            ):
+                return "policy.params"
         return None
 
     if verb in {"click", "read_text", "type", "select", "wait_for"}:

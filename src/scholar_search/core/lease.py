@@ -204,6 +204,18 @@ class Lease:
 # Protocol features this build needs, by name and minimum version. A peer that does not name them
 # in its handshake does not have them — "unknown" is not "supported" (docs/protocol-lease.md §8).
 LEASE_FEATURES: dict[str, int] = {"lease_control": 1, "operation_receipts": 1}
+# Advertised by the worker when it can do them, never assumed (ADR 0031). `readiness_observe`
+# guards the whole observation mode: a worker that does not advertise it must not be sent
+# `mode=observe`, because it would read the parameter as a capture request and produce bytes.
+READINESS_FEATURES: dict[str, int] = {"readiness_observe": 1, "capture_receipts": 1}
+
+
+def readiness_supported(build: dict[str, Any] | None) -> bool:
+    """May this build be asked to observe instead of capture?"""
+
+    return all(
+        feature_supported(build, name, version) for name, version in READINESS_FEATURES.items()
+    )
 
 
 def feature_supported(build: dict[str, Any] | None, name: str, minimum: int = 1) -> bool:
