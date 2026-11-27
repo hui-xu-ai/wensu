@@ -36,6 +36,33 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.48] - 2026-11-27
+
+0.14.47 复验的两项（`docs/reviews/wensu-0.14.47-lease-receipt-2026-11-27.md`）。报告点出的第一条
+是这轮最该被抓住的：**读者被告知"没发出去，可以再试"，而那一帧其实已经写出去了。**
+
+### Fixed — `TimeoutError("timed out")` 被当成"未发出，可重试"（F47-01，P1）
+
+分类靠 `"timeout" in code`，而客户端异常文本是 `timed out`（两层词都不同）：于是一次已经写出帧、
+只是没等到回包的导航，被答成 `the navigation failed before it was issued: ask again`，`stage` 还被重算成
+`render`、`terminal` 成 `partial`。
+
+现在只有**证据**能给出"未发出"：
+
+| 事实 | 回包 |
+|---|---|
+| 帧已写出（`operation_issued: true`），没等到回包 | `status: timeout` / `reason: navigation_unconfirmed` / `unconfirmed: true` / `stage: navigate` |
+| 无法判断（`null`，绝大多数 bridge 失败） | 同上 —— 默认就是"未确认" |
+| 证明在派发前失败（`operation_issued: false`） | `status: error` / `unconfirmed: false`，允许提示重试 |
+
+分类不再读错误字符串，而读适配器写下的 `operation_issued`；`_send` 在 `sendall` 返回后才置位。
+
+### Fixed — 上一次的 `operation_id` 会被用来回答下一次失败（F47-02，P2）
+
+`_last_request_id` 是共享成员，且只在 `_send` 里赋值；`_connect` 失败时 `execute` 直接取它，于是第二次
+失败返回的是**第一次成功操作**的查询键。现在每次 `execute` 先分配本次身份并传下去，所有返回路径都用
+这个局部身份；未派发时 `operation_issued: false`，id 与上一次必然不同。
+
 ## [0.14.47] - 2026-11-27
 
 0.14.46 复验的 2 条 P1 与 3 条 P2（`docs/reviews/wensu-0.14.46-lease-receipt-2026-11-27.md`）。

@@ -230,17 +230,21 @@ def _navigation_unconfirmed(
     publisher: str,
     target: str,
     error: str,
+    issued: bool | None = None,
 ) -> dict[str, Any]:
     """The answer for a navigation that may still land.
 
-    `operation_id` is what the caller quotes to `navigation_status`; without it the tool's own
-    instruction ("pass the operation_id") was impossible to follow (F46-01).
+    `issued` is the only thing allowed to produce "it was not issued, ask again": `False` means the
+    frame provably never left (a pre-dispatch failure), and `None` — the normal case for every
+    bridge timeout, including `TimeoutError("timed out")` whose text contains no "timeout" — stays
+    unconfirmed, because a second navigation while the first may still land is the failure this
+    whole field exists to prevent (retest 2026-11-27, F47-01).
     """
 
-    unconfirmed = "timeout" in code
+    not_issued = issued is False
     return {
-        "status": "timeout" if unconfirmed else "error",
-        "reason": "navigation_unconfirmed" if unconfirmed else code,
+        "status": "error" if not_issued else "timeout",
+        "reason": code if not_issued else "navigation_unconfirmed",
         "stage": "navigate",
         "doi": doi,
         "publisher": publisher,
@@ -248,17 +252,19 @@ def _navigation_unconfirmed(
         "mhtml_path": None,
         "bytes": 0,
         "operation_id": operation_id or None,
-        "unconfirmed": unconfirmed,
+        "unconfirmed": not not_issued,
         "error": error,
         "quota_charged": 0,
         "quota_reason": "unknown",
         "next": (
-            "the navigation was not confirmed: the tab may still land. Check "
-            "`status.browser_busy` (and the tab) before asking again — a second navigation while "
-            "this one is in flight is what makes captures untrustworthy. Ask "
-            "`navigation_status` with `operation_id` once you have one."
-            if unconfirmed
-            else "the navigation failed before it was issued: ask again."
+            "the action never left this machine (pre-dispatch failure): asking again is safe."
+            if not_issued
+            else (
+                "the navigation was not confirmed: the tab may still land. Check "
+                "`status.browser_busy` (and the tab) before asking again — a second navigation "
+                "while this one is in flight is what makes captures untrustworthy. Ask "
+                "`navigation_status` with `operation_id` once you have one."
+            )
         ),
     }
 
@@ -1575,6 +1581,7 @@ class ScholarService:
                     publisher=publisher.name,
                     target=target,
                     error=str(error),
+                    issued=getattr(error, "operation_issued", None),
                 )
             failed = outcomes[-1] if outcomes else None
             if failed is not None and not failed.ok:
@@ -1582,6 +1589,7 @@ class ScholarService:
                 # Report it here, from the outcome itself, so the operation id travels with the
                 # answer instead of being dropped on the way to an exception (F46-01).
                 failed_data = failed.data if isinstance(failed.data, dict) else {}
+                issued = failed_data.get("operation_issued")
                 return _navigation_unconfirmed(
                     code=str(failed.error or "") or "navigation_failed",
                     operation_id=str(failed_data.get("operation_id") or ""),
@@ -1589,20 +1597,7 @@ class ScholarService:
                     publisher=publisher.name,
                     target=target,
                     error=str(failed.error or ""),
-                )
-            failed = outcomes[-1] if outcomes else None
-            if failed is not None and not failed.ok:
-                # The navigation failed *after* it was dispatched (or was refused by the bridge).
-                # Report it here, from the outcome itself, so the operation id travels with the
-                # answer instead of being dropped on the way to an exception (F46-01).
-                failed_data = failed.data if isinstance(failed.data, dict) else {}
-                return _navigation_unconfirmed(
-                    code=str(failed.error or "") or "navigation_failed",
-                    operation_id=str(failed_data.get("operation_id") or ""),
-                    doi=identifier,
-                    publisher=publisher.name,
-                    target=target,
-                    error=str(failed.error or ""),
+                    issued=issued if isinstance(issued, bool) else None,
                 )
             final_url = outcomes[-1].url or target
             # Only the last navigation's title can be this page's title. With two `goto`s (the
@@ -2412,6 +2407,11 @@ class ScholarService:
                     # So the caller of a timed-out action can ask the ledger about *that* action
                     # (F46-01). Without this the id stopped at the adapter.
                     operation_id=str(failure_data.get("operation_id") or ""),
+                    operation_issued=(
+                        failure_data.get("operation_issued")
+                        if isinstance(failure_data.get("operation_issued"), bool)
+                        else None
+                    ),
                 )
         return outcomes
 

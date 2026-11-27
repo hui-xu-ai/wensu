@@ -41,6 +41,7 @@ class ActionError(ScholarSearchError):
         stage: str | None = None,
         diagnostics: dict[str, object] | None = None,
         operation_id: str = "",
+        operation_issued: bool | None = None,
     ) -> None:
         super().__init__(message)
         self.verb = verb
@@ -48,6 +49,9 @@ class ActionError(ScholarSearchError):
         # Which action this was, so a caller told "timeout" can ask the ledger what became of it
         # (F46-01). Empty when the action never reached the wire.
         self.operation_id = operation_id
+        # `False` only with proof the frame never left; `None` means "unknown", which is what every
+        # bridge timeout is (F47-01).
+        self.operation_issued = operation_issued
         # Where in the plan it stopped. `stage` is a short kind label such as
         # `wait.capture` or `click.submit`, never a selector: three different waits in
         # one WoS search used to be indistinguishable from the outside.

@@ -58,6 +58,8 @@ class BridgeAdapter:
         # The id of the most recent action, kept so a failed send can still tell the caller which
         # operation to ask about (F46-01).
         self._last_request_id: str = ""
+        # The id whose frame was actually written: only then may a failure not claim "not issued".
+        self._dispatched: str = ""
         self.domains: tuple[str, ...] | None = None
 
     # -- discovery -----------------------------------------------------
@@ -345,7 +347,9 @@ class BridgeAdapter:
 
     # -- actions -------------------------------------------------------
 
-    def _send(self, action: Action, timeout_ms: int) -> ActionOutcome:
+    def _send(
+        self, action: Action, timeout_ms: int, request_id: str | None = None
+    ) -> ActionOutcome:
         assert self._socket is not None and self._reader is not None
         # The client must outwait the server, not match it. The host allows itself the
         # action's whole `timeout_ms` and then writes the reply; a socket read deadline of
@@ -353,7 +357,7 @@ class BridgeAdapter:
         # its full budget could never report what happened — it surfaced as
         # `bridge.error: timed out` on a run that had in fact succeeded.
         self._socket.settimeout(max(self._timeout, timeout_ms / 1000 + BRIDGE_REPLY_MARGIN_S))
-        request_id = uuid.uuid4().hex
+        request_id = request_id or uuid.uuid4().hex
         self._last_request_id = request_id
         request = {
             "id": request_id,
@@ -364,6 +368,8 @@ class BridgeAdapter:
             "domains": list(self.domains or ()),
         }
         self._socket.sendall((json.dumps(request, ensure_ascii=False) + "\n").encode("utf-8"))
+        # From here on the frame is out: a failure can no longer claim "it was never issued".
+        self._dispatched = request_id
 
         # A navigation can delay the previous action's reply past its own return,
         # leaving it in the stream. Those replies belong to an action that already
@@ -398,22 +404,27 @@ class BridgeAdapter:
         )
 
     def execute(self, action: Action, *, timeout_ms: int) -> ActionOutcome:
+        # One identity per attempt, allocated *before* anything can fail, so a failure can never
+        # report the previous action's id (retest 2026-11-27, F47-02).
+        request_id = uuid.uuid4().hex
         try:
             self._connect()
-            return self._send(action, timeout_ms)
+            return self._send(action, timeout_ms, request_id)
         except (OSError, ValueError, KeyError) as exc:
             # A timed-out socket stays unusable, so drop it: the next call dials
             # again instead of reading from a poisoned stream. Without this, one
             # slow navigation made every later action fail.
             self.close()
-            # The request id of the action that timed out, so the caller can ask the ledger what
-            # became of it. Without this the tool told people to "pass the operation_id" and no
-            # id reached them at all (retest 2026-11-27, F46-01).
+            # `operation_issued: false` only when the request provably never left the wire. A read
+            # that timed out after the frame was written may have navigated: that one must stay
+            # "unconfirmed", because "it was not issued, ask again" invites a second navigation
+            # (F47-01).
+            issued = self._dispatched == request_id
             return ActionOutcome(
                 action=action,
                 ok=False,
                 error=f"bridge.error: {exc}",
-                data={"operation_id": self._last_request_id},
+                data={"operation_id": request_id, "operation_issued": issued},
             )
 
     def close(self) -> None:
