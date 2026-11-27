@@ -522,7 +522,12 @@ def _page_spec(publisher: Publisher) -> ChannelSpec:
 
 # A page snapshot moves a few megabytes through the browser's own write path. The host
 # rejects any deadline above 15 s (`policy.deadline`), so this is the ceiling too.
-SNAPSHOT_TIMEOUT_MS = 15_000
+SNAPSHOT_TIMEOUT_MS = 60_000
+# 15 s was not enough for a real article: a ScienceDirect page right after a captcha took the
+# browser >17 s to produce its 2.9 MB MHTML, so the public `snapshot()` returned `bridge.error:
+# timed out` on a page that was perfectly capturable (real run 2026-11-27, F58-01). The budget is
+# for `pageCapture` on a heavy page, not for the transport — the chunks that follow each get their
+# own timeout.
 # One chunk per round trip; the extension sends at most this many bytes per reply.
 MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024
 

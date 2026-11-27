@@ -36,6 +36,31 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.59] - 2026-11-27
+
+### Fixed — 人工过验证后抓当前页超时，且答"不可重试"（F58-01，P1）
+
+真机流程（`docs/reviews/wensu-0.14.58-browser-flow-2026-11-27.md`）：用户手动点过机器人验证、进入文献页，
+随后公开 `snapshot()` 抓当前页，约 17.034 s 后返回
+
+```json
+{"status": "error", "code": "ACTION_BRIDGE_ERROR: TIMED OUT", "stage": "snapshot",
+ "quota_charged": 0, "retryable": false}
+```
+
+页面是可抓的——同一篇在 `page_read` 计划里 2.9 MB 的 MHTML 抓下来过。问题在两处：
+
+1. **预算太短**：`SNAPSHOT_TIMEOUT_MS` 是 15 s，而这篇重页面 `pageCapture` 单独就要 >17 s。
+   现在 60 s，并在注释里写明这个预算买的是 `pageCapture` 的时间，不是传输（后续分块各有自己的超时）。
+2. **`retryable` 报错**：只有 `BridgeTimeout` 才算可重试，而 snapshot 路径抛的是 `ActionError`，
+   于是"超时"被写成"别试了"。现在：`stage == "snapshot"` 且代码含 `timeout` 时 `retryable: true`——
+   抓取不花额度、字节没到之前不写任何文件，重试不会损失什么。
+
+**读取路径的超时保持 `retryable: false`**：它的导航可能已经发出去了，重试可能再扣一次额度并把
+第二次导航落到标签页上。这条边界单独有测试守着，别被顺手改掉。
+
+`background-0.14.59.js`（worker 内容未变）。
+
 ## [0.14.58] - 2026-11-27
 
 ### Fixed — URL-only 读取把捕获存进了标题目录，而不是页面 DOI 目录（F57-01，P2）

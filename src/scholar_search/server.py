@@ -292,7 +292,17 @@ def _retryable(error: Exception) -> bool:
 
     if isinstance(error, RiskBlocked):
         return False
-    return isinstance(error, BridgeTimeout)
+    if isinstance(error, BridgeTimeout):
+        return True
+    # A capture that timed out is the one action-level case where asking again is honest: the
+    # snapshot costs no quota and writes nothing before the bytes arrive, so nothing was lost by
+    # the timeout. A *read* timeout stays `false` — its navigation may already have been issued,
+    # so repeating it could charge again and land a second navigation on the tab.
+    return bool(
+        isinstance(error, ActionError)
+        and getattr(error, "stage", "") == "snapshot"
+        and "timeout" in str(getattr(error, "code", "") or "").lower()
+    )
 
 
 def _payload(
