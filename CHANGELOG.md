@@ -36,6 +36,38 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.52] - 2026-11-27
+
+P2 第二、三点：**宿主派发前的租约校验**与 **worker 的旧代围栏**。
+
+### Added — 帧写出去之前先核对租约
+
+宿主在 `validate_request` 之后、写帧之前核对信封里的租约（`core/lease.py::lease_check`）：
+
+| 信封 | 记录 | 结果 |
+|---|---|---|
+| `fence` 落后于记录 | `active`/`unconfirmed` | 拒绝，`policy.lease` |
+| `lease_id` 与记录不符 | 同上 | 拒绝，`policy.lease` |
+| 记录是 `free` | — | 拒绝（没有租约能为一帧作保） |
+| 没带租约（observe 模式） | — | 不检查，行为不变 |
+
+`BridgeHost.request(..., context=...)` 现在接受信封；`native-host` 安装了检查器。**没装检查器的宿主行为一字未变**。
+
+### Added — worker 记住围栏，拒绝被取代的调用
+
+worker 处理 `lease_sync` 控制帧（记下 `fence`/`lease_id`，回 `lease_ack` 带自己的 `worker_epoch`），
+之后凡是信封 `fence` 落后于该围栏的动作，直接回 `policy.fence`，**不执行**——这是"调用返回了、但旧
+续体不该再动这个标签页"的第三道闸。没带信封的动作照常执行（旧内核不发信封）。
+
+### 验证的边界（必须说清）
+
+- 宿主侧：有 Python 单测覆盖（拒绝 superseded fence、`free` 记录不为任何帧作保、无信封不检查）。
+- worker 侧：**只有静态契约测试**证明 `lease_sync`/`lease_ack`/`policy.fence` 三条都在且被接进消息分派。
+  我写了一版真 worker + 假 `chrome` 的行为探针，端口消息没送达，**没有跑通，已删除**，所以这一条
+  **不算行为验证通过**。要做的话，下一轮照 `tests/js/gate_watch_probe.js` 的既有模式补。
+
+`background-0.14.52.js`。
+
 ## [0.14.51] - 2026-11-27
 
 P2 第一步：**内核侧准入（`enforce`），默认关闭**。

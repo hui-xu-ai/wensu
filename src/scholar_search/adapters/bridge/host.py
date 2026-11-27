@@ -66,6 +66,7 @@ class BridgeHost:
         *,
         clock: Callable[[], float] = time.monotonic,
         late_replies: Callable[[str, dict[str, Any], str], None] | None = None,
+        lease_checker: Callable[[dict[str, Any]], str | None] | None = None,
     ) -> None:
         self._in = stdin or sys.stdin.buffer
         self._out = stdout or sys.stdout.buffer
@@ -77,6 +78,9 @@ class BridgeHost:
         # "was it issued?" question unanswerable (plan §二.3).
         self._orphans: dict[str, dict[str, Any]] = {}
         self._late_replies = late_replies
+        # Optional gate on the *sender's* lease, checked before a frame is written. Installed by
+        # the native host; a host without it behaves exactly as before (docs/protocol-lease.md §3).
+        self._lease_checker = lease_checker
         self._closed = False
         self._handshaked = False
         # Filled by `_handshake` from the extension's own reply; empty until then.
@@ -228,6 +232,7 @@ class BridgeHost:
         timeout_s: float = 15.0,
         domains: tuple[str, ...] | None = None,
         request_id: str | None = None,
+        context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Send one action to the extension and wait for its reply."""
 
@@ -242,9 +247,22 @@ class BridgeHost:
             "params": params,
             "domains": list(domains or ()),
         }
+        if context:
+            message["context"] = dict(context)
         error = validate_request(message, domains)
         if error is not None:
             return {"ok": False, "error": error, "id": request_id}
+
+        # The sender's lease, checked here rather than trusted from the envelope: a stale fence is
+        # refused before the frame reaches the extension, so an old call cannot ride on a new
+        # lease (plan §二.2, second of the three enforcement points).
+        if self._lease_checker is not None:
+            context = message.get("context")
+            if isinstance(context, dict):
+                with contextlib.suppress(Exception):
+                    lease_error = self._lease_checker(context)
+                    if lease_error is not None:
+                        return {"ok": False, "error": lease_error, "id": request_id}
 
         deadline = self._clock() + timeout_s
         if not self._handshake(deadline):

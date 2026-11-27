@@ -23,7 +23,7 @@ from scholar_search import __version__ as VERSION
 from scholar_search.adapters.bridge.host import BridgeHost
 from scholar_search.adapters.bridge.policy import TRUSTED_DOMAINS, narrow_domains
 from scholar_search.core.config import ensure_host_runtime, host_runtime_dir
-from scholar_search.core.lease import LeaseStore, archive_late_reply
+from scholar_search.core.lease import LeaseStore, archive_late_reply, lease_check
 
 HOST_NAME = "com.scholar.search"
 ENDPOINT_NAME = "bridge.json"
@@ -298,7 +298,9 @@ def main() -> int:
         host = BridgeHost(
             late_replies=lambda rid, message, action: archive_late_reply(
                 lease_store, rid, message, action, at=time.time()
-            )
+            ),
+            # A frame whose lease was superseded is refused here, before it reaches the browser.
+            lease_checker=lease_check,
         )
         token = secrets.token_urlsafe(24)
         domains = (

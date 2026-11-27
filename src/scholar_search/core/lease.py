@@ -306,6 +306,30 @@ def validate_context(context: Any) -> str | None:
     return None
 
 
+def lease_check(context: Any, lease: Lease | None = None) -> str | None:
+    """Is this envelope's lease still the current one? Error code, or None.
+
+    Used by the host before it writes a frame: a caller whose fence is behind the record is a
+    caller whose call was already superseded, and letting it through is how an old navigation
+    lands on the tab the new lease is using.
+    """
+
+    if not isinstance(context, dict):
+        return None
+    fence = context.get("fence")
+    if not isinstance(fence, int):
+        return None  # no lease claim, nothing to check (observe mode never sends one)
+    current = lease if lease is not None else LeaseStore().read()
+    if current.state == "free":
+        return "policy.lease"
+    if fence < current.fence:
+        return "policy.lease"
+    claimed = str(context.get("lease_id") or "")
+    if current.lease_id and claimed and claimed != current.lease_id:
+        return "policy.lease"
+    return None
+
+
 def missing_features(build: dict[str, Any] | None) -> list[str]:
     """Which required features the connected build does not advertise."""
 

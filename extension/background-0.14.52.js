@@ -188,6 +188,13 @@ const captures = new Map();
 // The last navigation this worker issued in each tab (ADR 0030). A capture can then say which
 // navigation it followed, so "did I capture the page I just navigated to" stops being a guess.
 const tabNavigation = new Map();
+// This worker instance, and the lease fence the host has told it about (docs/protocol-lease.md §3).
+const WORKER_EPOCH =
+  typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+let fencedFence = 0;
+let fencedLease = "";
 
 function bytesToBase64(bytes) {
   let binary = "";
@@ -702,10 +709,27 @@ async function onHostMessage(message, channel) {
       features: FEATURES,
       // Identity of *this* worker instance: a rebuilt worker is a different epoch, and its
       // continuations must not be mistaken for the previous one's.
-      worker_epoch:
-        typeof crypto !== "undefined" && crypto.randomUUID
-          ? crypto.randomUUID()
-          : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      worker_epoch: WORKER_EPOCH,
+    });
+    return;
+  }
+  // Lease synchronisation (docs/protocol-lease.md §3). The host tells this worker which fence is
+  // current; from then on an action carrying an older fence is refused instead of executed, so a
+  // stale call cannot navigate a tab the new lease is using. Control only: it carries no URL,
+  // selector or script.
+  if (message.type === "lease_sync") {
+    const fence = Number(message.fence);
+    if (Number.isInteger(fence) && fence >= fencedFence) {
+      fencedFence = fence;
+      fencedLease = String(message.lease_id || "");
+    }
+    channel.postMessage({
+      type: "lease_ack",
+      id: message.id,
+      ok: Number.isInteger(fence) && fence >= 0,
+      worker_epoch: WORKER_EPOCH,
+      fence: fencedFence,
+      lease_id: fencedLease,
     });
     return;
   }
@@ -713,9 +737,23 @@ async function onHostMessage(message, channel) {
 
   const { id, action, params, context } = message;
   // The envelope the kernel sent (docs/protocol-lease.md §5). Echoed back with every reply for
-  // this action, so the caller can confirm the result belongs to the action it sent — this slice
-  // only reports, it never refuses on it.
+  // this action, so the caller can confirm the result belongs to the action it sent.
   const envelope = context && typeof context === "object" ? context : {};
+  if (
+    fencedFence > 0 &&
+    Number.isInteger(envelope.fence) &&
+    envelope.fence < fencedFence
+  ) {
+    // A frame from a superseded lease: it must not touch a tab the current lease is using.
+    channel.postMessage({
+      type: "action_result",
+      id,
+      ok: false,
+      error: "policy.fence",
+      data: { fence: fencedFence, worker_epoch: WORKER_EPOCH },
+    });
+    return;
+  }
   const domains = domainsFor(message);
   const reply = (payload) =>
     channel.postMessage({

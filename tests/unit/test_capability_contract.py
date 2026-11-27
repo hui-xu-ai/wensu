@@ -83,6 +83,63 @@ def test_the_worker_honours_a_named_tab_and_still_falls_back() -> None:
     assert "workTab(domains, params.tab_id)" in text
 
 
+def test_the_worker_implements_the_lease_fence() -> None:
+    """P2's third enforcement point, checked statically.
+
+    The behavioural probe (a `lease_sync` round trip under a fake `chrome`) is **not** in place
+    yet; until it is, this asserts the two pieces exist and are wired, and nothing more. Claiming
+    more than that would be the same mistake as testing only the worker's capability list.
+    """
+
+    worker = next(ROOT.glob("extension/background-*.js"))
+    text = worker.read_text(encoding="utf-8")
+
+    assert 'message.type === "lease_sync"' in text
+    assert 'type: "lease_ack"' in text
+    assert "policy.fence" in text
+    assert "let fencedFence = 0;" in text
+    assert "WORKER_EPOCH" in text
+
+
+def test_the_host_checks_the_senders_lease_before_writing_a_frame() -> None:
+    """P2, second enforcement point: a superseded fence is refused before dispatch."""
+
+    import io
+
+    from scholar_search.adapters.bridge.host import BridgeHost
+
+    seen: list[dict[str, object]] = []
+
+    def checker(context: dict[str, object]) -> str | None:
+        seen.append(context)
+        return "policy.lease" if context.get("fence") == 1 else None
+
+    host = BridgeHost(stdin=io.BytesIO(), stdout=io.BytesIO())
+    host._lease_checker = checker
+    host._handshaked = True
+
+    refused = host.request(
+        "sleep", {"ms": 1}, timeout_s=0.05, context={"version": 1, "fence": 1, "lease_id": "L1"}
+    )
+
+    assert refused["error"] == "policy.lease", refused
+    assert seen and seen[0]["fence"] == 1, seen
+
+
+def test_a_lease_claim_is_checked_against_the_record() -> None:
+    from scholar_search.core.lease import Lease, lease_check
+
+    active = Lease(lease_id="L2", fence=5, state="active")
+
+    assert lease_check({"version": 1, "fence": 5, "lease_id": "L2"}, active) is None
+    assert lease_check({"version": 1, "fence": 4, "lease_id": "L2"}, active) == "policy.lease"
+    assert lease_check({"version": 1, "fence": 5, "lease_id": "L1"}, active) == "policy.lease"
+    # A record that says `free` cannot vouch for any claim.
+    assert lease_check({"version": 1, "fence": 5}, Lease(lease_id="", fence=5, state="free"))
+    # No claim at all (observe mode): nothing to check.
+    assert lease_check({"version": 1}, active) is None
+
+
 def test_the_gate_wait_asks_for_a_focused_window() -> None:
     """A window that is maximized but behind everything is still invisible (P5 retest F34-01).
 
