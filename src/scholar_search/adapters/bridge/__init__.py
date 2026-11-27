@@ -334,7 +334,13 @@ class BridgeAdapter:
         build = reply.get("build")
         if not isinstance(build, dict):
             return {}
-        return {**build, "host_version": reply.get("host_version")}
+        info = {**build, "host_version": reply.get("host_version")}
+        # The host's own answer about whether *it* can write the lease records. It runs at the
+        # browser's integrity level; a kernel-side check could not answer this (unverified.md §2).
+        writable = reply.get("coordination_writable")
+        if isinstance(writable, bool):
+            info["coordination_writable"] = writable
+        return info
 
     def _connect(self) -> None:
         if self._socket is not None:

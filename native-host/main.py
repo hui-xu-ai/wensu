@@ -137,6 +137,11 @@ def serve_client(
                     "ok": True,
                     "host_version": VERSION,
                     "build": build if isinstance(build, dict) else {},
+                    # This process runs at the browser's low integrity, so *its* answer is the
+                    # evidence: lease records and late receipts are written here, and a medium-
+                    # integrity probe from the kernel could never tell whether this one can
+                    # (unverified.md §2). A write that fails silently is worse than a refusal.
+                    "coordination_writable": _coordination_writable(),
                 }
                 connection.sendall((json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8"))
                 continue
@@ -284,6 +289,26 @@ def _apply_runtime_home() -> None:
         return
     if home:
         os.environ["SCHOLAR_SEARCH_HOME"] = home
+
+
+def _coordination_writable() -> bool:
+    """Can *this* process write the lease records? Answered by writing one.
+
+    A permission check (`os.access`) lies under Windows integrity levels, and the question is not
+    "may I" but "did it work", so the probe creates and removes a real file in the directory the
+    records live in. Failure is reported as `false`, never as an exception: the host must still
+    answer `info` on a machine where the installer's ACL did not take.
+    """
+
+    try:
+        root = LeaseStore().root
+        root.mkdir(parents=True, exist_ok=True)
+        probe = root / f".probe-{os.getpid()}.tmp"
+        probe.write_text("wensu", encoding="utf-8")
+        probe.unlink()
+    except OSError:
+        return False
+    return True
 
 
 def main() -> int:

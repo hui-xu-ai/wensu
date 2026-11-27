@@ -36,6 +36,27 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.55] - 2026-11-27
+
+### Added — 宿主自己回答"我能不能写租约记录"
+
+`coordination/` 需要浏览器**低完整性**宿主可写。这一条至今只有安装器的意图，没有观测证据
+（`work/tasks/2026-11-27-lease-receipt/unverified.md` §2）；而内核在高完整性下探测永远成功，
+问不出真正的问题。
+
+现在宿主的 `info` 带 `coordination_writable`：它在 `coordination/` 里真的写一个临时文件再删掉，
+失败就报 `false`，不抛异常（安装器 ACL 没生效的机器上仍要能回答 `info`）。内核原样透传到
+`status.bridge_build.coordination_writable`。
+
+读法：
+
+| 值 | 含义 |
+|---|---|
+| `true` | 迟到回包归档与租约校验在真机上能落盘，`unverified.md` §2 可以划掉 |
+| `false` | 两者在真机上都静默失效——归档写不进去、`lease_check` 读到不可信记录（现在会拒绝，不再放行） |
+
+`background-0.14.55.js`（worker 内容未变）。
+
 ## [0.14.54] - 2026-11-27
 
 真实浏览器验收（`docs/reviews/wensu-0.14.53-real-browser-2026-11-27.md`）的三项内容问题。

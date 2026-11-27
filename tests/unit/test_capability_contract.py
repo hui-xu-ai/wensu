@@ -169,6 +169,40 @@ def test_the_installer_labels_the_coordination_directory() -> None:
     assert "$env:SCHOLAR_SEARCH_BROWSER_STATE" in script, "the override must be honoured"
 
 
+def test_the_host_reports_whether_it_can_write_the_lease_records(tmp_path, monkeypatch) -> None:
+    """Only the low-integrity host can answer this, so it answers with a real write.
+
+    A medium-integrity probe from the kernel would always succeed and prove nothing
+    (`work/tasks/2026-11-27-lease-receipt/unverified.md` §2).
+    """
+
+    import importlib.util
+
+    monkeypatch.setenv("SCHOLAR_SEARCH_BROWSER_STATE", str(tmp_path / "browser-state"))
+    spec = importlib.util.spec_from_file_location(
+        "wensu_native_host", ROOT / "native-host" / "main.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module._coordination_writable() is True
+    leftovers = list((tmp_path / "browser-state" / "coordination").glob(".probe-*"))
+    assert leftovers == [], f"the probe must clean up after itself: {leftovers}"
+
+
+def test_status_passes_the_host_s_answer_through() -> None:
+    """`bridge_build.coordination_writable` is the field the retest will read."""
+
+    import inspect
+
+    from scholar_search.adapters.bridge import BridgeAdapter
+
+    source = inspect.getsource(BridgeAdapter.info)
+
+    assert "coordination_writable" in source
+
+
 def test_the_gate_wait_asks_for_a_focused_window() -> None:
     """A window that is maximized but behind everything is still invisible (P5 retest F34-01).
 
