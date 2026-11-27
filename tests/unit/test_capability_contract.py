@@ -86,9 +86,9 @@ def test_the_worker_honours_a_named_tab_and_still_falls_back() -> None:
 def test_the_worker_implements_the_lease_fence() -> None:
     """P2's third enforcement point, checked statically.
 
-    The behavioural probe (a `lease_sync` round trip under a fake `chrome`) is **not** in place
-    yet; until it is, this asserts the two pieces exist and are wired, and nothing more. Claiming
-    more than that would be the same mistake as testing only the worker's capability list.
+    This is the cheap half; the behavioural half is `test_lease_fence_worker.py`, which drives
+    `lease_sync`, a stale fence and a legacy frame through the real worker. Keep both: the static
+    one catches a removed line, the behavioural one catches a message routed past the check.
     """
 
     worker = next(ROOT.glob("extension/background-*.js"))

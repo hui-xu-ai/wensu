@@ -21,20 +21,27 @@
 
 这两条只有等自然样本，**不要为它们制造访问**。
 
-## 1. worker 侧的旧代围栏（0.14.52）
+## 1. ~~worker 侧的旧代围栏（0.14.52）~~ 已于离线补通（0.14.64 测试集）
 
-- 代码：`extension/background-*.js` 的 `lease_sync` 处理、`policy.fence` 拒绝、`WORKER_EPOCH`。
-- 现状：只有**静态契约测试**（`tests/unit/test_capability_contract.py::test_the_worker_implements_the_lease_fence`）断言这几处存在且接进了消息分派。
-- 缺什么：一次真行为的回放——`lease_sync` 后，旧 fence 的动作必须被拒、当前 fence 与无信封的动作必须放行。
+`tests/js/lease_fence_probe.js` + `tests/unit/test_lease_fence_worker.py` 现在**驱动真 worker**：
 
-### 我试过的三次（都失败，都删掉了）
+| 输入 | 实测 |
+|---|---|
+| `lease_sync {lease_id: L1, fence: 5}` | `lease_ack {ok: true, fence: 5, lease_id: L1, worker_epoch}` |
+| `snapshot`，信封 `fence: 4`（被取代） | `ok: false`、`error: "policy.fence"`、`data.fence: 5` |
+| `sleep`，**无信封**（旧内核） | `ok: true` —— 围栏不是墙 |
+| `sleep`，信封 `fence: 5` | `ok: true`，且回包 `context` 原样带回 |
 
-1. **两条管道 + 脚本化 worker**：宿主侧握手 OK，但探针要驱动的是 worker 而不是宿主，方向错了。
-2. **VM + 假 `chrome` + 端口**：加载成功，但 `onConnect`/`onMessage` 的回调没有收到任何消息，四条全 `null`。
-3. **VM + `context.onHostMessage(message, channel)`**：进程不退出，没有任何输出。
+静态契约测试（`test_capability_contract.py`）保留：它抓"这行被删了"，行为探针抓"消息绕过检查"。
 
-**第四次成功**（`tests/js/readiness_probe.js`）：照 `gate_watch_probe.js` 的 `makeChrome`/`load`/`send`
-三段，末尾显式 `process.exit(0)`。同样的路子可以直接用来补这条围栏的行为验证。
+### 我前三次为什么失败（留作教训）
+
+1. 两条管道 + 脚本化 worker：宿主侧握手 OK，但方向错了——探针要驱动的是 worker；
+2. VM + 端口：加载成功，`onConnect`/`onMessage` 收不到任何消息；
+3. VM + `onHostMessage` 但没显式退出：进程挂住、无输出。
+
+**可用的模式**（`gate_watch_probe.js` 起就有的三条）：假 `chrome` 满足加载期所有监听器；
+直接 `await context.onHostMessage(msg, {postMessage})`；末尾 `process.exit(0)`。
 
 ### 建议的补法
 
