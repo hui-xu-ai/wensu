@@ -46,12 +46,23 @@
    并在 `next` 里要求先看 `status.browser_busy` 与标签页再决定是否重试——**标签页可能在你被告知超时之后
    才落地**，这才是"超时取消确认"缺的那块。
 
-## 未实施（第三片）
+## 未实施（第三片，已冻结契约）
 
-1. **内核指定 `tab_id`**：现在仍是扩展自选工作标签页，回包才告诉内核用的是哪一页；
-2. **租约超时后不派新任务**：现在只做到"报告未确认 + 让调用方自己看 `browser_busy`"，没有强制排队；
-3. **扩展在超时后主动上报收尾状态**（已中止 / 已落地及最终 URL）——需要给 `goto` 一个迟到的第二回执，
-   属协议新增。
+第三片补的是"调用结束 ≠ 浏览器操作结束"。方案见 `work/tasks/2026-11-27-lease-receipt/plan.md`，
+可执行的契约见 `docs/protocol-lease.md` 与 `src/scholar_search/core/lease.py`（P0，尚未接线）。
+
+已批准的三处收敛（实现方评审：`work/tasks/2026-11-27-lease-receipt/review-lead.md`）：
+
+1. **只读追问走宿主控制通道**，不新增浏览器动词——它不是浏览器动作，进封闭动词表要同步 5 处词表，
+   而本项目两次真机故障（F33-01、F34-01）都是漏层；
+2. **身份字段 8 → 4**：`lease_id`+`fence`、`operation_id`、`worker_epoch`、`endpoint_epoch`；
+3. **P1 拆两半**：P1a＝账本 + 迟到回包归档 + 只读追问 + `status` 摘要（全部离线可验，`observe` 模式）；
+   P1b＝`features`/epoch 协商 + `context` 信封 + 安装器最小权限。
+
+`内核指定 tab_id` 已在 0.14.45 实施（`params.tab_id`，命名标签页不可用时回退），不再属于"未实施"。
+
+仍未做、且明确不在 P1a 范围：强制准入（`enforce`）、worker 侧每个续体的旧代隔离、
+`context` 信封与 native framing 改动。
 
 ## 影响面
 
