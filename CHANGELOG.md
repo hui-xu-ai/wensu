@@ -36,6 +36,31 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.60] - 2026-11-27
+
+三处实错，来自对就绪方案的评审（`work/tasks/2026-11-27-lease-receipt/gpt-readiness-review.md`）。
+本轮只止血，不改动作语义；观测模式与捕获生命周期的改造随后按 P0 → P1 → P2 做。
+
+### Fixed — 抓取超时被报成"导航没确认"
+
+`_page_stage` 的推导把**任何** `status: timeout` 都归到 `navigate`，于是一次抓取超时被写成
+"页面没到达"，而那页其实已经到达并被抓取过。现在 payload 里显式的 `stage` **优先**于推导；
+身份拒绝的出口也直接声明 `stage: identity`。推导仍是兜底，未知阶段值不会被当成合法阶段。
+
+### Fixed — "抓取超时就可重试"改得太松（0.14.59 的错）
+
+0.14.59 把 `stage=snapshot` 的任何超时都标成 `retryable: true`。但 `saveAsMHTML` **已经发出**时，
+浏览器可能仍在生成文件——再调一次会在这同一个标签页上叠第二次物理抓取。现在只有
+`operation_issued is False`（确定没发出去）才可重试；`True` 与"未知"都不可重试。
+
+### Fixed — 抓取预算贴着宿主硬上限
+
+`SNAPSHOT_TIMEOUT_MS` 0.14.59 设成 60000，而 `native-host/main.py` 拒绝 `timeout_ms > 60000`：
+等于让动作预算与线上限重合，慢页面会先被宿主截断、连"我们自己的超时回执"都拿不到。现在 **55000**，
+并在注释里写明：要再往上必须先改宿主上限（那是协议变更，不是改常量）。
+
+`background-0.14.60.js`（worker 内容未变）。
+
 ## [0.14.59] - 2026-11-27
 
 ### Fixed — 人工过验证后抓当前页超时，且答"不可重试"（F58-01，P1）

@@ -294,15 +294,13 @@ def _retryable(error: Exception) -> bool:
         return False
     if isinstance(error, BridgeTimeout):
         return True
-    # A capture that timed out is the one action-level case where asking again is honest: the
-    # snapshot costs no quota and writes nothing before the bytes arrive, so nothing was lost by
-    # the timeout. A *read* timeout stays `false` — its navigation may already have been issued,
-    # so repeating it could charge again and land a second navigation on the tab.
-    return bool(
-        isinstance(error, ActionError)
-        and getattr(error, "stage", "") == "snapshot"
-        and "timeout" in str(getattr(error, "code", "") or "").lower()
-    )
+    # A capture only *might* have happened: `saveAsMHTML` was sent, and the browser may still be
+    # producing the file. Asking again would put a second capture on the tab, so this is only
+    # repeatable when the operation provably never left — not merely because the verb is free.
+    # (0.14.59 said "snapshot timeout ⇒ retryable"; that invited two overlapping captures.)
+    if isinstance(error, ActionError) and getattr(error, "stage", "") == "snapshot":
+        return getattr(error, "operation_issued", None) is False
+    return False
 
 
 def _payload(

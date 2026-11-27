@@ -144,13 +144,26 @@ def _network_actions(actions: Sequence[Action]) -> int:
     return sum(1 for action in actions if action.verb in NETWORK_VERBS)
 
 
+# The steps a read can stop at, in the order they happen. `render` is the old name for "the page
+# arrived but nothing usable came of it"; it stays for cached answers written by older builds.
+_PAGE_STAGES = frozenset({"cache", "navigate", "wall", "capture", "identity", "publish", "render"})
+
+
 def _page_stage(payload: dict[str, Any]) -> str:
     """Which step the read stopped at: `cache|navigate|wall|capture|identity|publish`.
 
     Derived from the answer's own fields, so every exit is covered without each exit having to
     remember to label itself — the failure mode this field exists to prevent.
+
+    An explicit `stage` on the payload wins. The derivation cannot tell *which* timeout this is:
+    a capture that timed out looked exactly like a navigation that never confirmed, so it was
+    reported as `navigate` — "the page never arrived" for a page that had arrived and been
+    captured (review of the readiness plan, 2026-11-27). Exits that know their stage say it.
     """
 
+    explicit = payload.get("stage")
+    if isinstance(explicit, str) and explicit in _PAGE_STAGES:
+        return explicit
     if payload.get("cached"):
         return "cache"
     status = str(payload.get("status") or "")
@@ -522,12 +535,12 @@ def _page_spec(publisher: Publisher) -> ChannelSpec:
 
 # A page snapshot moves a few megabytes through the browser's own write path. The host
 # rejects any deadline above 15 s (`policy.deadline`), so this is the ceiling too.
-SNAPSHOT_TIMEOUT_MS = 60_000
-# 15 s was not enough for a real article: a ScienceDirect page right after a captcha took the
-# browser >17 s to produce its 2.9 MB MHTML, so the public `snapshot()` returned `bridge.error:
-# timed out` on a page that was perfectly capturable (real run 2026-11-27, F58-01). The budget is
-# for `pageCapture` on a heavy page, not for the transport — the chunks that follow each get their
-# own timeout.
+SNAPSHOT_TIMEOUT_MS = 55_000
+# Below the native host's hard ceiling (`native-host/main.py` rejects `timeout_ms > 60_000`), so a
+# slow `pageCapture` fails with our own timeout and a receipt instead of being cut off at the wire
+# — and there is room for the reply to come back. 15 s was measured too short: a real article
+# capture was still running at 17.034 s (real run 2026-11-27, F58-01). Raising this above 55 s
+# needs the host ceiling raised first, which is a protocol change, not a constant.
 # One chunk per round trip; the extension sends at most this many bytes per reply.
 MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024
 
@@ -1871,6 +1884,9 @@ class ScholarService:
                 return {
                     "status": "no_page",
                     "reason": reason,
+                    # The bytes arrived and were rejected on identity: say so, instead of letting
+                    # the derivation guess `navigate` from a status it cannot read (2026-11-27).
+                    "stage": "identity",
                     "doi": identifier,
                     "publisher": publisher.name,
                     "final_url": final_url,
@@ -2324,11 +2340,18 @@ class ScholarService:
                         "open the article in this window, then ask again."
                     ),
                 }
+            issued = (first.data or {}).get("operation_issued")
             raise ActionError(
                 f"the page could not be saved ({first.error or 'action.failed'})",
                 verb="snapshot",
                 code=first.error or "action.failed",
                 stage="snapshot",
+                operation_id=str((first.data or {}).get("operation_id") or ""),
+                # Tri-state, and it decides whether the caller may try again: a capture that was
+                # issued may still be running inside the browser, and starting a second one would
+                # put two `saveAsMHTML` calls on the same tab. Only "we know nothing was sent" is
+                # safely repeatable (review of the readiness plan, 2026-11-27).
+                operation_issued=issued if isinstance(issued, bool) else None,
             )
         data = dict(first.data)
         meta = {
