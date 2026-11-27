@@ -339,6 +339,22 @@ class LeaseStore:
             return None
         return _operation_from(payload) if isinstance(payload, dict) else None
 
+    def archive(self, operation: Operation) -> None:
+        """Persist one operation's facts even when no lease is held any more.
+
+        A late reply can arrive after the lease was released (or after the host restarted). The
+        facts still belong to that operation, and the next caller must be able to ask about them.
+        """
+
+        with self._exclusive():
+            self.operations_dir().mkdir(parents=True, exist_ok=True)
+            path = self.operations_dir() / f"{_safe_name(operation.operation_id)}.json"
+            _atomic_write(path, operation.dumps())
+            lease = self.read()
+            if lease.lease_id and lease.lease_id == operation.lease_id:
+                lease.add(operation)
+                self._write(lease)
+
     def _write(self, lease: Lease) -> None:
         payload = {
             "lease_id": lease.lease_id,
@@ -388,3 +404,35 @@ def _atomic_write(path: Path, text: str) -> None:
 
 def _safe_name(value: str) -> str:
     return "".join(char if char.isalnum() or char in "-_." else "_" for char in value)[:80] or "op"
+
+
+def archive_late_reply(
+    store: LeaseStore, request_id: str, reply: dict[str, Any], action: str, *, at: float = 0.0
+) -> Operation:
+    """Turn one late `action_result` into an archived operation, without inventing facts.
+
+    This is the *only* place a timed-out action's fate gets recorded. It never returns the reply to
+    a caller, and it refuses to guess: `ok` proves the action ran; an explicit pre-navigation
+    refusal proves it did not; anything else stays `navigation_issued = None`.
+    """
+
+    data = reply.get("data") if isinstance(reply.get("data"), dict) else {}
+    error = str(reply.get("error") or "")
+    ok = reply.get("ok") is True
+    refused = error.startswith("policy.") or error in {"no_active_tab", "policy.params"}
+    operation = Operation(
+        operation_id=request_id,
+        action=action,
+        state="settled",
+        quiescent=True,
+        navigation_issued=True if ok else (False if refused else None),
+        navigation_id=str(data.get("navigation_id") or ""),
+        tab_id=data.get("tab_id") if isinstance(data.get("tab_id"), int) else None,
+        outcome="landed" if ok else "refused" if refused else "unknown",
+        error_code=error,
+        started_at=at,
+        settled_at=at,
+        receipt_seq=1,
+    )
+    store.archive(operation)
+    return operation

@@ -10,6 +10,7 @@ its request; both checks keep the two hops of the bridge in sync.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import struct
 import sys
@@ -64,12 +65,18 @@ class BridgeHost:
         stdout: IO[bytes] | None = None,
         *,
         clock: Callable[[], float] = time.monotonic,
+        late_replies: Callable[[str, dict[str, Any], str], None] | None = None,
     ) -> None:
         self._in = stdin or sys.stdin.buffer
         self._out = stdout or sys.stdout.buffer
         self._clock = clock
         self._lock = threading.Condition()
         self._pending: dict[str, dict[str, Any] | None] = {}
+        # Requests whose caller already gave up. The reply may still arrive, and that reply is the
+        # only evidence about what the browser did — dropping it loses the fact and keeps the
+        # "was it issued?" question unanswerable (plan §二.3).
+        self._orphans: dict[str, dict[str, Any]] = {}
+        self._late_replies = late_replies
         self._closed = False
         self._handshaked = False
         # Filled by `_handshake` from the extension's own reply; empty until then.
@@ -79,6 +86,12 @@ class BridgeHost:
     def closed(self) -> bool:
         with self._lock:
             return self._closed
+
+    def orphans(self) -> dict[str, dict[str, Any]]:
+        """Requests whose caller gave up and whose reply has not arrived yet."""
+
+        with self._lock:
+            return dict(self._orphans)
 
     def serve_extension(self) -> None:
         """Read frames until EOF, dispatching replies to waiting callers."""
@@ -90,10 +103,19 @@ class BridgeHost:
                     break
                 if message.get("type") in {"action_result", "hello_ack"}:
                     request_id = str(message.get("id", ""))
+                    late: tuple[str, dict[str, Any], str] | None = None
                     with self._lock:
                         if request_id in self._pending:
                             self._pending[request_id] = message
                             self._lock.notify_all()
+                        elif request_id in self._orphans:
+                            # Nobody is waiting for this any more. Keep the facts, and never hand
+                            # them to the next caller: a late reply describes the *old* operation.
+                            entry = self._orphans.pop(request_id)
+                            late = (request_id, message, str(entry.get("action") or ""))
+                    if late is not None and self._late_replies is not None:
+                        with contextlib.suppress(Exception):
+                            self._late_replies(*late)
         except (BridgeClosed, OSError, ValueError):
             pass
         finally:
@@ -224,6 +246,11 @@ class BridgeHost:
 
         reply = self._wait(request_id, deadline)
         if reply is None:
+            # The caller is about to be told "timeout". Whether the browser navigated is still
+            # open, so the request id stays known as an orphan: a later reply for it is the only
+            # evidence that can answer that question (plan §二.3, P1a).
+            with self._lock:
+                self._orphans[request_id] = {"action": action, "at": self._clock()}
             return {
                 "ok": False,
                 "error": "bridge.timeout" if not self.closed else "bridge.closed",

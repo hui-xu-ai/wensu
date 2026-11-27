@@ -23,6 +23,7 @@ from scholar_search import __version__ as VERSION
 from scholar_search.adapters.bridge.host import BridgeHost
 from scholar_search.adapters.bridge.policy import TRUSTED_DOMAINS, narrow_domains
 from scholar_search.core.config import ensure_host_runtime, host_runtime_dir
+from scholar_search.core.lease import LeaseStore, archive_late_reply
 
 HOST_NAME = "com.scholar.search"
 ENDPOINT_NAME = "bridge.json"
@@ -291,7 +292,14 @@ def main() -> int:
         ensure_host_runtime()
         prune_registry()
         _log(f"start pid={os.getpid()} cwd={os.getcwd()}")
-        host = BridgeHost()
+        # A reply that arrives after its caller gave up is the only evidence about whether the
+        # browser navigated. Keep the facts; never hand them to the next caller (plan §二.3).
+        lease_store = LeaseStore()
+        host = BridgeHost(
+            late_replies=lambda rid, message, action: archive_late_reply(
+                lease_store, rid, message, action, at=time.time()
+            )
+        )
         token = secrets.token_urlsafe(24)
         domains = (
             tuple(item for item in os.environ.get("SCHOLAR_SEARCH_DOMAINS", "").split(",") if item)
