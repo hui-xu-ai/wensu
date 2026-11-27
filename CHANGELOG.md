@@ -36,6 +36,39 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.64] - 2026-11-27
+
+ADR 0031 的 **P2（worker 侧）**：观测模式真正落地，并且开始广告。**从这一版起，抓取时机不再由
+固定 1.2 秒决定。**
+
+### Added — `snapshot(mode=observe)` 在扩展里实现
+
+`observeTab(tabId, observe_ms)` 只读 `chrome.tabs.get()` 的 `status`/`url`/`title`（每 200 ms 一次）：
+
+| 判定 | 条件 | 回包 |
+|---|---|---|
+| `candidate` | `status === "complete"` **且** 三元组 `status/url/title` 在 ≥500 ms 内未变 | 内核据此**立即**发起捕获 |
+| `observing` | 预算内始终未满足 | `budget_exhausted: true`；内核**仍然发起捕获** |
+| `tab_lost` | `tabs.get` 抛错或标签消失 | 内核放弃，不猜 |
+
+**`pageCapture` 一次都不调用**——观测不产生任何字节，这也是它能免费、零请求的原因。
+判墙词表**不下放**给扩展：扩展只报告标题，`core/risk.py` 仍是唯一来源，由内核把
+`challenge`/风险标题转成 `risk`（I2/I7：零捕获，直接 `blocked`）。
+
+### Changed — 特性广告
+
+`features` 增加 `readiness_observe: 1`、`capture_receipts: 1`。内核 `readiness_supported()` 两者齐全
+才走观测路径，因此**旧内核不受影响**（它不认识这些字段），**新内核看到它们就切换策略**，并在回包的
+`readiness.strategy` 里如实写明是 `observe` 还是 `settle`。
+
+### Verified — 真的跑了真 worker
+
+新增 `tests/js/readiness_probe.js`（真 `background-*.js` + 假 `chrome`，脚本化 tab 元数据）与
+`tests/unit/test_worker_observation.py`（4 条）：候选态 813 ms、超时态 1021 ms + `budget_exhausted`、
+两次 `saveAsMHTML` 调用次数均为 **0**、`features` 里两个新键都在。
+
+`background-0.14.64.js`。
+
 ## [0.14.63] - 2026-11-27
 
 ADR 0031 的 **P2（内核侧）**：抓取时机由证据决定，兜底预算不再决定成败。

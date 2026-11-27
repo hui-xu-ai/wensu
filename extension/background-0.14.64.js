@@ -14,7 +14,13 @@ const PROTOCOL_VERSION = 1;
 const CAPABILITIES = ["goto", "snapshot", "sleep", "await_gate_clear"];
 // Optional protocol features this worker understands, by name and version. The kernel enables
 // them only when the running worker names them here (docs/protocol-lease.md §8).
-const FEATURES = { lease_control: 1, operation_receipts: 1 };
+const FEATURES = {
+  lease_control: 1,
+  operation_receipts: 1,
+  // ADR 0031: `snapshot(mode=observe)` watches tab metadata and produces no bytes.
+  readiness_observe: 1,
+  capture_receipts: 1,
+};
 // Verbs that need `content/actions.js`, which the manifest injects into the channels' domains
 // (and nowhere else). Advertising them for a publisher page is what made `wait_for` a phantom.
 const CHANNEL_CAPABILITIES = [
@@ -578,6 +584,56 @@ async function activeTab() {
   return tab;
 }
 
+// ADR 0031: watch one tab's metadata and say whether a capture is worth starting.
+//
+// It reads `chrome.tabs.get()`, which is the browser's own record of the tab: no request, no DOM
+// access (a publisher page has no content script and the extension has no `scripting` permission).
+// "Ready" therefore means *candidate*, never "the article is complete": `status === "complete"`
+// plus the same status/url/title across a stability window. A page that keeps changing stays
+// `observing`; the kernel captures anyway when its budget runs out, so a slow page can delay a
+// capture but can never cancel one.
+const OBSERVE_POLL_MS = 200;
+const OBSERVE_STABLE_MS = 500;
+
+async function observeTab(tabId, budgetMs) {
+  const budget = Number.isFinite(budgetMs) && budgetMs > 0 ? budgetMs : 8000;
+  const began = Date.now();
+  let previous = "";
+  let stableSince = 0;
+  let page = { status: "", url: "", title: "" };
+  for (;;) {
+    let tab = null;
+    try {
+      tab = await chrome.tabs.get(tabId);
+    } catch (error) {
+      return { state: "tab_lost", elapsed_ms: Date.now() - began, page_state: page };
+    }
+    if (!tab) {
+      return { state: "tab_lost", elapsed_ms: Date.now() - began, page_state: page };
+    }
+    page = { status: tab.status || "", url: tab.url || "", title: tab.title || "" };
+    const signature = `${page.status}\u0000${page.url}\u0000${page.title}`;
+    const now = Date.now();
+    if (signature !== previous) {
+      previous = signature;
+      stableSince = now;
+    }
+    const stable = stableSince !== 0 && now - stableSince >= OBSERVE_STABLE_MS;
+    if (page.status === "complete" && stable) {
+      return { state: "candidate", elapsed_ms: now - began, page_state: page };
+    }
+    if (now - began >= budget) {
+      return {
+        state: "observing",
+        elapsed_ms: now - began,
+        budget_exhausted: true,
+        page_state: page,
+      };
+    }
+    await new Promise((resolve) => setTimeout(resolve, OBSERVE_POLL_MS));
+  }
+}
+
 function waitComplete(tabId, timeoutMs = 5000) {
   // Resolves either way. Waiting for "complete" is an optimistic assumption: a
   // heavy page may keep loading past the deadline, and a goto that fails there
@@ -797,6 +853,16 @@ async function onHostMessage(message, channel) {
       const tab = await replyTab(params, domains);
       if (!tab || !tab.id) throw new Error("no_active_tab");
       if (!tab.url || !/^https?:/i.test(tab.url)) throw new Error("policy.url_scheme");
+
+      // ADR 0031, observation mode: watch the tab's metadata and produce **no bytes**. It exists
+      // so the kernel can decide when a capture is worth starting without using a fixed sleep and
+      // without a single extra request. `pageCapture` is never called here.
+      if (params.mode === "observe") {
+        const observed = await observeTab(tab.id, params.observe_ms);
+        reply({ ok: true, data: { mode: "observe", ...observed } });
+        return;
+      }
+
       const blob = await chrome.pageCapture.saveAsMHTML({ tabId: tab.id });
       const bytes = new Uint8Array(await blob.arrayBuffer());
       // A challenge page is the one thing this verb must not hand back as if it were the

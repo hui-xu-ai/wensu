@@ -302,6 +302,13 @@ def _page_full_text(payload: dict[str, Any]) -> dict[str, Any]:
     return {**payload, "full_text": False, "full_text_reason": reason or "unknown"}
 
 
+def _mentions_risk(title: str) -> bool:
+    """Does this title carry one of the kernel's risk markers (`core/risk.py`, single source)?"""
+
+    text = (title or "").casefold()
+    return bool(text) and any(marker.casefold() in text for marker in RISK_TITLE_MARKERS)
+
+
 def _charged_units(outcomes: Sequence[ActionOutcome]) -> int:
     """What the policy actually billed: one unit per network action that ran.
 
@@ -2294,6 +2301,12 @@ class ScholarService:
                     "status": page_state.get("status"),
                     "title": page_state.get("title"),
                 }
+                # The wall vocabulary stays in the kernel (`core/risk.py`); the worker only reports
+                # what the tab says. A title that names a challenge is a wall even if the worker
+                # was happy to call the page a candidate.
+                title = str(page_state.get("title") or "")
+                if state != "tab_lost" and (challenge_in_title(title) or _mentions_risk(title)):
+                    state = "risk"
             if state in {"candidate", "risk", "tab_lost"}:
                 break
         evidence["state"] = state
