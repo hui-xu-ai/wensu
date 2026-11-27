@@ -203,6 +203,49 @@ def test_status_passes_the_host_s_answer_through() -> None:
     assert "coordination_writable" in source
 
 
+def test_a_lock_that_cannot_be_opened_is_denied_not_busy(tmp_path) -> None:
+    """A permission problem must not read as "a read is running" — waiting never frees it.
+
+    Found by installing 0.14.56 into an interpreter the OS policy did not allow to write the state
+    directory: `status.browser_busy` said `true` for the whole session, and `browser_lock_held`
+    agreed, while nothing was running.
+    """
+
+    import contextlib
+    import threading
+
+    from scholar_search.bootstrap import lock_state
+    from scholar_search.core.locking import interprocess_lock
+
+    blocked = tmp_path / "cannot-open"  # a directory where the lock file should be
+    blocked.mkdir()
+
+    assert lock_state(blocked) == "denied"
+
+    free = tmp_path / "browser.lock"
+    assert lock_state(free) == "free"
+
+    holding = threading.Event()
+    release = threading.Event()
+
+    def hold() -> None:
+        with interprocess_lock(free, timeout_s=5.0):
+            holding.set()
+            release.wait(5.0)
+
+    thread = threading.Thread(target=hold, daemon=True)
+    thread.start()
+    assert holding.wait(5.0)
+    try:
+        assert lock_state(free) == "held"
+    finally:
+        release.set()
+        thread.join(5.0)
+
+    with contextlib.suppress(Exception):
+        assert lock_state(free) == "free"
+
+
 def test_the_gate_wait_asks_for_a_focused_window() -> None:
     """A window that is maximized but behind everything is still invisible (P5 retest F34-01).
 

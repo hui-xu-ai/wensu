@@ -40,6 +40,7 @@ from .contracts import (
 from .errors import (
     ActionError,
     ChannelError,
+    LockUnavailable,
     ParseError,
     PolicyError,
     RiskBlocked,
@@ -2075,6 +2076,9 @@ class ScholarService:
         try:
             with interprocess_lock(path, timeout_s=0.0):
                 return False
+        except LockUnavailable:
+            # Permission denied is not "busy": waiting would never free it.
+            return False
         except (ScholarSearchError, OSError):
             return True
 

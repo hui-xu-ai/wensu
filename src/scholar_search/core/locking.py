@@ -18,7 +18,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import IO
 
-from .errors import ScholarSearchError
+from .errors import LockUnavailable, ScholarSearchError
 
 _MEMORY_LOCKS: dict[str, threading.Lock] = {}
 _MEMORY_GUARD = threading.Lock()
@@ -72,7 +72,11 @@ def interprocess_lock(path: Path, *, timeout_s: float = 60.0) -> Iterator[None]:
     """
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    handle = path.open("a+b")
+    try:
+        handle = path.open("a+b")
+    except OSError as error:
+        # A denied open is not contention: no amount of waiting will free it.
+        raise LockUnavailable(path, error.strerror or str(error)) from error
     _ensure_byte(handle)
 
     try:

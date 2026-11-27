@@ -29,6 +29,24 @@ class PolicyError(ScholarSearchError):
         self.rule = rule
 
 
+class LockUnavailable(ScholarSearchError):
+    """The lock file itself cannot be used — a permission problem, not contention.
+
+    Kept separate from "the lock is taken": reporting a denied open as `busy` sends a caller off to
+    wait for a lock that will never free (found while installing 0.14.56 under a policy that denies
+    the test interpreter write access to the state directory).
+    """
+
+    def __init__(self, path: object, reason: str) -> None:
+        super().__init__(
+            f"the lock file {path} cannot be opened ({reason}): this process is not allowed to "
+            "write the state directory — check the directory's permissions, and prefer the "
+            "installed build (its own interpreter is the one the installer configured)"
+        )
+        self.path = path
+        self.reason = reason
+
+
 class ActionError(ScholarSearchError):
     """A browser action failed; dependent actions must not run."""
 

@@ -18,7 +18,7 @@ from .core.config import (
     host_runtime_dir,
 )
 from .core.contracts import BrowserAdapter
-from .core.errors import ScholarSearchError
+from .core.errors import LockUnavailable, ScholarSearchError
 from .core.lease import LeaseStore
 from .core.locking import interprocess_lock
 from .core.planner import Planner
@@ -206,12 +206,7 @@ def _browser_busy(endpoint: Path, bridge_up: bool) -> bool:
 
     if not bridge_up:
         return False
-    lock = browser_state_dir() / "browser.lock"
-    try:
-        with interprocess_lock(lock, timeout_s=0.0):
-            return False
-    except (ScholarSearchError, OSError):
-        return True
+    return lock_state() == "held"
 
 
 def _last_job() -> dict[str, object] | None:
@@ -259,15 +254,28 @@ def _lease_summary() -> dict[str, object]:
     }
 
 
+def lock_state(lock: Path | None = None) -> str:
+    """`free`, `held` or `denied` — three answers, because two of them need different reactions.
+
+    Reporting a denied open as "held" tells a caller to wait for a lock that will never free; that
+    is what `browser_busy: true` did for a whole session on a machine whose interpreter was not
+    allowed to write the state directory (found while installing 0.14.56).
+    """
+
+    path = lock or browser_state_dir() / "browser.lock"
+    try:
+        with interprocess_lock(path, timeout_s=0.0):
+            return "free"
+    except LockUnavailable:
+        return "denied"
+    except (ScholarSearchError, OSError):
+        return "held"
+
+
 def browser_lock_held() -> bool:
     """Is the browser lock taken right now? The raw fact behind `browser_busy`."""
 
-    lock = browser_state_dir() / "browser.lock"
-    try:
-        with interprocess_lock(lock, timeout_s=0.0):
-            return False
-    except (ScholarSearchError, OSError):
-        return True
+    return lock_state() == "held"
 
 
 def build_service() -> ScholarService:
@@ -336,6 +344,7 @@ def build_service() -> ScholarService:
                 # What the shared record knows. `browser_busy` is the lock; this is the lease —
                 # they can disagree, and when they do the lease is the more cautious answer.
                 "browser_lock_held": lock_held,
+                "browser_lock": lock_state(),
                 "browser_lease": lease,
             }
 
@@ -372,6 +381,8 @@ def build_service() -> ScholarService:
             # ended (P5 acceptance 2026-11-26).
             "browser_busy": busy,
             "browser_lock_held": lock_held,
+            # `free` / `held` / `denied`: the third is a permission problem, not "wait a moment".
+            "browser_lock": lock_state(),
             "browser_lease": lease,
             "last_job": last_job,
             # `bridge_ready: false` on its own told a caller nothing about *why*,

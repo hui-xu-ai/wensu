@@ -36,6 +36,40 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.57] - 2026-11-27
+
+我按你的要求自己装了一遍 0.14.56（隔离 venv，真 wheel），测试脚本在 `D:\…\.tmp` 里跑的。
+结果：三项内容修复与身份修正**在安装产物上都成立**；顺带发现一处"权限失败被读成忙碌"。
+
+### 安装产物核验（真 wheel，不碰浏览器、不访问站点）
+
+| 项 | 结果 |
+|---|---|
+| `scholar_search.__version__` / 导入路径 | `0.14.56` / `site-packages` |
+| F55-01 四种情形 | URL-only 同 PII ⇒ `(False,"url")`；不同 PII ⇒ 拒绝；显式 DOI 冲突 ⇒ 拒绝；URL-only 无声明 ⇒ `(False,"url")`；空基准 ⇒ `(False,"publisher_only")` |
+| F53-01 真实捕获 | `tables_rendered: 3`、`table_rows: 25`、四个表头齐全、索引求和 7825 == `total_tokens` |
+| F53-02 | `pdf_url = …/1424-8220/26/4/1303/pdf`（不再是 flyer） |
+| 发行 worker | `background-0.14.56.js`，`features` / `lease_control` / `lease_sync` / `policy.fence` / `focused: true` / `params.tab_id` 全在 |
+| native host | 随 wheel 安装，且带 `_coordination_writable` |
+
+### Fixed — 锁文件打不开被报成"有读取在跑"（F56-01，P2）
+
+我的测试解释器不在系统的可写白名单里，`browser.lock` 的 `open("a+b")` 抛 `PermissionError`；
+`browser_busy` / `browser_lock_held` 把任何 `OSError` 都当成"被占用"，于是 `status` 在整个会话里
+声称有读取在跑，而实际什么都没跑。
+
+现在：
+
+* `locking.interprocess_lock` 在**打开文件**失败时抛 `LockUnavailable`（带路径与原因），与"锁被占用"分开；
+* `status` 新增 `browser_lock: "free" | "held" | "denied"`；`browser_busy` / `browser_lock_held` 只在
+  `held` 时为真；
+* `ScholarService.browser_busy()` 同样只认 `held`。
+
+`denied` 的处置不是等待——它是"这个进程不被允许写状态目录"，`LockUnavailable` 的消息直接指向
+用安装版自带解释器与检查目录权限。
+
+`background-0.14.57.js`（worker 内容未变）。
+
 ## [0.14.56] - 2026-11-27
 
 真机验收的一条例外（`docs/reviews/wensu-0.14.55-coordination-elsevier-2026-11-27.md`）。
