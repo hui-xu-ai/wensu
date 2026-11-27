@@ -73,6 +73,23 @@ try {
   Write-Warning "could not lower integrity on $runtime; the host may not be able to write there"
 }
 
+# The lease/operation records live beside the browser state, not inside one home (ADR 0029), and
+# the host writes them from a low-integrity process too. Without this the host cannot persist a
+# late receipt or answer `policy.lease` — both failures are silent, so the gap has to be closed
+# here rather than discovered later.
+$browserState = if ($env:SCHOLAR_SEARCH_BROWSER_STATE) {
+  $env:SCHOLAR_SEARCH_BROWSER_STATE
+} else {
+  Join-Path $runtimeHome "browser-state"
+}
+$coordination = Join-Path $browserState "coordination"
+New-Item -ItemType Directory -Path $coordination -Force | Out-Null
+try {
+  & icacls $coordination /setintegritylevel "(OI)(CI)L" | Out-Null
+} catch {
+  Write-Warning "could not lower integrity on $coordination; lease records may fail to persist"
+}
+
 $manifest = @{
   name            = $hostName
   description     = "scholar-search native bridge"

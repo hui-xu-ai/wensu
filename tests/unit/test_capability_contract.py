@@ -140,6 +140,35 @@ def test_a_lease_claim_is_checked_against_the_record() -> None:
     assert lease_check({"version": 1}, active) is None
 
 
+def test_a_record_nobody_can_trust_refuses_instead_of_allowing(tmp_path, monkeypatch) -> None:
+    """A corrupt or unreadable record is not "no lease": it cannot vouch, so the frame is refused.
+
+    Allowing it (the earlier behaviour) is the silent failure this check exists for: the frame goes
+    out while nothing knows whether an old navigation is still landing.
+    """
+
+    from scholar_search.core.lease import Lease, lease_check
+
+    assert (
+        lease_check({"version": 1, "fence": 1}, Lease(lease_id="", fence=0, state="quarantined"))
+        == "lease_protocol_unavailable"
+    )
+    assert (
+        lease_check({"version": 1, "fence": 1}, Lease(lease_id="", fence=0, state="unknown"))
+        == "lease_protocol_unavailable"
+    )
+
+
+def test_the_installer_labels_the_coordination_directory() -> None:
+    """The host writes the lease records from a low-integrity process (see unverified.md)."""
+
+    script = (ROOT / "native-host" / "install.ps1").read_text(encoding="utf-8")
+
+    assert "coordination" in script
+    assert "icacls $coordination /setintegritylevel" in script
+    assert "$env:SCHOLAR_SEARCH_BROWSER_STATE" in script, "the override must be honoured"
+
+
 def test_the_gate_wait_asks_for_a_focused_window() -> None:
     """A window that is maximized but behind everything is still invisible (P5 retest F34-01).
 

@@ -312,6 +312,11 @@ def lease_check(context: Any, lease: Lease | None = None) -> str | None:
     Used by the host before it writes a frame: a caller whose fence is behind the record is a
     caller whose call was already superseded, and letting it through is how an old navigation
     lands on the tab the new lease is using.
+
+    A record that cannot be trusted (`quarantined`, or unreadable) is **not** "no lease": answering
+    `None` there meant a frame was allowed through while nothing could vouch for it — the silent
+    failure this check exists to prevent. It reports `lease_protocol_unavailable` instead, which
+    the caller can act on (`wensu doctor`).
     """
 
     if not isinstance(context, dict):
@@ -319,8 +324,21 @@ def lease_check(context: Any, lease: Lease | None = None) -> str | None:
     fence = context.get("fence")
     if not isinstance(fence, int):
         return None  # no lease claim, nothing to check (observe mode never sends one)
-    current = lease if lease is not None else LeaseStore().read()
+    if lease is not None:
+        current = lease
+        readable = True
+    else:
+        try:
+            current = LeaseStore().read()
+            readable = True
+        except (OSError, ValueError):
+            return "lease_protocol_unavailable"
+    if not readable:
+        return "lease_protocol_unavailable"
+    if current.state in {"quarantined", "unknown"}:
+        return "lease_protocol_unavailable"
     if current.state == "free":
+        # A frame that claims a lease the record does not know about is stale by definition.
         return "policy.lease"
     if fence < current.fence:
         return "policy.lease"

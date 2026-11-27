@@ -36,6 +36,36 @@ edited, because 0.14.16 is already published.)
 
 `background-0.14.16.js`, as the cache-busting rule requires.
 
+## [0.14.53] - 2026-11-27
+
+两处"失败是静默的"修补：安装器没给租约目录权限，以及租约记录不可信时检查反而放行。
+
+### Fixed — 不可信的租约记录不再放行（`lease_check`）
+
+上一版：记录是 `quarantined` 时，`lease_check` 里"记录没有 lease_id"这条短路让它返回 `None`——
+**帧照发**。那正是这道检查存在的理由被绕开了：谁也不知道旧导航是不是还在落地，而宿主替它放行。
+
+现在：
+
+| 记录 | 结果 |
+|---|---|
+| `quarantined` / `unknown`，或读取抛异常 | `lease_protocol_unavailable`（拒绝，且原因指向可修的东西） |
+| `free` | `policy.lease`（一帧声称有租约、记录说没有 ⇒ 过时） |
+| `active` 但 `fence` 落后 / `lease_id` 不符 | `policy.lease` |
+| 信封没带租约（observe） | 不检查，行为不变 |
+
+### Fixed — 安装器给 `coordination/` 打低完整性标签
+
+浏览器启动的宿主是低完整性进程。安装器此前只给 `<home>/host` 打了标签，而租约与操作记录在
+`browser-state/coordination/`（ADR 0029 之后的位置），于是真机上很可能**写不进去**——迟到回包归档
+静默失效、`lease_check` 读到不可信记录。安装器现在也创建并标记该目录，并尊重
+`SCHOLAR_SEARCH_BROWSER_STATE` 覆盖。
+
+### 仍未验证（`work/tasks/2026-11-27-lease-receipt/unverified.md`）
+
+真机上这次 ACL 是否足够，只有在真实读取中出现一次超时、再看 `navigation_status` 能否查到回执才能确认；
+worker 侧旧代围栏仍只有静态契约测试。
+
 ## [0.14.52] - 2026-11-27
 
 P2 第二、三点：**宿主派发前的租约校验**与 **worker 的旧代围栏**。
