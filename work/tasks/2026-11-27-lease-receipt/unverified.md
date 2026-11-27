@@ -46,8 +46,35 @@
 0.14.46 的 `navigation_status` 与 0.14.52 的 `lease_check` 都依赖这个目录可写；0.14.53 起
 `lease_check` 在记录不可信时**拒绝**（`lease_protocol_unavailable`）而不是放行。
 
-## 3. 真机样本仍然缺
+## 3. 真机样本：已补两类，仍缺两类
 
-- 自然出现的 `bridge.timeout` + 迟到回包（0.14.48 起的路径）；
-- 人工点完验证后同一次调用续抓（0.14.41 那次是中间页自清，不是人工点击）；
-- 真实 10 秒验证超时。
+### ✅ 真实 10 秒验证超时（0.14.57 纯官方版，已验收）
+
+`docs/reviews/wensu-0.14.57-official-wall-2026-11-27.md`：ScienceDirect 自然出现 Are-you-a-robot 墙，
+一次直达 `goto`（1476 ms）后 `await_gate_clear` 真等 **10127 ms**，回包
+`status: blocked / terminal: timeout / reason: verification_timeout / stage: wall / waited: true`，
+未发布文献、未重试、未代点；配额 286→285（差额=实际导航数 1），冷却未设，收尾
+`browser_lock: free`、`browser_lease.state: free`。
+
+我离线核过证据目录：`acceptance.json` 的五个字段与报告一致，`actions.jsonl` 两行 verb 齐全。
+
+### ⚠️ 人工放行后的"唤醒→等待→抓取"（**只到 transactions 层，不是公开 `page_read`**）
+
+`docs/reviews/wensu-0.14.57-manual-verification-2026-11-27.md`：同一 `_browser_transaction()` 内依次调用
+官方 `_await_gate_clear()`（返回 `ran=true / cleared=true`，耗时 10076 ms）→ `sleep 1200` →
+`_snapshot_locked(tab="work")` → `_publish_page()`，**没有重新导航**，额外配额 0；文章标题/URL/PII/
+`declared_doi=10.1016/j.cej.2023.144222` 均匹配，MHTML 2,915,487 B，`page2md` ok（coverage 0.643）。
+
+我离线核过：留存副本 SHA-256 = `a31507…ce6`（与报告相同），`converted/page.md` = 55,178 B（与报告相同），
+该捕获 **0 个 `<table>`**，所以 `table_rows=0` 是正确结果、不是 F53-01 的复发。
+
+**但这不是"单次公开 `page_read` 内人工放行后续抓"**：那次公开调用自己已经 `timeout` 并停在 `last_job` 里，
+唤醒走的是本地驱动直接调用官方原语。所以下面这条**仍然缺**。
+
+### ❌ 仍然缺
+
+- **单个公开 `page_read` 调用内**人工放行后直接续抓（当前样本是本地驱动复用官方原语）；
+- 页面**自然自清**（无人工点击）；
+- 自然出现的 `bridge.timeout` + 迟到回包（0.14.48 起的归档路径），以及随之才能证明的
+  归档/锁/去重/恢复协议；
+- `SCHOLAR_SEARCH_LEASE_MODE=enforce` 的真机行为，与 worker 旧代续体围栏（§1）。
